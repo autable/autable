@@ -8,6 +8,7 @@ import {
   type Item
 } from "@glideapps/glide-data-grid";
 import { AuthDialog } from "./components/AuthDialog";
+import { compactMembers, replaceResource, replaceRole, rowDraftFromRecord } from "./appState";
 import { FormWorkspace } from "./components/FormWorkspace";
 import { compactRoleGrants, PermissionPanel } from "./components/PermissionPanel";
 import { TableWorkspace } from "./components/TableWorkspace";
@@ -1102,29 +1103,4 @@ export function App() {
       />
     </div>
   );
-}
-
-function replaceResource<T extends { id?: number }>(items: T[], saved: T): T[] {
-  if (!saved.id) {
-    return items;
-  }
-  if (!items.some((item) => item.id === saved.id)) {
-    return [...items, saved];
-  }
-  return items.map((item) => (item.id === saved.id ? saved : item));
-}
-
-function replaceRole(items: RoleDefinition[], saved: RoleDefinition): RoleDefinition[] {
-  if (!items.some((item) => item.name === saved.name)) {
-    return [...items, saved];
-  }
-  return items.map((item) => (item.name === saved.name ? saved : item));
-}
-
-function compactMembers(members: string[]): string[] {
-  return [...new Set(members.map((member) => member.trim()).filter(Boolean))].sort((left, right) => left.localeCompare(right));
-}
-
-function rowDraftFromRecord(row: Record<string, unknown> | null, fieldNames: string[]): Record<string, string> {
-  return Object.fromEntries(fieldNames.map((fieldName) => [fieldName, row?.[fieldName] === undefined ? "" : String(row[fieldName])]));
 }
