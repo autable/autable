@@ -1638,11 +1638,35 @@ func (server *Server) requireResourceLevel(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusInternalServerError, err)
 		return false
 	}
+	if server.canManageDatabaseResource(r.Context(), perms, actorID, scope, id) {
+		return true
+	}
 	if perms.ResourceLevel(actorID, scope, resourceID(id)) < level {
 		writeError(w, http.StatusForbidden, table.ErrPermissionDenied)
 		return false
 	}
 	return true
+}
+
+func (server *Server) canManageDatabaseResource(ctx context.Context, perms permission.Set, actorID string, scope permission.Scope, id int64) bool {
+	var dbName string
+	switch scope {
+	case permission.ScopeWorkflow:
+		workflow, err := server.system.Workflow(ctx, id)
+		if err != nil {
+			return false
+		}
+		dbName = workflow.DatabaseName
+	case permission.ScopeForm:
+		form, err := server.system.Form(ctx, id)
+		if err != nil {
+			return false
+		}
+		dbName = form.DatabaseName
+	default:
+		return false
+	}
+	return perms.ResourceLevel(actorID, permission.ScopeDatabase, dbName) >= permission.Write
 }
 
 func (server *Server) filterReadableWorkflows(ctx context.Context, actorID string, workflows []systemdb.WorkflowDefinition) ([]systemdb.WorkflowDefinition, error) {
@@ -1652,7 +1676,8 @@ func (server *Server) filterReadableWorkflows(ctx context.Context, actorID strin
 	}
 	filtered := make([]systemdb.WorkflowDefinition, 0, len(workflows))
 	for _, workflow := range workflows {
-		if perms.CanReadResource(actorID, permission.ScopeWorkflow, resourceID(workflow.ID)) {
+		if perms.ResourceLevel(actorID, permission.ScopeDatabase, workflow.DatabaseName) >= permission.Write ||
+			perms.CanReadResource(actorID, permission.ScopeWorkflow, resourceID(workflow.ID)) {
 			filtered = append(filtered, workflow)
 		}
 	}
@@ -1666,7 +1691,8 @@ func (server *Server) filterReadableForms(ctx context.Context, actorID string, f
 	}
 	filtered := make([]systemdb.FormDefinition, 0, len(forms))
 	for _, form := range forms {
-		if perms.CanReadResource(actorID, permission.ScopeForm, resourceID(form.ID)) {
+		if perms.ResourceLevel(actorID, permission.ScopeDatabase, form.DatabaseName) >= permission.Write ||
+			perms.CanReadResource(actorID, permission.ScopeForm, resourceID(form.ID)) {
 			filtered = append(filtered, form)
 		}
 	}

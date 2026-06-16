@@ -1441,6 +1441,127 @@ func TestWorkflowAndFormCreationRequiresDatabaseOrTableWrite(t *testing.T) {
 	}
 }
 
+func TestDatabaseWriteCanManageDatabaseWorkflowsAndForms(t *testing.T) {
+	ctx := context.Background()
+	server, system := newTestServer(t)
+	if err := system.SaveGrant(ctx, permission.Grant{
+		SubjectID: "table-owner",
+		Scope:     permission.ScopeTable,
+		Resource:  "db.contacts",
+		Level:     permission.Write,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := system.SaveGrant(ctx, permission.Grant{
+		SubjectID: "db-owner",
+		Scope:     permission.ScopeDatabase,
+		Resource:  "db",
+		Level:     permission.Write,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	workflowRequest := httptest.NewRequest(http.MethodPost, "/api/databases/db/workflows", bytes.NewBufferString(`{
+		"name":"owned-by-table",
+		"script":"function run(info) { return { message: info.inputs.name }; }"
+	}`))
+	workflowRequest.AddCookie(testSessionCookie(t, system, "table-owner"))
+	workflowRecorder := httptest.NewRecorder()
+	server.ServeHTTP(workflowRecorder, workflowRequest)
+	if workflowRecorder.Code != http.StatusCreated {
+		t.Fatalf("expected table owner workflow create 201, got %d: %s", workflowRecorder.Code, workflowRecorder.Body.String())
+	}
+	var workflow systemdb.WorkflowDefinition
+	if err := json.NewDecoder(workflowRecorder.Body).Decode(&workflow); err != nil {
+		t.Fatal(err)
+	}
+
+	formRequest := httptest.NewRequest(http.MethodPost, "/api/databases/db/forms", bytes.NewBufferString(`{
+		"name":"owned-by-table",
+		"script":"root.append()"
+	}`))
+	formRequest.AddCookie(testSessionCookie(t, system, "table-owner"))
+	formRecorder := httptest.NewRecorder()
+	server.ServeHTTP(formRecorder, formRequest)
+	if formRecorder.Code != http.StatusCreated {
+		t.Fatalf("expected table owner form create 201, got %d: %s", formRecorder.Code, formRecorder.Body.String())
+	}
+	var form systemdb.FormDefinition
+	if err := json.NewDecoder(formRecorder.Body).Decode(&form); err != nil {
+		t.Fatal(err)
+	}
+
+	listWorkflows := httptest.NewRequest(http.MethodGet, "/api/databases/db/workflows", nil)
+	listWorkflows.AddCookie(testSessionCookie(t, system, "db-owner"))
+	listWorkflowsRecorder := httptest.NewRecorder()
+	server.ServeHTTP(listWorkflowsRecorder, listWorkflows)
+	if listWorkflowsRecorder.Code != http.StatusOK {
+		t.Fatalf("expected db owner workflow list 200, got %d: %s", listWorkflowsRecorder.Code, listWorkflowsRecorder.Body.String())
+	}
+	var workflows []systemdb.WorkflowDefinition
+	if err := json.NewDecoder(listWorkflowsRecorder.Body).Decode(&workflows); err != nil {
+		t.Fatal(err)
+	}
+	if len(workflows) != 1 || workflows[0].ID != workflow.ID {
+		t.Fatalf("expected db owner to see workflow, got %#v", workflows)
+	}
+
+	getWorkflow := httptest.NewRequest(http.MethodGet, "/api/workflows/1", nil)
+	getWorkflow.AddCookie(testSessionCookie(t, system, "db-owner"))
+	getWorkflowRecorder := httptest.NewRecorder()
+	server.ServeHTTP(getWorkflowRecorder, getWorkflow)
+	if getWorkflowRecorder.Code != http.StatusOK {
+		t.Fatalf("expected db owner workflow get 200, got %d: %s", getWorkflowRecorder.Code, getWorkflowRecorder.Body.String())
+	}
+
+	updateWorkflow := httptest.NewRequest(http.MethodPost, "/api/databases/db/workflows", bytes.NewBufferString(`{
+		"id":1,
+		"name":"owned-by-table",
+		"script":"function run() { return { updated: true }; }"
+	}`))
+	updateWorkflow.AddCookie(testSessionCookie(t, system, "db-owner"))
+	updateWorkflowRecorder := httptest.NewRecorder()
+	server.ServeHTTP(updateWorkflowRecorder, updateWorkflow)
+	if updateWorkflowRecorder.Code != http.StatusCreated {
+		t.Fatalf("expected db owner workflow update 201, got %d: %s", updateWorkflowRecorder.Code, updateWorkflowRecorder.Body.String())
+	}
+
+	listForms := httptest.NewRequest(http.MethodGet, "/api/databases/db/forms", nil)
+	listForms.AddCookie(testSessionCookie(t, system, "db-owner"))
+	listFormsRecorder := httptest.NewRecorder()
+	server.ServeHTTP(listFormsRecorder, listForms)
+	if listFormsRecorder.Code != http.StatusOK {
+		t.Fatalf("expected db owner form list 200, got %d: %s", listFormsRecorder.Code, listFormsRecorder.Body.String())
+	}
+	var forms []systemdb.FormDefinition
+	if err := json.NewDecoder(listFormsRecorder.Body).Decode(&forms); err != nil {
+		t.Fatal(err)
+	}
+	if len(forms) != 1 || forms[0].ID != form.ID {
+		t.Fatalf("expected db owner to see form, got %#v", forms)
+	}
+
+	getForm := httptest.NewRequest(http.MethodGet, "/api/forms/1", nil)
+	getForm.AddCookie(testSessionCookie(t, system, "db-owner"))
+	getFormRecorder := httptest.NewRecorder()
+	server.ServeHTTP(getFormRecorder, getForm)
+	if getFormRecorder.Code != http.StatusOK {
+		t.Fatalf("expected db owner form get 200, got %d: %s", getFormRecorder.Code, getFormRecorder.Body.String())
+	}
+
+	updateForm := httptest.NewRequest(http.MethodPost, "/api/databases/db/forms", bytes.NewBufferString(`{
+		"id":1,
+		"name":"owned-by-table",
+		"script":"root.append(api.submit('Save'))"
+	}`))
+	updateForm.AddCookie(testSessionCookie(t, system, "db-owner"))
+	updateFormRecorder := httptest.NewRecorder()
+	server.ServeHTTP(updateFormRecorder, updateForm)
+	if updateFormRecorder.Code != http.StatusCreated {
+		t.Fatalf("expected db owner form update 201, got %d: %s", updateFormRecorder.Code, updateFormRecorder.Body.String())
+	}
+}
+
 func TestWorkflowAndFormUpdatesCannotMoveAcrossDatabases(t *testing.T) {
 	ctx := context.Background()
 	catalog := metadata.Catalog{Databases: []metadata.Database{
