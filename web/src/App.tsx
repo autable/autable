@@ -1,4 +1,4 @@
-import { type FormEvent, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Text, Toolbar, ToolbarButton, Tooltip } from "@fluentui/react-components";
 import { ArrowClockwiseRegular } from "@fluentui/react-icons";
 import {
@@ -8,16 +8,15 @@ import {
   type Item
 } from "@glideapps/glide-data-grid";
 import { AuthDialog } from "./components/AuthDialog";
-import { compactMembers, replaceResource, replaceRole, rowDraftFromRecord } from "./appState";
+import { compactMembers, replaceRole, rowDraftFromRecord } from "./appState";
 import { FormWorkspace } from "./components/FormWorkspace";
 import { compactRoleGrants, PermissionPanel } from "./components/PermissionPanel";
 import { TableWorkspace } from "./components/TableWorkspace";
 import { WorkflowWorkspace } from "./components/WorkflowWorkspace";
 import { WorkspaceNavigation, type WorkspaceView } from "./components/WorkspaceNavigation";
-import { renderFormScript, type FormElement } from "./formRuntime";
+import { useWorkflowFormWorkspace } from "./hooks/useWorkflowFormWorkspace";
 import { buildTableColumns, rowRecordToValues } from "./tableGrid";
 import { applyTableView } from "./tableViews";
-import { parseAnyMap, parseStringMap, stringMapToJSON } from "./workflowConfig";
 import {
   createDatabase,
   createRole,
@@ -25,41 +24,30 @@ import {
   createTable,
   deleteRow,
   listOIDCProviders,
-  listForms,
   listRowHistory,
   listRoles,
   listRows,
-  listWorkflowRuns,
-  listWorkflows,
   loadCurrentUser,
   loadMetadata,
-  loadWorkflowNodes,
   login,
   logout,
   oidcStartURL,
   register,
-  runWorkflow,
-  saveForm,
   saveRoleGrants,
   saveRoleMembers,
-  saveWorkflow,
   updateTableMetadata,
   updateRow,
   type AuthUser,
   type Catalog,
   type DatabaseMetadata,
-  type FormDefinition,
   type OIDCProvider,
   type PermissionGrant,
   type RowChange,
   type RoleDefinition,
   type TableMetadata,
-  type TableView,
   type TableViewFilter,
-  type TableViewSort,
-  type WorkflowDefinition,
-  type WorkflowNodeInfo,
-  type WorkflowRunResponse
+  type TableView,
+  type TableViewSort
 } from "./api";
 
 type View = WorkspaceView;
@@ -76,12 +64,7 @@ export function App() {
   const [selectedDatabaseName, setSelectedDatabaseName] = useState("");
   const [selectedTable, setSelectedTable] = useState("");
   const [selectedTableView, setSelectedTableView] = useState("all");
-  const [workflows, setWorkflows] = useState<WorkflowDefinition[]>([]);
-  const [workflowNodes, setWorkflowNodes] = useState<WorkflowNodeInfo[]>([]);
-  const [forms, setForms] = useState<FormDefinition[]>([]);
   const [roles, setRoles] = useState<RoleDefinition[]>([]);
-  const [selectedWorkflowID, setSelectedWorkflowID] = useState(0);
-  const [selectedFormID, setSelectedFormID] = useState(0);
   const [selectedRoleName, setSelectedRoleName] = useState("");
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
@@ -90,12 +73,6 @@ export function App() {
   const [oidcProviders, setOIDCProviders] = useState<OIDCProvider[]>([]);
   const [selectedRecordID, setSelectedRecordID] = useState(0);
   const [rowHistory, setRowHistory] = useState<RowChange[]>([]);
-  const [workflowRuns, setWorkflowRuns] = useState<WorkflowRunResponse[]>([]);
-  const [selectedWorkflowRunKey, setSelectedWorkflowRunKey] = useState("");
-  const [formValues, setFormValues] = useState<Record<string, string>>({});
-  const [workflowInputsText, setWorkflowInputsText] = useState("{}");
-  const [workflowSecretsText, setWorkflowSecretsText] = useState("{}");
-  const [workflowVariablesText, setWorkflowVariablesText] = useState("{}");
   const [authDialogOpen, setAuthDialogOpen] = useState(false);
   const [newDatabaseName, setNewDatabaseName] = useState("");
   const [newTableName, setNewTableName] = useState("");
@@ -109,8 +86,6 @@ export function App() {
   const [newViewFilterValue, setNewViewFilterValue] = useState("");
   const [newViewSortField, setNewViewSortField] = useState("");
   const [newViewSortDirection, setNewViewSortDirection] = useState<TableViewSort["direction"]>("asc");
-  const [newWorkflowName, setNewWorkflowName] = useState("");
-  const [newFormName, setNewFormName] = useState("");
   const [newRoleName, setNewRoleName] = useState("");
   const [roleDraftGrants, setRoleDraftGrants] = useState<PermissionGrant[]>([]);
   const [roleDraftMembers, setRoleDraftMembers] = useState<string[]>([]);
@@ -122,8 +97,36 @@ export function App() {
   const table = database.tables.find((item) => item.name === selectedTable) ?? database.tables[0] ?? emptyTable;
   const activeFields = table.fields.filter((field) => !field.deleted);
   const activeFieldNames = useMemo(() => activeFields.map((field) => field.name), [table.fields]);
-  const selectedWorkflow = workflows.find((item) => item.id === selectedWorkflowID) ?? workflows[0];
-  const selectedForm = forms.find((item) => item.id === selectedFormID) ?? forms[0];
+  const workflowFormWorkspace = useWorkflowFormWorkspace({
+    currentUserID: currentUser?.id,
+    databaseName: database.name,
+    tableName: table.name,
+    onStatus: setStatus,
+    onSubmittedRow: (targetTableName, row) => {
+      if (targetTableName === table.name) {
+        setRows((current) => [...current, row]);
+        setRowsViewName("local");
+        setSelectedRecordID(Number(row.record_id));
+        setRowHistory([]);
+      }
+    }
+  });
+  const {
+    forms,
+    formValues,
+    newFormName,
+    newWorkflowName,
+    renderedForm,
+    selectedForm,
+    selectedWorkflow,
+    selectedWorkflowRun,
+    workflowInputsText,
+    workflowNodes,
+    workflowRuns,
+    workflowSecretsText,
+    workflows,
+    workflowVariablesText
+  } = workflowFormWorkspace;
   const selectedRole = roles.find((item) => item.name === selectedRoleName) ?? roles[0];
   const displayedRows = useMemo(
     () => (rowsViewName === selectedTableView ? rows : applyTableView(rows, table.views ?? [], selectedTableView)),
@@ -133,18 +136,11 @@ export function App() {
     () => displayedRows.map((row) => Number(row.record_id)).filter((recordID) => Number.isFinite(recordID)),
     [displayedRows]
   );
-  const selectedWorkflowRun =
-    workflowRuns.find((run) => run.history_key === selectedWorkflowRunKey) ?? workflowRuns[0] ?? null;
-  const renderedForm = useMemo(() => renderFormScript(selectedForm?.script ?? ""), [selectedForm?.script]);
   const selectedRow = useMemo(
     () => displayedRows.find((row) => Number(row.record_id) === selectedRecordID) ?? null,
     [displayedRows, selectedRecordID]
   );
   const [selectedRowDraft, setSelectedRowDraft] = useState<Record<string, string>>({});
-
-  useEffect(() => {
-    setFormValues({});
-  }, [selectedForm?.id, selectedForm?.script]);
 
   useEffect(() => {
     setSelectedRowDraft(rowDraftFromRecord(selectedRow, activeFieldNames));
@@ -169,49 +165,27 @@ export function App() {
 
   useEffect(() => {
     let cancelled = false;
-    if (!database.name) {
-      setWorkflows([]);
-      setForms([]);
+    if (!database.name || !currentUser) {
       setRoles([]);
-      setWorkflowNodes([]);
-      setSelectedWorkflowID(0);
-      setSelectedFormID(0);
       setSelectedRoleName("");
       return () => {
         cancelled = true;
       };
     }
-    if (!currentUser) {
-      setWorkflows([]);
-      setForms([]);
-      setRoles([]);
-      setWorkflowNodes([]);
-      setSelectedWorkflowID(0);
-      setSelectedFormID(0);
-      setSelectedRoleName("");
-      return () => {
-        cancelled = true;
-      };
-    }
-    void Promise.all([
-      listWorkflows(database.name),
-      listForms(database.name),
-      listRoles(database.name).catch(() => []),
-      loadWorkflowNodes()
-    ])
-      .then(([nextWorkflows, nextForms, nextRoles, nextWorkflowNodes]) => {
+    void listRoles(database.name)
+      .then((nextRoles) => {
         if (cancelled) {
           return;
         }
-        setWorkflows(nextWorkflows);
-        setForms(nextForms);
         setRoles(nextRoles);
-        setWorkflowNodes(nextWorkflowNodes);
-        setSelectedWorkflowID(nextWorkflows[0]?.id ?? 0);
-        setSelectedFormID(nextForms[0]?.id ?? 0);
         setSelectedRoleName(nextRoles[0]?.name ?? "");
       })
-      .catch(() => undefined);
+      .catch(() => {
+        if (!cancelled) {
+          setRoles([]);
+          setSelectedRoleName("");
+        }
+      });
     return () => {
       cancelled = true;
     };
@@ -272,10 +246,8 @@ export function App() {
     }
     if (!currentUser) {
       applyCatalogSelection(emptyCatalog, "");
-      setWorkflows([]);
-      setForms([]);
       setRoles([]);
-      setWorkflowNodes([]);
+      workflowFormWorkspace.clearResources();
       return () => {
         cancelled = true;
       };
@@ -318,41 +290,6 @@ export function App() {
       cancelled = true;
     };
   }, [currentUser?.id, database.name, table.name, selectedTableView]);
-
-  useEffect(() => {
-    setWorkflowInputsText("{}");
-    setWorkflowSecretsText(stringMapToJSON(selectedWorkflow?.secrets ?? {}));
-    setWorkflowVariablesText(stringMapToJSON(selectedWorkflow?.variables ?? {}));
-  }, [selectedWorkflow?.id]);
-
-  useEffect(() => {
-    let cancelled = false;
-    if (!currentUser || !selectedWorkflow?.id) {
-      setWorkflowRuns([]);
-      setSelectedWorkflowRunKey("");
-      return () => {
-        cancelled = true;
-      };
-    }
-    void listWorkflowRuns(selectedWorkflow.id)
-      .then((runs) => {
-        if (cancelled) {
-          return;
-        }
-        const newestFirst = [...runs].reverse();
-        setWorkflowRuns(newestFirst);
-        setSelectedWorkflowRunKey(newestFirst[0]?.history_key ?? "");
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setWorkflowRuns([]);
-          setSelectedWorkflowRunKey("");
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [currentUser?.id, selectedWorkflow?.id]);
 
   const columns = useMemo(
     () => buildTableColumns(activeFields),
@@ -408,18 +345,11 @@ export function App() {
       const nextCatalog = await loadMetadata();
       const dbName = applyCatalogSelection(nextCatalog, selectedDatabaseName);
       if (dbName) {
-        const [nextWorkflows, nextForms, nextRoles, nextWorkflowNodes] = await Promise.all([
-          listWorkflows(dbName),
-          listForms(dbName),
+        const [nextRoles] = await Promise.all([
           listRoles(dbName).catch(() => []),
-          loadWorkflowNodes()
+          workflowFormWorkspace.refreshResources(dbName)
         ]);
-        setWorkflows(nextWorkflows);
-        setForms(nextForms);
         setRoles(nextRoles);
-        setWorkflowNodes(nextWorkflowNodes);
-        setSelectedWorkflowID(nextWorkflows[0]?.id ?? 0);
-        setSelectedFormID(nextForms[0]?.id ?? 0);
         setSelectedRoleName(nextRoles[0]?.name ?? "");
       }
       setStatus("Metadata and db-level resources refreshed");
@@ -690,146 +620,6 @@ export function App() {
     }
   }
 
-  async function persistWorkflow() {
-    if (!selectedWorkflow) {
-      return;
-    }
-    try {
-      const saved = await saveWorkflow(database.name, selectedWorkflow);
-      setWorkflows((current) => replaceResource(current, saved));
-      setSelectedWorkflowID(saved.id ?? 0);
-      setStatus(`Workflow saved as #${saved.id}`);
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Workflow save failed");
-    }
-  }
-
-  async function createWorkflowFromSidebar() {
-    const name = newWorkflowName.trim();
-    if (!database.name) {
-      setStatus("Select a database before creating a workflow");
-      return;
-    }
-    if (!name) {
-      setStatus("Workflow name is required");
-      return;
-    }
-    try {
-      const saved = await saveWorkflow(database.name, {
-        database_name: database.name,
-        name,
-        script: "function run(info) {\n  const echoed = info.node('echo', { value: info.inputs.name });\n  return { message: echoed.value };\n}",
-        secrets: {},
-        variables: {}
-      });
-      setWorkflows((current) => replaceResource(current, saved));
-      setSelectedWorkflowID(saved.id ?? 0);
-      setWorkflowRuns([]);
-      setSelectedWorkflowRunKey("");
-      setNewWorkflowName("");
-      setStatus(`Created workflow ${saved.name}`);
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Workflow creation failed");
-    }
-  }
-
-  async function executeWorkflow() {
-    if (!selectedWorkflow?.id) {
-      setStatus("Save workflow before running");
-      return;
-    }
-    const parsedInputs = parseAnyMap(workflowInputsText);
-    if (!parsedInputs.ok) {
-      setStatus(parsedInputs.error);
-      return;
-    }
-    try {
-      const response = await runWorkflow(selectedWorkflow.id, parsedInputs.value);
-      setWorkflowRuns((current) => [response, ...current.filter((run) => run.history_key !== response.history_key)]);
-      setSelectedWorkflowRunKey(response.history_key);
-      if (response.run.error) {
-        setStatus(`Workflow failed: ${response.run.error}`);
-        return;
-      }
-      setStatus(`Workflow run saved: ${response.history_key}`);
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Workflow run failed");
-    }
-  }
-
-  async function persistForm() {
-    if (!selectedForm) {
-      return;
-    }
-    try {
-      const saved = await saveForm(database.name, selectedForm);
-      setForms((current) => replaceResource(current, saved));
-      setSelectedFormID(saved.id ?? 0);
-      setStatus(`Form saved as #${saved.id}`);
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Form save failed");
-    }
-  }
-
-  async function createFormFromSidebar() {
-    const name = newFormName.trim();
-    if (!database.name) {
-      setStatus("Select a database before creating a form");
-      return;
-    }
-    if (!name) {
-      setStatus("Form name is required");
-      return;
-    }
-    try {
-      const targetTable = table.name ? JSON.stringify(table.name) : "undefined";
-      const saved = await saveForm(database.name, {
-        database_name: database.name,
-        name,
-        script: `root.append(api.input({ name: 'name', label: 'Name' }), api.submit('Submit', { table: ${targetTable} }));`
-      });
-      setForms((current) => replaceResource(current, saved));
-      setSelectedFormID(saved.id ?? 0);
-      setFormValues({});
-      setNewFormName("");
-      setStatus(`Created form ${saved.name}`);
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Form creation failed");
-    }
-  }
-
-  async function submitRenderedForm(submitElement?: Extract<FormElement, { kind: "submit" }>, event?: FormEvent<HTMLFormElement>) {
-    event?.preventDefault();
-    const targetTableName = submitElement?.tableName || table.name;
-    if (!database.name || !targetTableName) {
-      setStatus("Select a target table before submitting the form");
-      return;
-    }
-    const values = Object.fromEntries(
-      renderedForm.elements.flatMap((element) => {
-        if (element.kind === "input") {
-          return [[element.name, formValues[element.name] ?? ""]];
-        }
-        if (element.kind === "select") {
-          return [[element.name, formValues[element.name] ?? element.options[0] ?? ""]];
-        }
-        return [];
-      })
-    );
-    try {
-      const saved = await createRow(database.name, targetTableName, values);
-      if (targetTableName === table.name) {
-        setRows((current) => [...current, rowRecordToValues(saved)]);
-        setRowsViewName("local");
-        setSelectedRecordID(saved.record_id);
-        setRowHistory([]);
-      }
-      setStatus(`Form created ${targetTableName} record ${saved.record_id}`);
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Form submit failed");
-    }
-  }
-
   async function registerUser() {
     try {
       const user = await register(authEmail, authPassword);
@@ -883,47 +673,6 @@ export function App() {
       setRowHistory([]);
       setStatus(error instanceof Error ? error.message : "Row history failed");
     }
-  }
-
-  function updateSelectedWorkflowScript(script: string) {
-    setWorkflows((current) =>
-      current.map((item) => (item.id === selectedWorkflow?.id ? { ...item, script } : item))
-    );
-  }
-
-  function updateSelectedWorkflowJSON(kind: "secrets" | "variables", text: string) {
-    if (kind === "secrets") {
-      setWorkflowSecretsText(text);
-    } else {
-      setWorkflowVariablesText(text);
-    }
-    const parsed = parseStringMap(text);
-    if (!parsed.ok) {
-      setStatus(parsed.error);
-      return;
-    }
-    setStatus("Workflow config updated");
-    setWorkflows((current) =>
-      current.map((item) => (item.id === selectedWorkflow?.id ? { ...item, [kind]: parsed.value } : item))
-    );
-  }
-
-  function updateWorkflowInputsJSON(text: string) {
-    setWorkflowInputsText(text);
-    const parsed = parseAnyMap(text);
-    if (!parsed.ok) {
-      setStatus(parsed.error);
-      return;
-    }
-    setStatus("Workflow inputs updated");
-  }
-
-  function updateSelectedFormScript(script: string) {
-    setForms((current) => current.map((item) => (item.id === selectedForm?.id ? { ...item, script } : item)));
-  }
-
-  function updateFormValue(name: string, value: string) {
-    setFormValues((current) => ({ ...current, [name]: value }));
   }
 
   function updateRoleGrant(scope: PermissionGrant["scope"], resource: string, field: string, level: PermissionGrant["level"]) {
@@ -988,23 +737,23 @@ export function App() {
         newTableName={newTableName}
         newWorkflowName={newWorkflowName}
         onCreateDatabase={createDatabaseFromSidebar}
-        onCreateForm={createFormFromSidebar}
+        onCreateForm={workflowFormWorkspace.createForm}
         onCreateRole={createRoleFromSidebar}
         onCreateTable={createTableFromSidebar}
-        onCreateWorkflow={createWorkflowFromSidebar}
+        onCreateWorkflow={workflowFormWorkspace.createWorkflow}
         onLogout={logoutUser}
         onNewDatabaseNameChange={setNewDatabaseName}
-        onNewFormNameChange={setNewFormName}
+        onNewFormNameChange={workflowFormWorkspace.setNewFormName}
         onNewRoleNameChange={setNewRoleName}
         onNewTableNameChange={setNewTableName}
-        onNewWorkflowNameChange={setNewWorkflowName}
+        onNewWorkflowNameChange={workflowFormWorkspace.setNewWorkflowName}
         onOpenLogin={() => setAuthDialogOpen(true)}
         onSelectDatabaseSection={selectDatabaseSection}
-        onSelectFormID={setSelectedFormID}
+        onSelectFormID={workflowFormWorkspace.setSelectedFormID}
         onSelectRoleName={setSelectedRoleName}
         onSelectTable={setSelectedTable}
         onSelectTableView={setSelectedTableView}
-        onSelectWorkflowID={setSelectedWorkflowID}
+        onSelectWorkflowID={workflowFormWorkspace.setSelectedWorkflowID}
         roles={roles}
         selectedForm={selectedForm}
         selectedRole={selectedRole}
@@ -1094,12 +843,12 @@ export function App() {
           {view === "workflow" && (
             <WorkflowWorkspace
               databaseName={database.name}
-              onExecute={executeWorkflow}
-              onSave={persistWorkflow}
-              onSelectRunKey={setSelectedWorkflowRunKey}
-              onUpdateConfigJSON={updateSelectedWorkflowJSON}
-              onUpdateInputsJSON={updateWorkflowInputsJSON}
-              onUpdateScript={updateSelectedWorkflowScript}
+              onExecute={workflowFormWorkspace.executeWorkflow}
+              onSave={workflowFormWorkspace.persistWorkflow}
+              onSelectRunKey={workflowFormWorkspace.setSelectedWorkflowRunKey}
+              onUpdateConfigJSON={workflowFormWorkspace.updateSelectedWorkflowJSON}
+              onUpdateInputsJSON={workflowFormWorkspace.updateWorkflowInputsJSON}
+              onUpdateScript={workflowFormWorkspace.updateSelectedWorkflowScript}
               inputsText={workflowInputsText}
               selectedRun={selectedWorkflowRun}
               secretsText={workflowSecretsText}
@@ -1115,10 +864,10 @@ export function App() {
               databaseName={database.name}
               form={selectedForm}
               formValues={formValues}
-              onFormValueChange={updateFormValue}
-              onSave={persistForm}
-              onSubmit={submitRenderedForm}
-              onUpdateScript={updateSelectedFormScript}
+              onFormValueChange={workflowFormWorkspace.updateFormValue}
+              onSave={workflowFormWorkspace.persistForm}
+              onSubmit={workflowFormWorkspace.submitRenderedForm}
+              onUpdateScript={workflowFormWorkspace.updateSelectedFormScript}
               renderedForm={renderedForm}
             />
           )}
