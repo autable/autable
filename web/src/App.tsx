@@ -65,6 +65,8 @@ export function App() {
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
   const [lastWorkflowRun, setLastWorkflowRun] = useState<WorkflowRunResponse | null>(null);
   const [formValues, setFormValues] = useState<Record<string, string>>({});
+  const [workflowSecretsText, setWorkflowSecretsText] = useState("{}");
+  const [workflowVariablesText, setWorkflowVariablesText] = useState("{}");
   const [status, setStatus] = useState("Ready");
 
   const database = catalog.databases[0];
@@ -83,6 +85,11 @@ export function App() {
   useEffect(() => {
     setFormValues({});
   }, [selectedForm?.id, selectedForm?.script]);
+
+  useEffect(() => {
+    setWorkflowSecretsText(stringMapToJSON(selectedWorkflow?.secrets ?? {}));
+    setWorkflowVariablesText(stringMapToJSON(selectedWorkflow?.variables ?? {}));
+  }, [selectedWorkflow?.id]);
 
   const columns = useMemo<GridColumn[]>(
     () => [
@@ -288,6 +295,23 @@ export function App() {
     );
   }
 
+  function updateSelectedWorkflowJSON(kind: "secrets" | "variables", text: string) {
+    if (kind === "secrets") {
+      setWorkflowSecretsText(text);
+    } else {
+      setWorkflowVariablesText(text);
+    }
+    const parsed = parseStringMap(text);
+    if (!parsed.ok) {
+      setStatus(parsed.error);
+      return;
+    }
+    setStatus("Workflow config updated");
+    setWorkflows((current) =>
+      current.map((item) => (item.id === selectedWorkflow?.id ? { ...item, [kind]: parsed.value } : item))
+    );
+  }
+
   function updateSelectedFormScript(script: string) {
     setForms((current) => current.map((item) => (item.id === selectedForm?.id ? { ...item, script } : item)));
   }
@@ -420,6 +444,28 @@ export function App() {
                   resize="none"
                   aria-label="Workflow JavaScript"
                 />
+                <div className="workflow-config-grid">
+                  <label className="field-stack">
+                    <span>Variables JSON</span>
+                    <Textarea
+                      className="json-editor"
+                      value={workflowVariablesText}
+                      onChange={(_, data) => updateSelectedWorkflowJSON("variables", data.value)}
+                      resize="none"
+                      aria-label="Workflow Variables JSON"
+                    />
+                  </label>
+                  <label className="field-stack">
+                    <span>Secrets JSON</span>
+                    <Textarea
+                      className="json-editor"
+                      value={workflowSecretsText}
+                      onChange={(_, data) => updateSelectedWorkflowJSON("secrets", data.value)}
+                      resize="none"
+                      aria-label="Workflow Secrets JSON"
+                    />
+                  </label>
+                </div>
               </div>
               <div className="history-pane">
                 <Text weight="semibold">Workflows</Text>
@@ -546,6 +592,31 @@ function replaceResource<T extends { id?: number }>(items: T[], saved: T): T[] {
     return [...items, saved];
   }
   return items.map((item) => (item.id === saved.id ? saved : item));
+}
+
+function stringMapToJSON(values: Record<string, string>): string {
+  const sorted = Object.fromEntries(Object.entries(values).sort(([left], [right]) => left.localeCompare(right)));
+  return JSON.stringify(sorted, null, 2);
+}
+
+function parseStringMap(text: string): { ok: true; value: Record<string, string> } | { ok: false; error: string } {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "Invalid JSON" };
+  }
+  if (!parsed || Array.isArray(parsed) || typeof parsed !== "object") {
+    return { ok: false, error: "Workflow config must be a JSON object" };
+  }
+  const values: Record<string, string> = {};
+  for (const [key, value] of Object.entries(parsed)) {
+    if (typeof value !== "string") {
+      return { ok: false, error: `Workflow config value for ${key} must be a string` };
+    }
+    values[key] = value;
+  }
+  return { ok: true, value: values };
 }
 
 function applyTableView(rows: Array<Record<string, unknown>>, views: TableView[], selectedView: string) {

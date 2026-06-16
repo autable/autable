@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { FluentProvider, webLightTheme } from "@fluentui/react-components";
 import { describe, expect, it } from "vitest";
@@ -28,6 +28,13 @@ describe("App", () => {
     expect((screen.getByLabelText("Workflow JavaScript") as HTMLTextAreaElement).value).toContain(
       'info.node("echo"'
     );
+    expect((screen.getByLabelText("Workflow Variables JSON") as HTMLTextAreaElement).value).toContain(
+      '"CHANNEL": "ops"'
+    );
+    expect((screen.getByLabelText("Workflow Secrets JSON") as HTMLTextAreaElement).value).toContain('"TOKEN": ""');
+    await userEvent.clear(screen.getByLabelText("Workflow Variables JSON"));
+    fireEvent.change(screen.getByLabelText("Workflow Variables JSON"), { target: { value: '{"CHANNEL":"support"}' } });
+    expect((screen.getByLabelText("Workflow Variables JSON") as HTMLTextAreaElement).value).toContain("support");
     expect(screen.getByText("No runs yet")).toBeInTheDocument();
   });
 
