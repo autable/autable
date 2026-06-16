@@ -1,0 +1,15 @@
+server:
+  address: "127.0.0.1:8080"
+system_db:
+  path: "./data/system.sqlite"
+history:
+  path: "./data/leveldb"
+repository:
+  path: "./workspace"
+oidc:
+  providers:
+    - name: "example"
+      issuer_url: "https://accounts.example.com"
+      client_id: "codetable"
+      client_secret: "replace-me"
+      scopes: ["openid", "email", "profile"]

@@ -1,0 +1,20 @@
+.DS_Store
+
+# Build/test artifacts
+/bin/
+/dist/
+/coverage/
+*.test
+*.out
+
+# Runtime data: users/operators must back these up manually.
+*.sqlite
+*.sqlite3
+*.db
+*.db-shm
+*.db-wal
+leveldb/
+data/
+
+# Frontend dependencies, when the UI package is added.
+node_modules/

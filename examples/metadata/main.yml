@@ -1,0 +1,15 @@
+databases:
+  - name: "workspace"
+    sqlite_path: "./data/workspace.sqlite"
+    tables:
+      - name: "contacts"
+        display_name: "Contacts"
+        fields:
+          - name: "name"
+            type: "text"
+            required: true
+          - name: "email"
+            type: "email"
+          - name: "archived_note"
+            type: "text"
+            deleted: true
