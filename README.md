@@ -33,4 +33,20 @@ Run the API server with git-managed config and metadata:
 go run ./cmd/codetable -config examples/config.yml -metadata examples/metadata/main.yml
 ```
 
+Run the frontend:
+
+```sh
+cd web
+npm install
+npm run dev
+```
+
+Frontend verification:
+
+```sh
+cd web
+npm test
+npm run build
+```
+
 SQLite files and LevelDB directories must be backed up by users/operators. The project will keep generated data out of git while keeping user-authored metadata, workflows, forms, and config files in git.

@@ -2,10 +2,11 @@
 
 # Build/test artifacts
 /bin/
-/dist/
+dist/
 /coverage/
 *.test
 *.out
+*.tsbuildinfo
 
 # Runtime data: users/operators must back these up manually.
 *.sqlite
