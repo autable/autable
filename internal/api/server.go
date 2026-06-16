@@ -544,6 +544,25 @@ func (server *Server) handleRowHistory(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	actorID, ok := server.requireUserID(w, r)
+	if !ok {
+		return
+	}
+	tableMeta, ok := server.catalogSnapshot().Table(dbName, tableName)
+	if !ok {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("table %s.%s not found", dbName, tableName))
+		return
+	}
+	perms, err := server.system.EffectiveGrantsForSubject(r.Context(), actorID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	resource := dbName + "." + tableName
+	if !canReadRowHistory(perms, actorID, resource, tableMeta) {
+		writeError(w, http.StatusForbidden, table.ErrPermissionDenied)
+		return
+	}
 	entries, err := server.history.GetPrefix(r.Context(), history.RowPrefix(dbName, tableName, recordID))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
@@ -556,6 +575,7 @@ func (server *Server) handleRowHistory(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, err)
 			return
 		}
+		change.Values = readableHistoryValues(change.Values, perms, actorID, resource, tableMeta)
 		changes = append(changes, rowHistoryResponse{HistoryKey: entry.Key, RowChange: change})
 	}
 	writeJSON(w, http.StatusOK, changes)
@@ -1141,6 +1161,32 @@ func (server *Server) filterReadableForms(ctx context.Context, actorID string, f
 	return filtered, nil
 }
 
+func canReadRowHistory(perms permission.Set, actorID, resource string, tableMeta metadata.Table) bool {
+	if perms.CanReadField(actorID, resource, "record_id") {
+		return true
+	}
+	for _, field := range tableMeta.ActiveFields() {
+		if perms.CanReadField(actorID, resource, field.Name) {
+			return true
+		}
+	}
+	return false
+}
+
+func readableHistoryValues(values map[string]any, perms permission.Set, actorID, resource string, tableMeta metadata.Table) map[string]any {
+	readable := map[string]any{}
+	for fieldName, value := range values {
+		field, ok := tableMeta.Field(fieldName)
+		if !ok || field.Deleted {
+			continue
+		}
+		if perms.CanReadField(actorID, resource, fieldName) {
+			readable[fieldName] = value
+		}
+	}
+	return readable
+}
+
 func (server *Server) grantResourceOwner(w http.ResponseWriter, r *http.Request, actorID string, scope permission.Scope, id int64) bool {
 	if err := server.system.SaveGrant(r.Context(), permission.Grant{
 		SubjectID: actorID,
@@ -1159,9 +1205,6 @@ func resourceID(id int64) string {
 }
 
 func (server *Server) currentUserID(r *http.Request) (string, bool, error) {
-	if userID := r.Header.Get("X-Codetable-User"); userID != "" {
-		return userID, true, nil
-	}
 	user, ok, err := server.currentUser(r)
 	if err != nil || !ok {
 		return "", ok, err

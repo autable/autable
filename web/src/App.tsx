@@ -315,13 +315,7 @@ export function App() {
       current.map((item) => (Number(item.record_id) === recordID ? { ...item, [field]: nextValue } : item))
     );
     try {
-      const saved = await updateRow(
-        database.name,
-        table.name,
-        recordID,
-        { [field]: nextValue },
-        undefined
-      );
+      const saved = await updateRow(database.name, table.name, recordID, { [field]: nextValue });
       setRows((current) =>
         current.map((item) =>
           Number(item.record_id) === saved.record_id ? rowRecordToValues(saved) : item

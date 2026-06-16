@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"codetable/internal/auth"
 	"codetable/internal/config"
 	"codetable/internal/history"
 	"codetable/internal/metadata"
@@ -276,7 +277,7 @@ func TestCreateRowAPIEnforcesPermissionsAndWritesHistory(t *testing.T) {
 
 	body := bytes.NewBufferString(`{"values":{"name":"Ada","email":"ada@example.com"}}`)
 	request := httptest.NewRequest(http.MethodPost, "/api/tables/db/contacts/rows", body)
-	request.Header.Set("X-Codetable-User", "u1")
+	request.AddCookie(testSessionCookie(t, system, "u1"))
 	recorder := httptest.NewRecorder()
 
 	server.ServeHTTP(recorder, request)
@@ -293,6 +294,7 @@ func TestCreateRowAPIEnforcesPermissionsAndWritesHistory(t *testing.T) {
 	}
 
 	historyRequest := httptest.NewRequest(http.MethodGet, "/api/tables/db/contacts/rows/1/history", nil)
+	historyRequest.AddCookie(testSessionCookie(t, system, "u1"))
 	historyRecorder := httptest.NewRecorder()
 	server.ServeHTTP(historyRecorder, historyRequest)
 	if historyRecorder.Code != http.StatusOK {
@@ -330,7 +332,7 @@ func TestUpdateRowAPIEnforcesPermissionsAndWritesHistory(t *testing.T) {
 	createRequest := httptest.NewRequest(http.MethodPost, "/api/tables/db/contacts/rows", bytes.NewBufferString(`{
 		"values":{"name":"Ada","email":"ada@example.com"}
 	}`))
-	createRequest.Header.Set("X-Codetable-User", "u1")
+	createRequest.AddCookie(testSessionCookie(t, system, "u1"))
 	createRecorder := httptest.NewRecorder()
 	server.ServeHTTP(createRecorder, createRequest)
 	if createRecorder.Code != http.StatusCreated {
@@ -340,7 +342,7 @@ func TestUpdateRowAPIEnforcesPermissionsAndWritesHistory(t *testing.T) {
 	updateRequest := httptest.NewRequest(http.MethodPatch, "/api/tables/db/contacts/rows/1", bytes.NewBufferString(`{
 		"values":{"email":"ada@codetable.test"}
 	}`))
-	updateRequest.Header.Set("X-Codetable-User", "u1")
+	updateRequest.AddCookie(testSessionCookie(t, system, "u1"))
 	updateRecorder := httptest.NewRecorder()
 	server.ServeHTTP(updateRecorder, updateRequest)
 	if updateRecorder.Code != http.StatusOK {
@@ -355,6 +357,7 @@ func TestUpdateRowAPIEnforcesPermissionsAndWritesHistory(t *testing.T) {
 	}
 
 	historyRequest := httptest.NewRequest(http.MethodGet, "/api/tables/db/contacts/rows/1/history", nil)
+	historyRequest.AddCookie(testSessionCookie(t, system, "u1"))
 	historyRecorder := httptest.NewRecorder()
 	server.ServeHTTP(historyRecorder, historyRequest)
 	if historyRecorder.Code != http.StatusOK {
@@ -369,6 +372,73 @@ func TestUpdateRowAPIEnforcesPermissionsAndWritesHistory(t *testing.T) {
 	}
 	if changes[1].Values["email"] != "ada@codetable.test" || changes[1].Values["name"] != "Ada" {
 		t.Fatalf("unexpected update history: %#v", changes[1])
+	}
+}
+
+func TestRowHistoryAPIRequiresAuthAndFiltersReadableFields(t *testing.T) {
+	ctx := context.Background()
+	server, system := newTestServer(t)
+	if err := system.SaveGrant(ctx, permission.Grant{
+		SubjectID: "writer",
+		Scope:     permission.ScopeTable,
+		Resource:  "db.contacts",
+		Level:     permission.Write,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	createRequest := httptest.NewRequest(http.MethodPost, "/api/tables/db/contacts/rows", bytes.NewBufferString(`{
+		"values":{"name":"Ada","email":"ada@example.com","status":"active"}
+	}`))
+	createRequest.AddCookie(testSessionCookie(t, system, "writer"))
+	createRecorder := httptest.NewRecorder()
+	server.ServeHTTP(createRecorder, createRequest)
+	if createRecorder.Code != http.StatusCreated {
+		t.Fatalf("expected create 201, got %d: %s", createRecorder.Code, createRecorder.Body.String())
+	}
+
+	anonymousHistory := httptest.NewRequest(http.MethodGet, "/api/tables/db/contacts/rows/1/history", nil)
+	anonymousRecorder := httptest.NewRecorder()
+	server.ServeHTTP(anonymousRecorder, anonymousHistory)
+	if anonymousRecorder.Code != http.StatusUnauthorized {
+		t.Fatalf("expected anonymous history 401, got %d: %s", anonymousRecorder.Code, anonymousRecorder.Body.String())
+	}
+
+	if err := system.SaveGrant(ctx, permission.Grant{
+		SubjectID: "reader",
+		Scope:     permission.ScopeField,
+		Resource:  "db.contacts",
+		Field:     "email",
+		Level:     permission.Read,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	readerHistory := httptest.NewRequest(http.MethodGet, "/api/tables/db/contacts/rows/1/history", nil)
+	readerHistory.AddCookie(testSessionCookie(t, system, "reader"))
+	readerRecorder := httptest.NewRecorder()
+	server.ServeHTTP(readerRecorder, readerHistory)
+	if readerRecorder.Code != http.StatusOK {
+		t.Fatalf("expected reader history 200, got %d: %s", readerRecorder.Code, readerRecorder.Body.String())
+	}
+	var changes []history.RowChange
+	if err := json.NewDecoder(readerRecorder.Body).Decode(&changes); err != nil {
+		t.Fatal(err)
+	}
+	if len(changes) != 1 {
+		t.Fatalf("expected one readable history entry, got %#v", changes)
+	}
+	if changes[0].Values["email"] != "ada@example.com" {
+		t.Fatalf("expected readable email in history, got %#v", changes[0].Values)
+	}
+	if _, ok := changes[0].Values["name"]; ok {
+		t.Fatalf("history leaked unreadable name field: %#v", changes[0].Values)
+	}
+
+	deniedHistory := httptest.NewRequest(http.MethodGet, "/api/tables/db/contacts/rows/1/history", nil)
+	deniedHistory.AddCookie(testSessionCookie(t, system, "denied"))
+	deniedRecorder := httptest.NewRecorder()
+	server.ServeHTTP(deniedRecorder, deniedHistory)
+	if deniedRecorder.Code != http.StatusForbidden {
+		t.Fatalf("expected denied history 403, got %d: %s", deniedRecorder.Code, deniedRecorder.Body.String())
 	}
 }
 
@@ -397,7 +467,7 @@ func TestPermissionGrantAPISavesAuthenticatedGrant(t *testing.T) {
 		"field":"email",
 		"level":2
 	}`))
-	request.Header.Set("X-Codetable-User", "admin")
+	request.AddCookie(testSessionCookie(t, system, "admin"))
 	recorder := httptest.NewRecorder()
 	server.ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusCreated {
@@ -420,7 +490,7 @@ func TestCreateDatabaseAPIWritesMetadataAndGrantsOwner(t *testing.T) {
 		"name":"sales",
 		"sqlite_path":"./data/sales.sqlite"
 	}`))
-	request.Header.Set("X-Codetable-User", "owner")
+	request.AddCookie(testSessionCookie(t, system, "owner"))
 	recorder := httptest.NewRecorder()
 	server.ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusCreated {
@@ -463,7 +533,7 @@ func TestDatabaseOwnerCanCreateTable(t *testing.T) {
 		"fields":[{"name":"name","type":"text","required":true},{"name":"email","type":"email"}],
 		"views":[]
 	}`))
-	request.Header.Set("X-Codetable-User", "owner")
+	request.AddCookie(testSessionCookie(t, system, "owner"))
 	recorder := httptest.NewRecorder()
 	server.ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusCreated {
@@ -503,7 +573,7 @@ func TestDatabaseOwnerCanManageRoles(t *testing.T) {
 	createRole := httptest.NewRequest(http.MethodPost, "/api/databases/workspace/roles", bytes.NewBufferString(`{
 		"name":"editor"
 	}`))
-	createRole.Header.Set("X-Codetable-User", "owner")
+	createRole.AddCookie(testSessionCookie(t, system, "owner"))
 	recorder := httptest.NewRecorder()
 	server.ServeHTTP(recorder, createRole)
 	if recorder.Code != http.StatusCreated {
@@ -517,7 +587,7 @@ func TestDatabaseOwnerCanManageRoles(t *testing.T) {
 			{"scope":"form","resource":"3","level":0}
 		]
 	}`))
-	updateGrants.Header.Set("X-Codetable-User", "owner")
+	updateGrants.AddCookie(testSessionCookie(t, system, "owner"))
 	recorder = httptest.NewRecorder()
 	server.ServeHTTP(recorder, updateGrants)
 	if recorder.Code != http.StatusOK {
@@ -527,7 +597,7 @@ func TestDatabaseOwnerCanManageRoles(t *testing.T) {
 	updateMembers := httptest.NewRequest(http.MethodPut, "/api/databases/workspace/roles/editor/members", bytes.NewBufferString(`{
 		"members":["u1","u2","u1"]
 	}`))
-	updateMembers.Header.Set("X-Codetable-User", "owner")
+	updateMembers.AddCookie(testSessionCookie(t, system, "owner"))
 	recorder = httptest.NewRecorder()
 	server.ServeHTTP(recorder, updateMembers)
 	if recorder.Code != http.StatusOK {
@@ -535,7 +605,7 @@ func TestDatabaseOwnerCanManageRoles(t *testing.T) {
 	}
 
 	rolesRequest := httptest.NewRequest(http.MethodGet, "/api/databases/workspace/roles", nil)
-	rolesRequest.Header.Set("X-Codetable-User", "owner")
+	rolesRequest.AddCookie(testSessionCookie(t, system, "owner"))
 	recorder = httptest.NewRecorder()
 	server.ServeHTTP(recorder, rolesRequest)
 	if recorder.Code != http.StatusOK {
@@ -568,7 +638,7 @@ func TestRoleMembershipGrantsEffectiveTableAccess(t *testing.T) {
 	request := httptest.NewRequest(http.MethodPost, "/api/tables/db/contacts/rows", bytes.NewBufferString(`{
 		"values":{"name":"Ada","email":"ada@example.com"}
 	}`))
-	request.Header.Set("X-Codetable-User", "u1")
+	request.AddCookie(testSessionCookie(t, system, "u1"))
 	recorder := httptest.NewRecorder()
 	server.ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusCreated {
@@ -578,12 +648,12 @@ func TestRoleMembershipGrantsEffectiveTableAccess(t *testing.T) {
 
 func TestRoleManagementRequiresDatabaseWrite(t *testing.T) {
 	catalog := metadata.Catalog{Databases: []metadata.Database{{Name: "workspace", SQLitePath: "./data/workspace.sqlite"}}}
-	server, _, _ := newTestServerWithMetadataFile(t, catalog)
+	server, system, _ := newTestServerWithMetadataFile(t, catalog)
 
 	request := httptest.NewRequest(http.MethodPost, "/api/databases/workspace/roles", bytes.NewBufferString(`{
 		"name":"viewer"
 	}`))
-	request.Header.Set("X-Codetable-User", "viewer")
+	request.AddCookie(testSessionCookie(t, system, "viewer"))
 	recorder := httptest.NewRecorder()
 	server.ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusForbidden {
@@ -593,12 +663,12 @@ func TestRoleManagementRequiresDatabaseWrite(t *testing.T) {
 
 func TestNonDatabaseOwnerCannotCreateTable(t *testing.T) {
 	catalog := metadata.Catalog{Databases: []metadata.Database{{Name: "workspace", SQLitePath: "./data/workspace.sqlite"}}}
-	server, _, _ := newTestServerWithMetadataFile(t, catalog)
+	server, system, _ := newTestServerWithMetadataFile(t, catalog)
 	request := httptest.NewRequest(http.MethodPost, "/api/databases/workspace/tables", bytes.NewBufferString(`{
 		"name":"contacts",
 		"fields":[{"name":"name","type":"text"}]
 	}`))
-	request.Header.Set("X-Codetable-User", "other")
+	request.AddCookie(testSessionCookie(t, system, "other"))
 	recorder := httptest.NewRecorder()
 	server.ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusForbidden {
@@ -623,7 +693,7 @@ func TestListRowsAPIAppliesView(t *testing.T) {
 		`{"values":{"name":"Linus","email":"linus@example.com","status":"archived"}}`,
 	} {
 		request := httptest.NewRequest(http.MethodPost, "/api/tables/db/contacts/rows", bytes.NewBufferString(body))
-		request.Header.Set("X-Codetable-User", "u1")
+		request.AddCookie(testSessionCookie(t, system, "u1"))
 		recorder := httptest.NewRecorder()
 		server.ServeHTTP(recorder, request)
 		if recorder.Code != http.StatusCreated {
@@ -632,7 +702,7 @@ func TestListRowsAPIAppliesView(t *testing.T) {
 	}
 
 	request := httptest.NewRequest(http.MethodGet, "/api/tables/db/contacts/rows?view=active-a", nil)
-	request.Header.Set("X-Codetable-User", "u1")
+	request.AddCookie(testSessionCookie(t, system, "u1"))
 	recorder := httptest.NewRecorder()
 	server.ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusOK {
@@ -652,10 +722,10 @@ func TestListRowsAPIAppliesView(t *testing.T) {
 }
 
 func TestCreateRowAPIDeniesMissingWritePermission(t *testing.T) {
-	server, _ := newTestServer(t)
+	server, system := newTestServer(t)
 	body := bytes.NewBufferString(`{"values":{"name":"Ada"}}`)
 	request := httptest.NewRequest(http.MethodPost, "/api/tables/db/contacts/rows", body)
-	request.Header.Set("X-Codetable-User", "u1")
+	request.AddCookie(testSessionCookie(t, system, "u1"))
 	recorder := httptest.NewRecorder()
 
 	server.ServeHTTP(recorder, request)
@@ -698,7 +768,7 @@ func TestCreateRowAPICanUsePersistentRepository(t *testing.T) {
 	}
 
 	request := httptest.NewRequest(http.MethodPost, "/api/tables/db/contacts/rows", bytes.NewBufferString(`{"values":{"name":"Ada"}}`))
-	request.Header.Set("X-Codetable-User", "u1")
+	request.AddCookie(testSessionCookie(t, system, "u1"))
 	recorder := httptest.NewRecorder()
 	server.ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusCreated {
@@ -715,7 +785,7 @@ func TestCreateRowAPICanUsePersistentRepository(t *testing.T) {
 }
 
 func TestWorkflowAndFormAPI(t *testing.T) {
-	server, _ := newTestServer(t)
+	server, system := newTestServer(t)
 
 	workflowRequest := httptest.NewRequest(http.MethodPost, "/api/databases/db/workflows", bytes.NewBufferString(`{
 		"name":"notify",
@@ -723,7 +793,7 @@ func TestWorkflowAndFormAPI(t *testing.T) {
 		"secrets":{"TOKEN":"secret"},
 		"variables":{"CHANNEL":"ops"}
 	}`))
-	workflowRequest.Header.Set("X-Codetable-User", "u1")
+	workflowRequest.AddCookie(testSessionCookie(t, system, "u1"))
 	workflowRecorder := httptest.NewRecorder()
 	server.ServeHTTP(workflowRecorder, workflowRequest)
 	if workflowRecorder.Code != http.StatusCreated {
@@ -738,14 +808,14 @@ func TestWorkflowAndFormAPI(t *testing.T) {
 		t.Fatalf("expected db-level workflow, got %#v", workflow)
 	}
 	getWorkflow := httptest.NewRequest(http.MethodGet, "/api/workflows/1", nil)
-	getWorkflow.Header.Set("X-Codetable-User", "u1")
+	getWorkflow.AddCookie(testSessionCookie(t, system, "u1"))
 	getWorkflowRecorder := httptest.NewRecorder()
 	server.ServeHTTP(getWorkflowRecorder, getWorkflow)
 	if getWorkflowRecorder.Code != http.StatusOK {
 		t.Fatalf("expected workflow 200, got %d: %s", getWorkflowRecorder.Code, getWorkflowRecorder.Body.String())
 	}
 	listWorkflows := httptest.NewRequest(http.MethodGet, "/api/databases/db/workflows", nil)
-	listWorkflows.Header.Set("X-Codetable-User", "u1")
+	listWorkflows.AddCookie(testSessionCookie(t, system, "u1"))
 	listWorkflowsRecorder := httptest.NewRecorder()
 	server.ServeHTTP(listWorkflowsRecorder, listWorkflows)
 	if listWorkflowsRecorder.Code != http.StatusOK {
@@ -763,7 +833,7 @@ func TestWorkflowAndFormAPI(t *testing.T) {
 		"name":"contact-intake",
 		"script":"root.append(api.input({ name: 'email' }))"
 	}`))
-	formRequest.Header.Set("X-Codetable-User", "u1")
+	formRequest.AddCookie(testSessionCookie(t, system, "u1"))
 	formRecorder := httptest.NewRecorder()
 	server.ServeHTTP(formRecorder, formRequest)
 	if formRecorder.Code != http.StatusCreated {
@@ -778,7 +848,7 @@ func TestWorkflowAndFormAPI(t *testing.T) {
 		t.Fatalf("expected db-level form, got %#v", form)
 	}
 	listForms := httptest.NewRequest(http.MethodGet, "/api/databases/db/forms", nil)
-	listForms.Header.Set("X-Codetable-User", "u1")
+	listForms.AddCookie(testSessionCookie(t, system, "u1"))
 	listFormsRecorder := httptest.NewRecorder()
 	server.ServeHTTP(listFormsRecorder, listForms)
 	if listFormsRecorder.Code != http.StatusOK {
@@ -797,14 +867,14 @@ func TestWorkflowAndFormAPI(t *testing.T) {
 }
 
 func TestWorkflowRunAPI(t *testing.T) {
-	server, _ := newTestServer(t)
+	server, system := newTestServer(t)
 
 	workflowRequest := httptest.NewRequest(http.MethodPost, "/api/databases/db/workflows", bytes.NewBufferString(`{
 		"name":"welcome",
 		"script":"function run(info) { const echoed = info.node(\"echo\", { value: info.inputs.name }); return { message: echoed.value + \"-\" + info.variables.suffix }; }",
 		"variables":{"suffix":"done"}
 	}`))
-	workflowRequest.Header.Set("X-Codetable-User", "u1")
+	workflowRequest.AddCookie(testSessionCookie(t, system, "u1"))
 	workflowRecorder := httptest.NewRecorder()
 	server.ServeHTTP(workflowRecorder, workflowRequest)
 	if workflowRecorder.Code != http.StatusCreated {
@@ -816,7 +886,7 @@ func TestWorkflowRunAPI(t *testing.T) {
 	}
 
 	runRequest := httptest.NewRequest(http.MethodPost, "/api/workflows/1/runs", bytes.NewBufferString(`{"inputs":{"name":"Ada"}}`))
-	runRequest.Header.Set("X-Codetable-User", "u1")
+	runRequest.AddCookie(testSessionCookie(t, system, "u1"))
 	runRecorder := httptest.NewRecorder()
 	server.ServeHTTP(runRecorder, runRequest)
 	if runRecorder.Code != http.StatusCreated {
@@ -834,7 +904,7 @@ func TestWorkflowRunAPI(t *testing.T) {
 	}
 
 	listRequest := httptest.NewRequest(http.MethodGet, "/api/workflows/1/runs", nil)
-	listRequest.Header.Set("X-Codetable-User", "u1")
+	listRequest.AddCookie(testSessionCookie(t, system, "u1"))
 	listRecorder := httptest.NewRecorder()
 	server.ServeHTTP(listRecorder, listRequest)
 	if listRecorder.Code != http.StatusOK {
@@ -872,7 +942,7 @@ func TestWorkflowNodesAPI(t *testing.T) {
 
 func TestWorkflowRunAPIWithRecordChangedTrigger(t *testing.T) {
 	ctx := context.Background()
-	server, _ := newTestServer(t)
+	server, system := newTestServer(t)
 	historyKey, err := history.SaveRowChange(ctx, server.history, history.RowChange{
 		Database: "db",
 		Table:    "contacts",
@@ -888,7 +958,7 @@ func TestWorkflowRunAPIWithRecordChangedTrigger(t *testing.T) {
 		"name":"triggered",
 		"script":"function run(info) { const changed = info.node(\"table.record.changed\", { history_key: info.inputs.history_key }); return { record_id: changed.record.record_id, name: changed.values.name }; }"
 	}`))
-	workflowRequest.Header.Set("X-Codetable-User", "u1")
+	workflowRequest.AddCookie(testSessionCookie(t, system, "u1"))
 	workflowRecorder := httptest.NewRecorder()
 	server.ServeHTTP(workflowRecorder, workflowRequest)
 	if workflowRecorder.Code != http.StatusCreated {
@@ -896,7 +966,7 @@ func TestWorkflowRunAPIWithRecordChangedTrigger(t *testing.T) {
 	}
 
 	runRequest := httptest.NewRequest(http.MethodPost, "/api/workflows/1/runs", bytes.NewBufferString(`{"inputs":{"history_key":"`+historyKey+`"}}`))
-	runRequest.Header.Set("X-Codetable-User", "u1")
+	runRequest.AddCookie(testSessionCookie(t, system, "u1"))
 	runRecorder := httptest.NewRecorder()
 	server.ServeHTTP(runRecorder, runRequest)
 	if runRecorder.Code != http.StatusCreated {
@@ -921,7 +991,7 @@ func TestWorkflowAndFormPermissions(t *testing.T) {
 		"name":"restricted",
 		"script":"function run(info) { return info.inputs; }"
 	}`))
-	workflowRequest.Header.Set("X-Codetable-User", "owner")
+	workflowRequest.AddCookie(testSessionCookie(t, system, "owner"))
 	workflowRecorder := httptest.NewRecorder()
 	server.ServeHTTP(workflowRecorder, workflowRequest)
 	if workflowRecorder.Code != http.StatusCreated {
@@ -932,7 +1002,7 @@ func TestWorkflowAndFormPermissions(t *testing.T) {
 		"name":"restricted-form",
 		"script":"root.append(api.input({ name: 'email' }))"
 	}`))
-	formRequest.Header.Set("X-Codetable-User", "owner")
+	formRequest.AddCookie(testSessionCookie(t, system, "owner"))
 	formRecorder := httptest.NewRecorder()
 	server.ServeHTTP(formRecorder, formRequest)
 	if formRecorder.Code != http.StatusCreated {
@@ -940,7 +1010,7 @@ func TestWorkflowAndFormPermissions(t *testing.T) {
 	}
 
 	otherWorkflow := httptest.NewRequest(http.MethodGet, "/api/workflows/1", nil)
-	otherWorkflow.Header.Set("X-Codetable-User", "other")
+	otherWorkflow.AddCookie(testSessionCookie(t, system, "other"))
 	otherWorkflowRecorder := httptest.NewRecorder()
 	server.ServeHTTP(otherWorkflowRecorder, otherWorkflow)
 	if otherWorkflowRecorder.Code != http.StatusForbidden {
@@ -948,7 +1018,7 @@ func TestWorkflowAndFormPermissions(t *testing.T) {
 	}
 
 	otherForms := httptest.NewRequest(http.MethodGet, "/api/databases/db/forms", nil)
-	otherForms.Header.Set("X-Codetable-User", "other")
+	otherForms.AddCookie(testSessionCookie(t, system, "other"))
 	otherFormsRecorder := httptest.NewRecorder()
 	server.ServeHTTP(otherFormsRecorder, otherForms)
 	if otherFormsRecorder.Code != http.StatusOK {
@@ -971,7 +1041,7 @@ func TestWorkflowAndFormPermissions(t *testing.T) {
 		t.Fatal(err)
 	}
 	readWorkflow := httptest.NewRequest(http.MethodGet, "/api/workflows/1", nil)
-	readWorkflow.Header.Set("X-Codetable-User", "other")
+	readWorkflow.AddCookie(testSessionCookie(t, system, "other"))
 	readWorkflowRecorder := httptest.NewRecorder()
 	server.ServeHTTP(readWorkflowRecorder, readWorkflow)
 	if readWorkflowRecorder.Code != http.StatusOK {
@@ -979,7 +1049,7 @@ func TestWorkflowAndFormPermissions(t *testing.T) {
 	}
 
 	runWorkflow := httptest.NewRequest(http.MethodPost, "/api/workflows/1/runs", bytes.NewBufferString(`{"inputs":{"name":"Ada"}}`))
-	runWorkflow.Header.Set("X-Codetable-User", "other")
+	runWorkflow.AddCookie(testSessionCookie(t, system, "other"))
 	runWorkflowRecorder := httptest.NewRecorder()
 	server.ServeHTTP(runWorkflowRecorder, runWorkflow)
 	if runWorkflowRecorder.Code != http.StatusForbidden {
@@ -1054,6 +1124,26 @@ func testCatalog(sqlitePath string) metadata.Catalog {
 			},
 		}},
 	}}}
+}
+
+func testSessionCookie(t *testing.T, system *systemdb.DB, userID string) *http.Cookie {
+	t.Helper()
+	user, err := auth.NewPasswordUser(auth.PasswordRegistration{
+		Email:    userID + "@example.com",
+		Password: "correct horse",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	user.ID = userID
+	if _, err := system.UpsertUserByEmail(context.Background(), user); err != nil {
+		t.Fatal(err)
+	}
+	session, err := system.CreateSession(context.Background(), userID, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &http.Cookie{Name: sessionCookieName, Value: session.Token}
 }
 
 func sessionCookie(t *testing.T, recorder *httptest.ResponseRecorder) *http.Cookie {

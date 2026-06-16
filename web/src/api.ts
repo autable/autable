@@ -139,10 +139,6 @@ export type OIDCProvider = {
   scopes: string[];
 };
 
-function userHeaders(userID?: string): Record<string, string> {
-  return userID ? { "X-Codetable-User": userID } : {};
-}
-
 export async function loadMetadata(): Promise<Catalog> {
   const response = await fetch("/api/metadata");
   if (!response.ok) {
@@ -152,12 +148,11 @@ export async function loadMetadata(): Promise<Catalog> {
 }
 
 export async function createDatabase(
-  database: Pick<DatabaseMetadata, "name" | "sqlite_path">,
-  userID?: string
+  database: Pick<DatabaseMetadata, "name" | "sqlite_path">
 ): Promise<DatabaseMetadata> {
   const response = await fetch("/api/databases", {
     method: "POST",
-    headers: { "Content-Type": "application/json", ...userHeaders(userID) },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(database)
   });
   if (!response.ok) {
@@ -167,10 +162,10 @@ export async function createDatabase(
   return response.json() as Promise<DatabaseMetadata>;
 }
 
-export async function createTable(dbName: string, table: TableMetadata, userID?: string): Promise<TableMetadata> {
+export async function createTable(dbName: string, table: TableMetadata): Promise<TableMetadata> {
   const response = await fetch(`/api/databases/${dbName}/tables`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", ...userHeaders(userID) },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(table)
   });
   if (!response.ok) {
@@ -183,18 +178,11 @@ export async function createTable(dbName: string, table: TableMetadata, userID?:
 export async function createRow(
   dbName: string,
   tableName: string,
-  values: Record<string, unknown>,
-  userID?: string
+  values: Record<string, unknown>
 ): Promise<RowRecord> {
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json"
-  };
-  if (userID) {
-    headers["X-Codetable-User"] = userID;
-  }
   const response = await fetch(`/api/tables/${dbName}/${tableName}/rows`, {
     method: "POST",
-    headers,
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ values })
   });
   if (!response.ok) {
@@ -208,18 +196,11 @@ export async function updateRow(
   dbName: string,
   tableName: string,
   recordID: number,
-  values: Record<string, unknown>,
-  userID?: string
+  values: Record<string, unknown>
 ): Promise<RowRecord> {
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json"
-  };
-  if (userID) {
-    headers["X-Codetable-User"] = userID;
-  }
   const response = await fetch(`/api/tables/${dbName}/${tableName}/rows/${recordID}`, {
     method: "PATCH",
-    headers,
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ values })
   });
   if (!response.ok) {
@@ -232,13 +213,10 @@ export async function updateRow(
 export async function listRows(
   dbName: string,
   tableName: string,
-  viewName?: string,
-  userID?: string
+  viewName?: string
 ): Promise<RowRecord[]> {
   const query = viewName && viewName !== "all" ? `?view=${encodeURIComponent(viewName)}` : "";
-  const response = await fetch(`/api/tables/${dbName}/${tableName}/rows${query}`, {
-    headers: userHeaders(userID)
-  });
+  const response = await fetch(`/api/tables/${dbName}/${tableName}/rows${query}`);
   if (!response.ok) {
     const error = await response.json().catch(() => ({ error: response.statusText }));
     throw new Error(error.error ?? `row list failed: ${response.status}`);
@@ -249,12 +227,9 @@ export async function listRows(
 export async function listRowHistory(
   dbName: string,
   tableName: string,
-  recordID: number,
-  userID?: string
+  recordID: number
 ): Promise<RowChange[]> {
-  const response = await fetch(`/api/tables/${dbName}/${tableName}/rows/${recordID}/history`, {
-    headers: userHeaders(userID)
-  });
+  const response = await fetch(`/api/tables/${dbName}/${tableName}/rows/${recordID}/history`);
   if (!response.ok) {
     const error = await response.json().catch(() => ({ error: response.statusText }));
     throw new Error(error.error ?? `row history failed: ${response.status}`);
@@ -318,10 +293,8 @@ export async function logout(): Promise<void> {
   }
 }
 
-export async function listWorkflows(dbName: string, userID?: string): Promise<WorkflowDefinition[]> {
-  const response = await fetch(`/api/databases/${dbName}/workflows`, {
-    headers: userHeaders(userID)
-  });
+export async function listWorkflows(dbName: string): Promise<WorkflowDefinition[]> {
+  const response = await fetch(`/api/databases/${dbName}/workflows`);
   if (!response.ok) {
     throw new Error(`workflow list failed: ${response.status}`);
   }
@@ -330,12 +303,11 @@ export async function listWorkflows(dbName: string, userID?: string): Promise<Wo
 
 export async function saveWorkflow(
   dbName: string,
-  workflow: WorkflowDefinition,
-  userID?: string
+  workflow: WorkflowDefinition
 ): Promise<WorkflowDefinition> {
   const response = await fetch(`/api/databases/${dbName}/workflows`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", ...userHeaders(userID) },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(workflow)
   });
   if (!response.ok) {
@@ -354,12 +326,11 @@ export async function loadWorkflowNodes(): Promise<WorkflowNodeInfo[]> {
 
 export async function runWorkflow(
   workflowID: number,
-  inputs: Record<string, unknown>,
-  userID?: string
+  inputs: Record<string, unknown>
 ): Promise<WorkflowRunResponse> {
   const response = await fetch(`/api/workflows/${workflowID}/runs`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", ...userHeaders(userID) },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ inputs })
   });
   const body = await response.json().catch(() => undefined);
@@ -369,10 +340,8 @@ export async function runWorkflow(
   return body as WorkflowRunResponse;
 }
 
-export async function listWorkflowRuns(workflowID: number, userID?: string): Promise<WorkflowRunResponse[]> {
-  const response = await fetch(`/api/workflows/${workflowID}/runs`, {
-    headers: userHeaders(userID)
-  });
+export async function listWorkflowRuns(workflowID: number): Promise<WorkflowRunResponse[]> {
+  const response = await fetch(`/api/workflows/${workflowID}/runs`);
   if (!response.ok) {
     const error = await response.json().catch(() => ({ error: response.statusText }));
     throw new Error(error.error ?? `workflow runs failed: ${response.status}`);
@@ -380,20 +349,18 @@ export async function listWorkflowRuns(workflowID: number, userID?: string): Pro
   return response.json() as Promise<WorkflowRunResponse[]>;
 }
 
-export async function listForms(dbName: string, userID?: string): Promise<FormDefinition[]> {
-  const response = await fetch(`/api/databases/${dbName}/forms`, {
-    headers: userHeaders(userID)
-  });
+export async function listForms(dbName: string): Promise<FormDefinition[]> {
+  const response = await fetch(`/api/databases/${dbName}/forms`);
   if (!response.ok) {
     throw new Error(`form list failed: ${response.status}`);
   }
   return response.json() as Promise<FormDefinition[]>;
 }
 
-export async function saveForm(dbName: string, form: FormDefinition, userID?: string): Promise<FormDefinition> {
+export async function saveForm(dbName: string, form: FormDefinition): Promise<FormDefinition> {
   const response = await fetch(`/api/databases/${dbName}/forms`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", ...userHeaders(userID) },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(form)
   });
   if (!response.ok) {
@@ -402,20 +369,18 @@ export async function saveForm(dbName: string, form: FormDefinition, userID?: st
   return response.json() as Promise<FormDefinition>;
 }
 
-export async function listRoles(dbName: string, userID?: string): Promise<RoleDefinition[]> {
-  const response = await fetch(`/api/databases/${dbName}/roles`, {
-    headers: userHeaders(userID)
-  });
+export async function listRoles(dbName: string): Promise<RoleDefinition[]> {
+  const response = await fetch(`/api/databases/${dbName}/roles`);
   if (!response.ok) {
     throw new Error(`role list failed: ${response.status}`);
   }
   return response.json() as Promise<RoleDefinition[]>;
 }
 
-export async function createRole(dbName: string, name: string, userID?: string): Promise<RoleDefinition> {
+export async function createRole(dbName: string, name: string): Promise<RoleDefinition> {
   const response = await fetch(`/api/databases/${dbName}/roles`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", ...userHeaders(userID) },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name })
   });
   if (!response.ok) {
@@ -428,12 +393,11 @@ export async function createRole(dbName: string, name: string, userID?: string):
 export async function saveRoleGrants(
   dbName: string,
   roleName: string,
-  grants: PermissionGrant[],
-  userID?: string
+  grants: PermissionGrant[]
 ): Promise<RoleDefinition> {
   const response = await fetch(`/api/databases/${dbName}/roles/${encodeURIComponent(roleName)}/grants`, {
     method: "PUT",
-    headers: { "Content-Type": "application/json", ...userHeaders(userID) },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ grants })
   });
   if (!response.ok) {
@@ -446,12 +410,11 @@ export async function saveRoleGrants(
 export async function saveRoleMembers(
   dbName: string,
   roleName: string,
-  members: string[],
-  userID?: string
+  members: string[]
 ): Promise<RoleDefinition> {
   const response = await fetch(`/api/databases/${dbName}/roles/${encodeURIComponent(roleName)}/members`, {
     method: "PUT",
-    headers: { "Content-Type": "application/json", ...userHeaders(userID) },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ members })
   });
   if (!response.ok) {
