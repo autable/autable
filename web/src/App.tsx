@@ -5,7 +5,6 @@ import {
   type EditableGridCell,
   type GridCell,
   GridCellKind,
-  type GridColumn,
   type Item
 } from "@glideapps/glide-data-grid";
 import { AuthDialog } from "./components/AuthDialog";
@@ -15,6 +14,7 @@ import { TableWorkspace } from "./components/TableWorkspace";
 import { WorkflowWorkspace } from "./components/WorkflowWorkspace";
 import { WorkspaceNavigation, type WorkspaceView } from "./components/WorkspaceNavigation";
 import { renderFormScript } from "./formRuntime";
+import { buildTableColumns, rowRecordToValues } from "./tableGrid";
 import {
   createDatabase,
   createRole,
@@ -49,7 +49,6 @@ import {
   type OIDCProvider,
   type PermissionGrant,
   type RowChange,
-  type RowRecord,
   type RoleDefinition,
   type TableMetadata,
   type TableView,
@@ -306,15 +305,8 @@ export function App() {
     };
   }, [currentUser?.id, selectedWorkflow?.id]);
 
-  const columns = useMemo<GridColumn[]>(
-    () => [
-      { id: "record_id", title: "record_id", width: 96 },
-      ...activeFields.map((field) => ({
-        id: field.name,
-        title: field.required ? `${field.name} *` : field.name,
-        width: Math.max(128, field.name.length * 14)
-      }))
-    ],
+  const columns = useMemo(
+    () => buildTableColumns(activeFields),
     [activeFields]
   );
 
@@ -1121,10 +1113,6 @@ function replaceRole(items: RoleDefinition[], saved: RoleDefinition): RoleDefini
 
 function compactMembers(members: string[]): string[] {
   return [...new Set(members.map((member) => member.trim()).filter(Boolean))].sort((left, right) => left.localeCompare(right));
-}
-
-function rowRecordToValues(row: RowRecord): Record<string, unknown> {
-  return { record_id: row.record_id, ...row.values };
 }
 
 function rowDraftFromRecord(row: Record<string, unknown> | null, fieldNames: string[]): Record<string, string> {
