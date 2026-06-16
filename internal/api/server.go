@@ -327,15 +327,27 @@ func (server *Server) handleRowHistory(w http.ResponseWriter, r *http.Request) {
 }
 
 func (server *Server) handleSaveWorkflow(w http.ResponseWriter, r *http.Request) {
+	actorID, ok := server.requireUserID(w, r)
+	if !ok {
+		return
+	}
 	var workflow systemdb.WorkflowDefinition
 	if err := readJSON(r, &workflow); err != nil {
 		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if workflow.ID != 0 && !server.requireResourceWrite(w, r, actorID, permission.ScopeWorkflow, workflow.ID) {
 		return
 	}
 	saved, err := server.system.SaveWorkflow(r.Context(), workflow)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
+	}
+	if workflow.ID == 0 {
+		if !server.grantResourceOwner(w, r, actorID, permission.ScopeWorkflow, saved.ID) {
+			return
+		}
 	}
 	writeJSON(w, http.StatusCreated, saved)
 }
@@ -346,6 +358,10 @@ func (server *Server) handleGetDatabaseResource(w http.ResponseWriter, r *http.R
 		http.NotFound(w, r)
 		return
 	}
+	actorID, ok := server.requireUserID(w, r)
+	if !ok {
+		return
+	}
 	switch resource {
 	case "workflows":
 		workflows, err := server.system.Workflows(r.Context(), dbName)
@@ -353,14 +369,24 @@ func (server *Server) handleGetDatabaseResource(w http.ResponseWriter, r *http.R
 			writeError(w, http.StatusInternalServerError, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, workflows)
+		filtered, err := server.filterReadableWorkflows(r.Context(), actorID, workflows)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, filtered)
 	case "forms":
 		forms, err := server.system.Forms(r.Context(), dbName)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, forms)
+		filtered, err := server.filterReadableForms(r.Context(), actorID, forms)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, filtered)
 	default:
 		http.NotFound(w, r)
 	}
@@ -372,11 +398,18 @@ func (server *Server) handlePostDatabaseResource(w http.ResponseWriter, r *http.
 		http.NotFound(w, r)
 		return
 	}
+	actorID, ok := server.requireUserID(w, r)
+	if !ok {
+		return
+	}
 	switch resource {
 	case "workflows":
 		var workflow systemdb.WorkflowDefinition
 		if err := readJSON(r, &workflow); err != nil {
 			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		if workflow.ID != 0 && !server.requireResourceWrite(w, r, actorID, permission.ScopeWorkflow, workflow.ID) {
 			return
 		}
 		workflow.DatabaseName = dbName
@@ -385,6 +418,11 @@ func (server *Server) handlePostDatabaseResource(w http.ResponseWriter, r *http.
 			writeError(w, http.StatusInternalServerError, err)
 			return
 		}
+		if workflow.ID == 0 {
+			if !server.grantResourceOwner(w, r, actorID, permission.ScopeWorkflow, saved.ID) {
+				return
+			}
+		}
 		writeJSON(w, http.StatusCreated, saved)
 	case "forms":
 		var form systemdb.FormDefinition
@@ -392,11 +430,19 @@ func (server *Server) handlePostDatabaseResource(w http.ResponseWriter, r *http.
 			writeError(w, http.StatusBadRequest, err)
 			return
 		}
+		if form.ID != 0 && !server.requireResourceWrite(w, r, actorID, permission.ScopeForm, form.ID) {
+			return
+		}
 		form.DatabaseName = dbName
 		saved, err := server.system.SaveForm(r.Context(), form)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err)
 			return
+		}
+		if form.ID == 0 {
+			if !server.grantResourceOwner(w, r, actorID, permission.ScopeForm, saved.ID) {
+				return
+			}
 		}
 		writeJSON(w, http.StatusCreated, saved)
 	default:
@@ -414,6 +460,13 @@ func (server *Server) handleGetWorkflow(w http.ResponseWriter, r *http.Request) 
 		http.NotFound(w, r)
 		return
 	}
+	actorID, ok := server.requireUserID(w, r)
+	if !ok {
+		return
+	}
+	if !server.requireResourceRead(w, r, actorID, permission.ScopeWorkflow, id) {
+		return
+	}
 	workflow, err := server.system.Workflow(r.Context(), id)
 	if err != nil {
 		writeError(w, http.StatusNotFound, err)
@@ -426,6 +479,13 @@ func (server *Server) handleRunWorkflow(w http.ResponseWriter, r *http.Request) 
 	id, ok := parseWorkflowRunsPath(r.URL.Path)
 	if !ok || r.Method != http.MethodPost {
 		http.NotFound(w, r)
+		return
+	}
+	actorID, ok := server.requireUserID(w, r)
+	if !ok {
+		return
+	}
+	if !server.requireResourceWrite(w, r, actorID, permission.ScopeWorkflow, id) {
 		return
 	}
 	var request workflowRunRequest
@@ -456,6 +516,13 @@ func (server *Server) handleWorkflowRuns(w http.ResponseWriter, r *http.Request,
 		http.NotFound(w, r)
 		return
 	}
+	actorID, ok := server.requireUserID(w, r)
+	if !ok {
+		return
+	}
+	if !server.requireResourceRead(w, r, actorID, permission.ScopeWorkflow, workflowID) {
+		return
+	}
 	entries, err := server.history.GetPrefix(r.Context(), history.WorkflowPrefix(workflowID))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
@@ -474,15 +541,27 @@ func (server *Server) handleWorkflowRuns(w http.ResponseWriter, r *http.Request,
 }
 
 func (server *Server) handleSaveForm(w http.ResponseWriter, r *http.Request) {
+	actorID, ok := server.requireUserID(w, r)
+	if !ok {
+		return
+	}
 	var form systemdb.FormDefinition
 	if err := readJSON(r, &form); err != nil {
 		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if form.ID != 0 && !server.requireResourceWrite(w, r, actorID, permission.ScopeForm, form.ID) {
 		return
 	}
 	saved, err := server.system.SaveForm(r.Context(), form)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
+	}
+	if form.ID == 0 {
+		if !server.grantResourceOwner(w, r, actorID, permission.ScopeForm, saved.ID) {
+			return
+		}
 	}
 	writeJSON(w, http.StatusCreated, saved)
 }
@@ -491,6 +570,13 @@ func (server *Server) handleGetForm(w http.ResponseWriter, r *http.Request) {
 	id, ok := parseIDPath(r.URL.Path, "/api/forms/")
 	if !ok {
 		http.NotFound(w, r)
+		return
+	}
+	actorID, ok := server.requireUserID(w, r)
+	if !ok {
+		return
+	}
+	if !server.requireResourceRead(w, r, actorID, permission.ScopeForm, id) {
 		return
 	}
 	form, err := server.system.Form(r.Context(), id)
@@ -577,6 +663,85 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 
 func writeError(w http.ResponseWriter, status int, err error) {
 	writeJSON(w, status, map[string]string{"error": err.Error()})
+}
+
+func (server *Server) requireUserID(w http.ResponseWriter, r *http.Request) (string, bool) {
+	actorID, ok, err := server.currentUserID(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return "", false
+	}
+	if !ok {
+		writeError(w, http.StatusUnauthorized, errors.New("authentication is required"))
+		return "", false
+	}
+	return actorID, true
+}
+
+func (server *Server) requireResourceRead(w http.ResponseWriter, r *http.Request, actorID string, scope permission.Scope, id int64) bool {
+	return server.requireResourceLevel(w, r, actorID, scope, id, permission.Read)
+}
+
+func (server *Server) requireResourceWrite(w http.ResponseWriter, r *http.Request, actorID string, scope permission.Scope, id int64) bool {
+	return server.requireResourceLevel(w, r, actorID, scope, id, permission.Write)
+}
+
+func (server *Server) requireResourceLevel(w http.ResponseWriter, r *http.Request, actorID string, scope permission.Scope, id int64, level permission.Level) bool {
+	perms, err := server.system.GrantsForSubject(r.Context(), actorID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return false
+	}
+	if perms.ResourceLevel(actorID, scope, resourceID(id)) < level {
+		writeError(w, http.StatusForbidden, table.ErrPermissionDenied)
+		return false
+	}
+	return true
+}
+
+func (server *Server) filterReadableWorkflows(ctx context.Context, actorID string, workflows []systemdb.WorkflowDefinition) ([]systemdb.WorkflowDefinition, error) {
+	perms, err := server.system.GrantsForSubject(ctx, actorID)
+	if err != nil {
+		return nil, err
+	}
+	filtered := make([]systemdb.WorkflowDefinition, 0, len(workflows))
+	for _, workflow := range workflows {
+		if perms.CanReadResource(actorID, permission.ScopeWorkflow, resourceID(workflow.ID)) {
+			filtered = append(filtered, workflow)
+		}
+	}
+	return filtered, nil
+}
+
+func (server *Server) filterReadableForms(ctx context.Context, actorID string, forms []systemdb.FormDefinition) ([]systemdb.FormDefinition, error) {
+	perms, err := server.system.GrantsForSubject(ctx, actorID)
+	if err != nil {
+		return nil, err
+	}
+	filtered := make([]systemdb.FormDefinition, 0, len(forms))
+	for _, form := range forms {
+		if perms.CanReadResource(actorID, permission.ScopeForm, resourceID(form.ID)) {
+			filtered = append(filtered, form)
+		}
+	}
+	return filtered, nil
+}
+
+func (server *Server) grantResourceOwner(w http.ResponseWriter, r *http.Request, actorID string, scope permission.Scope, id int64) bool {
+	if err := server.system.SaveGrant(r.Context(), permission.Grant{
+		SubjectID: actorID,
+		Scope:     scope,
+		Resource:  resourceID(id),
+		Level:     permission.Write,
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return false
+	}
+	return true
+}
+
+func resourceID(id int64) string {
+	return strconv.FormatInt(id, 10)
 }
 
 func (server *Server) currentUserID(r *http.Request) (string, bool, error) {

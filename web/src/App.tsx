@@ -139,7 +139,8 @@ export function App() {
       setCatalog(nextCatalog);
       const dbName = nextCatalog.databases[0]?.name;
       if (dbName) {
-        const [nextWorkflows, nextForms] = await Promise.all([listWorkflows(dbName), listForms(dbName)]);
+        const userID = currentUser ? undefined : "demo-user";
+        const [nextWorkflows, nextForms] = await Promise.all([listWorkflows(dbName, userID), listForms(dbName, userID)]);
         setWorkflows(nextWorkflows);
         setForms(nextForms);
         setSelectedWorkflowID(nextWorkflows[0]?.id ?? 0);
@@ -170,7 +171,7 @@ export function App() {
       return;
     }
     try {
-      const saved = await saveWorkflow(database.name, selectedWorkflow);
+      const saved = await saveWorkflow(database.name, selectedWorkflow, currentUser ? undefined : "demo-user");
       setWorkflows((current) => replaceResource(current, saved));
       setSelectedWorkflowID(saved.id ?? 0);
       setStatus(`Workflow saved as #${saved.id}`);
@@ -189,7 +190,7 @@ export function App() {
       const response = await runWorkflow(selectedWorkflow.id, {
         ...sampleRow,
         record_id: Number(sampleRow.record_id ?? 1)
-      });
+      }, currentUser ? undefined : "demo-user");
       setLastWorkflowRun(response);
       if (response.run.error) {
         setStatus(`Workflow failed: ${response.run.error}`);
@@ -206,7 +207,7 @@ export function App() {
       return;
     }
     try {
-      const saved = await saveForm(database.name, selectedForm);
+      const saved = await saveForm(database.name, selectedForm, currentUser ? undefined : "demo-user");
       setForms((current) => replaceResource(current, saved));
       setSelectedFormID(saved.id ?? 0);
       setStatus(`Form saved as #${saved.id}`);

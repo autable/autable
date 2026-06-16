@@ -21,6 +21,7 @@ This repository currently contains the backend core primitives:
 - Table views with composable `base_view`, filters, and sorts.
 - Password registration/login with HttpOnly session cookies.
 - Field-level permissions: none, read, write.
+- Workflow and form resource permissions using their auto-incrementing IDs.
 - User identity model with email fallback for password and OIDC accounts.
 - History key generation and prefix scanning for row/workflow history.
 - Stateless workflow node interface definitions.

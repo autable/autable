@@ -49,12 +49,33 @@ func (set Set) FieldLevel(subjectID, resource, field string) Level {
 	return level
 }
 
+func (set Set) ResourceLevel(subjectID string, scope Scope, resource string) Level {
+	level := None
+	for _, grant := range set.grants {
+		if grant.SubjectID != subjectID || grant.Scope != scope || grant.Resource != resource {
+			continue
+		}
+		if grant.Level > level {
+			level = grant.Level
+		}
+	}
+	return level
+}
+
 func (set Set) CanReadField(subjectID, resource, field string) bool {
 	return set.FieldLevel(subjectID, resource, field) >= Read
 }
 
 func (set Set) CanWriteField(subjectID, resource, field string) bool {
 	return set.FieldLevel(subjectID, resource, field) >= Write
+}
+
+func (set Set) CanReadResource(subjectID string, scope Scope, resource string) bool {
+	return set.ResourceLevel(subjectID, scope, resource) >= Read
+}
+
+func (set Set) CanWriteResource(subjectID string, scope Scope, resource string) bool {
+	return set.ResourceLevel(subjectID, scope, resource) >= Write
 }
 
 func (level Level) String() string {

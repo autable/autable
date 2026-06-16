@@ -341,6 +341,7 @@ func TestWorkflowAndFormAPI(t *testing.T) {
 		"secrets":{"TOKEN":"secret"},
 		"variables":{"CHANNEL":"ops"}
 	}`))
+	workflowRequest.Header.Set("X-Codetable-User", "u1")
 	workflowRecorder := httptest.NewRecorder()
 	server.ServeHTTP(workflowRecorder, workflowRequest)
 	if workflowRecorder.Code != http.StatusCreated {
@@ -355,12 +356,14 @@ func TestWorkflowAndFormAPI(t *testing.T) {
 		t.Fatalf("expected db-level workflow, got %#v", workflow)
 	}
 	getWorkflow := httptest.NewRequest(http.MethodGet, "/api/workflows/1", nil)
+	getWorkflow.Header.Set("X-Codetable-User", "u1")
 	getWorkflowRecorder := httptest.NewRecorder()
 	server.ServeHTTP(getWorkflowRecorder, getWorkflow)
 	if getWorkflowRecorder.Code != http.StatusOK {
 		t.Fatalf("expected workflow 200, got %d: %s", getWorkflowRecorder.Code, getWorkflowRecorder.Body.String())
 	}
 	listWorkflows := httptest.NewRequest(http.MethodGet, "/api/databases/db/workflows", nil)
+	listWorkflows.Header.Set("X-Codetable-User", "u1")
 	listWorkflowsRecorder := httptest.NewRecorder()
 	server.ServeHTTP(listWorkflowsRecorder, listWorkflows)
 	if listWorkflowsRecorder.Code != http.StatusOK {
@@ -378,6 +381,7 @@ func TestWorkflowAndFormAPI(t *testing.T) {
 		"name":"contact-intake",
 		"script":"root.append(api.input({ name: 'email' }))"
 	}`))
+	formRequest.Header.Set("X-Codetable-User", "u1")
 	formRecorder := httptest.NewRecorder()
 	server.ServeHTTP(formRecorder, formRequest)
 	if formRecorder.Code != http.StatusCreated {
@@ -392,6 +396,7 @@ func TestWorkflowAndFormAPI(t *testing.T) {
 		t.Fatalf("expected db-level form, got %#v", form)
 	}
 	listForms := httptest.NewRequest(http.MethodGet, "/api/databases/db/forms", nil)
+	listForms.Header.Set("X-Codetable-User", "u1")
 	listFormsRecorder := httptest.NewRecorder()
 	server.ServeHTTP(listFormsRecorder, listForms)
 	if listFormsRecorder.Code != http.StatusOK {
@@ -417,6 +422,7 @@ func TestWorkflowRunAPI(t *testing.T) {
 		"script":"function run(info) { const echoed = info.node(\"echo\", { value: info.inputs.name }); return { message: echoed.value + \"-\" + info.variables.suffix }; }",
 		"variables":{"suffix":"done"}
 	}`))
+	workflowRequest.Header.Set("X-Codetable-User", "u1")
 	workflowRecorder := httptest.NewRecorder()
 	server.ServeHTTP(workflowRecorder, workflowRequest)
 	if workflowRecorder.Code != http.StatusCreated {
@@ -428,6 +434,7 @@ func TestWorkflowRunAPI(t *testing.T) {
 	}
 
 	runRequest := httptest.NewRequest(http.MethodPost, "/api/workflows/1/runs", bytes.NewBufferString(`{"inputs":{"name":"Ada"}}`))
+	runRequest.Header.Set("X-Codetable-User", "u1")
 	runRecorder := httptest.NewRecorder()
 	server.ServeHTTP(runRecorder, runRequest)
 	if runRecorder.Code != http.StatusCreated {
@@ -445,6 +452,7 @@ func TestWorkflowRunAPI(t *testing.T) {
 	}
 
 	listRequest := httptest.NewRequest(http.MethodGet, "/api/workflows/1/runs", nil)
+	listRequest.Header.Set("X-Codetable-User", "u1")
 	listRecorder := httptest.NewRecorder()
 	server.ServeHTTP(listRecorder, listRequest)
 	if listRecorder.Code != http.StatusOK {
@@ -456,6 +464,79 @@ func TestWorkflowRunAPI(t *testing.T) {
 	}
 	if len(runs) != 1 || runs[0].HistoryKey != runResponse.HistoryKey {
 		t.Fatalf("unexpected workflow run list: %#v", runs)
+	}
+}
+
+func TestWorkflowAndFormPermissions(t *testing.T) {
+	server, system := newTestServer(t)
+
+	workflowRequest := httptest.NewRequest(http.MethodPost, "/api/databases/db/workflows", bytes.NewBufferString(`{
+		"name":"restricted",
+		"script":"function run(info) { return info.inputs; }"
+	}`))
+	workflowRequest.Header.Set("X-Codetable-User", "owner")
+	workflowRecorder := httptest.NewRecorder()
+	server.ServeHTTP(workflowRecorder, workflowRequest)
+	if workflowRecorder.Code != http.StatusCreated {
+		t.Fatalf("expected workflow 201, got %d: %s", workflowRecorder.Code, workflowRecorder.Body.String())
+	}
+
+	formRequest := httptest.NewRequest(http.MethodPost, "/api/databases/db/forms", bytes.NewBufferString(`{
+		"name":"restricted-form",
+		"script":"root.append(api.input({ name: 'email' }))"
+	}`))
+	formRequest.Header.Set("X-Codetable-User", "owner")
+	formRecorder := httptest.NewRecorder()
+	server.ServeHTTP(formRecorder, formRequest)
+	if formRecorder.Code != http.StatusCreated {
+		t.Fatalf("expected form 201, got %d: %s", formRecorder.Code, formRecorder.Body.String())
+	}
+
+	otherWorkflow := httptest.NewRequest(http.MethodGet, "/api/workflows/1", nil)
+	otherWorkflow.Header.Set("X-Codetable-User", "other")
+	otherWorkflowRecorder := httptest.NewRecorder()
+	server.ServeHTTP(otherWorkflowRecorder, otherWorkflow)
+	if otherWorkflowRecorder.Code != http.StatusForbidden {
+		t.Fatalf("expected workflow 403, got %d: %s", otherWorkflowRecorder.Code, otherWorkflowRecorder.Body.String())
+	}
+
+	otherForms := httptest.NewRequest(http.MethodGet, "/api/databases/db/forms", nil)
+	otherForms.Header.Set("X-Codetable-User", "other")
+	otherFormsRecorder := httptest.NewRecorder()
+	server.ServeHTTP(otherFormsRecorder, otherForms)
+	if otherFormsRecorder.Code != http.StatusOK {
+		t.Fatalf("expected form list 200, got %d: %s", otherFormsRecorder.Code, otherFormsRecorder.Body.String())
+	}
+	var forms []systemdb.FormDefinition
+	if err := json.NewDecoder(otherFormsRecorder.Body).Decode(&forms); err != nil {
+		t.Fatal(err)
+	}
+	if len(forms) != 0 {
+		t.Fatalf("expected unreadable forms to be filtered, got %#v", forms)
+	}
+
+	if err := system.SaveGrant(context.Background(), permission.Grant{
+		SubjectID: "other",
+		Scope:     permission.ScopeWorkflow,
+		Resource:  "1",
+		Level:     permission.Read,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	readWorkflow := httptest.NewRequest(http.MethodGet, "/api/workflows/1", nil)
+	readWorkflow.Header.Set("X-Codetable-User", "other")
+	readWorkflowRecorder := httptest.NewRecorder()
+	server.ServeHTTP(readWorkflowRecorder, readWorkflow)
+	if readWorkflowRecorder.Code != http.StatusOK {
+		t.Fatalf("expected workflow 200, got %d: %s", readWorkflowRecorder.Code, readWorkflowRecorder.Body.String())
+	}
+
+	runWorkflow := httptest.NewRequest(http.MethodPost, "/api/workflows/1/runs", bytes.NewBufferString(`{"inputs":{"name":"Ada"}}`))
+	runWorkflow.Header.Set("X-Codetable-User", "other")
+	runWorkflowRecorder := httptest.NewRecorder()
+	server.ServeHTTP(runWorkflowRecorder, runWorkflow)
+	if runWorkflowRecorder.Code != http.StatusForbidden {
+		t.Fatalf("expected read-only workflow run 403, got %d: %s", runWorkflowRecorder.Code, runWorkflowRecorder.Body.String())
 	}
 }
 

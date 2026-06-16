@@ -93,6 +93,10 @@ export type AuthUser = {
   provider: string;
 };
 
+function userHeaders(userID?: string): Record<string, string> {
+  return userID ? { "X-Codetable-User": userID } : {};
+}
+
 export async function loadMetadata(): Promise<Catalog> {
   const response = await fetch("/api/metadata");
   if (!response.ok) {
@@ -183,18 +187,24 @@ export async function logout(): Promise<void> {
   }
 }
 
-export async function listWorkflows(dbName: string): Promise<WorkflowDefinition[]> {
-  const response = await fetch(`/api/databases/${dbName}/workflows`);
+export async function listWorkflows(dbName: string, userID?: string): Promise<WorkflowDefinition[]> {
+  const response = await fetch(`/api/databases/${dbName}/workflows`, {
+    headers: userHeaders(userID)
+  });
   if (!response.ok) {
     throw new Error(`workflow list failed: ${response.status}`);
   }
   return response.json() as Promise<WorkflowDefinition[]>;
 }
 
-export async function saveWorkflow(dbName: string, workflow: WorkflowDefinition): Promise<WorkflowDefinition> {
+export async function saveWorkflow(
+  dbName: string,
+  workflow: WorkflowDefinition,
+  userID?: string
+): Promise<WorkflowDefinition> {
   const response = await fetch(`/api/databases/${dbName}/workflows`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...userHeaders(userID) },
     body: JSON.stringify(workflow)
   });
   if (!response.ok) {
@@ -205,11 +215,12 @@ export async function saveWorkflow(dbName: string, workflow: WorkflowDefinition)
 
 export async function runWorkflow(
   workflowID: number,
-  inputs: Record<string, unknown>
+  inputs: Record<string, unknown>,
+  userID?: string
 ): Promise<WorkflowRunResponse> {
   const response = await fetch(`/api/workflows/${workflowID}/runs`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...userHeaders(userID) },
     body: JSON.stringify({ inputs })
   });
   const body = await response.json().catch(() => undefined);
@@ -219,18 +230,20 @@ export async function runWorkflow(
   return body as WorkflowRunResponse;
 }
 
-export async function listForms(dbName: string): Promise<FormDefinition[]> {
-  const response = await fetch(`/api/databases/${dbName}/forms`);
+export async function listForms(dbName: string, userID?: string): Promise<FormDefinition[]> {
+  const response = await fetch(`/api/databases/${dbName}/forms`, {
+    headers: userHeaders(userID)
+  });
   if (!response.ok) {
     throw new Error(`form list failed: ${response.status}`);
   }
   return response.json() as Promise<FormDefinition[]>;
 }
 
-export async function saveForm(dbName: string, form: FormDefinition): Promise<FormDefinition> {
+export async function saveForm(dbName: string, form: FormDefinition, userID?: string): Promise<FormDefinition> {
   const response = await fetch(`/api/databases/${dbName}/forms`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...userHeaders(userID) },
     body: JSON.stringify(form)
   });
   if (!response.ok) {

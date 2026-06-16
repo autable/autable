@@ -21,3 +21,26 @@ func TestFieldLevelPermission(t *testing.T) {
 		t.Fatal("did not expect another subject to inherit permissions")
 	}
 }
+
+func TestResourceLevelPermission(t *testing.T) {
+	perms := New(
+		Grant{SubjectID: "u1", Scope: ScopeWorkflow, Resource: "7", Level: Write},
+		Grant{SubjectID: "u1", Scope: ScopeForm, Resource: "3", Level: Read},
+	)
+
+	if !perms.CanWriteResource("u1", ScopeWorkflow, "7") {
+		t.Fatal("expected workflow write permission")
+	}
+	if !perms.CanReadResource("u1", ScopeWorkflow, "7") {
+		t.Fatal("expected workflow write permission to allow reads")
+	}
+	if perms.CanWriteResource("u1", ScopeForm, "3") {
+		t.Fatal("did not expect form read permission to allow writes")
+	}
+	if perms.CanReadResource("u2", ScopeWorkflow, "7") {
+		t.Fatal("did not expect another subject to inherit workflow permission")
+	}
+	if perms.CanReadResource("u1", ScopeForm, "7") {
+		t.Fatal("did not expect workflow resource id to cross scopes")
+	}
+}
