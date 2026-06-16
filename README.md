@@ -27,4 +27,10 @@ This repository currently contains the backend core primitives:
 go test ./...
 ```
 
+Run the API server with git-managed config and metadata:
+
+```sh
+go run ./cmd/codetable -config examples/config.yml -metadata examples/metadata/main.yml
+```
+
 SQLite files and LevelDB directories must be backed up by users/operators. The project will keep generated data out of git while keeping user-authored metadata, workflows, forms, and config files in git.
