@@ -249,6 +249,12 @@ test("hides workflow and form resources without resource permission", async ({ p
   await page.goto("/");
   await expect(page.getByRole("button", { name: databaseName })).toBeVisible();
   await expect(page.getByRole("button", { name: /Contacts/ })).toBeVisible();
+  const tableCanvas = page.locator(".table-view");
+  await expect(tableCanvas.getByRole("button", { name: "Fields" })).toBeDisabled();
+  await expect(tableCanvas.getByRole("button", { name: "View", exact: true })).toBeDisabled();
+  await expect(tableCanvas.getByRole("button", { name: "Edit Row" })).toBeDisabled();
+  await expect(tableCanvas.getByRole("button", { name: "Delete Row" })).toBeDisabled();
+  await expect(tableCanvas.getByRole("button", { name: "Row", exact: true })).toBeDisabled();
   await page.getByRole("button", { name: "Workflow", exact: true }).click();
   await expect(page.getByRole("button", { name: workflowName })).toHaveCount(0);
   await page.getByRole("button", { name: "Form", exact: true }).click();

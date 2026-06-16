@@ -110,6 +110,8 @@ export function TableWorkspace({
   table
 }: TableWorkspaceProps) {
   const activeFields = table.fields.filter((field) => !field.deleted);
+  const canWriteTable = (table.permission_level ?? 2) >= 2;
+  const canCreateRow = activeFields.some((field) => canWriteField(field));
   return (
     <div className="table-view">
       <div className="section-header">
@@ -134,6 +136,7 @@ export function TableWorkspace({
           </Select>
           <FieldDialog
             activeFields={activeFields}
+            canWriteTable={canWriteTable}
             newFieldName={newFieldName}
             newFieldRequired={newFieldRequired}
             newFieldType={newFieldType}
@@ -145,6 +148,7 @@ export function TableWorkspace({
           />
           <ViewDialog
             activeFields={activeFields}
+            canWriteTable={canWriteTable}
             newViewBase={newViewBase}
             newViewFilterField={newViewFilterField}
             newViewFilterOp={newViewFilterOp}
@@ -188,10 +192,10 @@ export function TableWorkspace({
             selectedRecordID={selectedRecordID}
             values={selectedRowDraft}
           />
-          <Button icon={<DeleteRegular />} onClick={onDeleteSelectedRow} disabled={!selectedRecordID}>
+          <Button icon={<DeleteRegular />} onClick={onDeleteSelectedRow} disabled={!selectedRecordID || !canWriteTable}>
             Delete Row
           </Button>
-          <Button icon={<AddRegular />} appearance="primary" onClick={onAddRow}>
+          <Button icon={<AddRegular />} appearance="primary" onClick={onAddRow} disabled={!canCreateRow}>
             Row
           </Button>
         </div>
@@ -199,7 +203,13 @@ export function TableWorkspace({
       <div className="grid-host">
         <DataEditor
           getCellContent={getCellContent}
-          onCellEdited={onCellEdited}
+          onCellEdited={(cell, newValue) => {
+            const field = activeFields[cell[0]];
+            if (!field || !canWriteField(field)) {
+              return;
+            }
+            void onCellEdited(cell, newValue);
+          }}
           onCellClicked={([, rowIndex]) => {
             const recordID = Number(displayedRows[rowIndex]?.record_id);
             if (Number.isFinite(recordID)) {
@@ -238,6 +248,7 @@ export function TableWorkspace({
 
 function FieldDialog({
   activeFields,
+  canWriteTable,
   newFieldName,
   newFieldRequired,
   newFieldType,
@@ -248,6 +259,7 @@ function FieldDialog({
   onNewFieldTypeChange
 }: {
   activeFields: Field[];
+  canWriteTable: boolean;
   newFieldName: string;
   newFieldRequired: boolean;
   newFieldType: string;
@@ -260,7 +272,9 @@ function FieldDialog({
   return (
     <Dialog>
       <DialogTrigger disableButtonEnhancement>
-        <Button icon={<TableRegular />}>Fields</Button>
+        <Button icon={<TableRegular />} disabled={!canWriteTable}>
+          Fields
+        </Button>
       </DialogTrigger>
       <DialogSurface>
         <DialogBody>
@@ -278,15 +292,30 @@ function FieldDialog({
                       {field.required ? " · required" : ""}
                     </Text>
                   </div>
-                  <Button icon={<DeleteRegular />} aria-label={`Delete field ${field.name}`} onClick={() => onDeleteField(field.name)} />
+                  <Button
+                    icon={<DeleteRegular />}
+                    aria-label={`Delete field ${field.name}`}
+                    onClick={() => onDeleteField(field.name)}
+                    disabled={!canWriteTable}
+                  />
                 </div>
               ))}
             </div>
             <FluentField label="New field name">
-              <Input aria-label="New field name" value={newFieldName} onChange={(_, data) => onNewFieldNameChange(data.value)} />
+              <Input
+                aria-label="New field name"
+                value={newFieldName}
+                onChange={(_, data) => onNewFieldNameChange(data.value)}
+                disabled={!canWriteTable}
+              />
             </FluentField>
             <FluentField label="New field type">
-              <Select aria-label="New field type" value={newFieldType} onChange={(_, data) => onNewFieldTypeChange(data.value)}>
+              <Select
+                aria-label="New field type"
+                value={newFieldType}
+                onChange={(_, data) => onNewFieldTypeChange(data.value)}
+                disabled={!canWriteTable}
+              >
                 <option value="text">text</option>
                 <option value="email">email</option>
                 <option value="number">number</option>
@@ -297,10 +326,11 @@ function FieldDialog({
               label="Required"
               checked={newFieldRequired}
               onChange={(_, data) => onNewFieldRequiredChange(Boolean(data.checked))}
+              disabled={!canWriteTable}
             />
           </DialogContent>
           <DialogActions>
-            <Button appearance="primary" icon={<AddRegular />} onClick={onAddField}>
+            <Button appearance="primary" icon={<AddRegular />} onClick={onAddField} disabled={!canWriteTable}>
               Add Field
             </Button>
             <DialogTrigger disableButtonEnhancement>
@@ -315,6 +345,7 @@ function FieldDialog({
 
 function ViewDialog({
   activeFields,
+  canWriteTable,
   newViewBase,
   newViewFilterField,
   newViewFilterOp,
@@ -333,6 +364,7 @@ function ViewDialog({
   views
 }: {
   activeFields: Field[];
+  canWriteTable: boolean;
   newViewBase: string;
   newViewFilterField: string;
   newViewFilterOp: TableViewFilter["op"];
@@ -353,17 +385,29 @@ function ViewDialog({
   return (
     <Dialog>
       <DialogTrigger disableButtonEnhancement>
-        <Button icon={<AddRegular />}>View</Button>
+        <Button icon={<AddRegular />} disabled={!canWriteTable}>
+          View
+        </Button>
       </DialogTrigger>
       <DialogSurface>
         <DialogBody>
           <DialogTitle>Create view</DialogTitle>
           <DialogContent className="modal-stack">
             <FluentField label="View name">
-              <Input aria-label="New view name" value={newViewName} onChange={(_, data) => onNewViewNameChange(data.value)} />
+              <Input
+                aria-label="New view name"
+                value={newViewName}
+                onChange={(_, data) => onNewViewNameChange(data.value)}
+                disabled={!canWriteTable}
+              />
             </FluentField>
             <FluentField label="Base view">
-              <Select aria-label="Base view" value={newViewBase} onChange={(_, data) => onNewViewBaseChange(data.value)}>
+              <Select
+                aria-label="Base view"
+                value={newViewBase}
+                onChange={(_, data) => onNewViewBaseChange(data.value)}
+                disabled={!canWriteTable}
+              >
                 <option value="all">All records</option>
                 {views.map((item) => (
                   <option key={item.name} value={item.name}>
@@ -377,6 +421,7 @@ function ViewDialog({
                 aria-label="View filter field"
                 value={newViewFilterField}
                 onChange={(_, data) => onNewViewFilterFieldChange(data.value)}
+                disabled={!canWriteTable}
               >
                 <option value="">No filter</option>
                 {activeFields.map((field) => (
@@ -391,7 +436,7 @@ function ViewDialog({
                 aria-label="View filter operator"
                 value={newViewFilterOp}
                 onChange={(_, data) => onNewViewFilterOpChange(data.value as TableViewFilter["op"])}
-                disabled={!newViewFilterField}
+                disabled={!canWriteTable || !newViewFilterField}
               >
                 <option value="eq">equals</option>
                 <option value="contains">contains</option>
@@ -403,7 +448,7 @@ function ViewDialog({
                 aria-label="View filter value"
                 value={newViewFilterValue}
                 onChange={(_, data) => onNewViewFilterValueChange(data.value)}
-                disabled={!newViewFilterField || newViewFilterOp === "not_empty"}
+                disabled={!canWriteTable || !newViewFilterField || newViewFilterOp === "not_empty"}
               />
             </FluentField>
             <FluentField label="Sort field">
@@ -411,6 +456,7 @@ function ViewDialog({
                 aria-label="View sort field"
                 value={newViewSortField}
                 onChange={(_, data) => onNewViewSortFieldChange(data.value)}
+                disabled={!canWriteTable}
               >
                 <option value="">No sort</option>
                 <option value="record_id">record_id</option>
@@ -426,7 +472,7 @@ function ViewDialog({
                 aria-label="View sort direction"
                 value={newViewSortDirection}
                 onChange={(_, data) => onNewViewSortDirectionChange(data.value as TableViewSort["direction"])}
-                disabled={!newViewSortField}
+                disabled={!canWriteTable || !newViewSortField}
               >
                 <option value="asc">ascending</option>
                 <option value="desc">descending</option>
@@ -434,7 +480,7 @@ function ViewDialog({
             </FluentField>
           </DialogContent>
           <DialogActions>
-            <Button appearance="primary" icon={<AddRegular />} onClick={onCreateView}>
+            <Button appearance="primary" icon={<AddRegular />} onClick={onCreateView} disabled={!canWriteTable}>
               Create View
             </Button>
             <DialogTrigger disableButtonEnhancement>
@@ -460,10 +506,12 @@ function EditRowDialog({
   selectedRecordID: number;
   values: Record<string, string>;
 }) {
+  const writableFields = fields.filter(canWriteField);
+  const hasWritableFields = writableFields.length > 0;
   return (
     <Dialog>
       <DialogTrigger disableButtonEnhancement>
-        <Button icon={<EditRegular />} disabled={!selectedRecordID}>
+        <Button icon={<EditRegular />} disabled={!selectedRecordID || !hasWritableFields}>
           Edit Row
         </Button>
       </DialogTrigger>
@@ -478,13 +526,13 @@ function EditRowDialog({
                   aria-label={`${field.name} value`}
                   value={values[field.name] ?? ""}
                   onChange={(_, data) => onChange(field.name, data.value)}
-                  disabled={!selectedRecordID}
+                  disabled={!selectedRecordID || !canWriteField(field)}
                 />
               </FluentField>
             ))}
           </DialogContent>
           <DialogActions>
-            <Button appearance="primary" icon={<SaveRegular />} onClick={onSave} disabled={!selectedRecordID}>
+            <Button appearance="primary" icon={<SaveRegular />} onClick={onSave} disabled={!selectedRecordID || !hasWritableFields}>
               Save Row
             </Button>
             <DialogTrigger disableButtonEnhancement>
@@ -495,4 +543,8 @@ function EditRowDialog({
       </DialogSurface>
     </Dialog>
   );
+}
+
+function canWriteField(field: Field): boolean {
+  return (field.permission_level ?? 2) >= 2;
 }

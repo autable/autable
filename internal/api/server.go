@@ -1263,13 +1263,20 @@ func (server *Server) visibleCatalog(ctx context.Context, actorID string, perms 
 
 func visibleTableMetadata(perms permission.Set, actorID, dbName string, tableMeta metadata.Table) metadata.Table {
 	resource := dbName + "." + tableMeta.Name
-	if perms.ResourceLevel(actorID, permission.ScopeDatabase, dbName) >= permission.Write {
-		return tableMeta
+	dbLevel := perms.ResourceLevel(actorID, permission.ScopeDatabase, dbName)
+	tableLevel := perms.ResourceLevel(actorID, permission.ScopeTable, resource)
+	annotated := tableMeta
+	annotated.PermissionLevel = int(maxPermissionLevel(dbLevel, tableLevel))
+	if dbLevel >= permission.Write {
+		annotated.Fields = annotateFieldPermissionLevels(perms, actorID, resource, dbLevel, annotated.Fields)
+		return annotated
 	}
-	visible := tableMeta
+	visible := annotated
 	visible.Fields = make([]metadata.Field, 0, len(tableMeta.Fields))
 	for _, field := range tableMeta.ActiveFields() {
-		if perms.CanReadField(actorID, resource, field.Name) {
+		fieldLevel := perms.FieldLevel(actorID, resource, field.Name)
+		if fieldLevel >= permission.Read {
+			field.PermissionLevel = int(fieldLevel)
 			visible.Fields = append(visible.Fields, field)
 		}
 	}
@@ -1284,6 +1291,22 @@ func visibleTableMetadata(perms permission.Set, actorID, dbName string, tableMet
 		}
 	}
 	return visible
+}
+
+func annotateFieldPermissionLevels(perms permission.Set, actorID, resource string, dbLevel permission.Level, fields []metadata.Field) []metadata.Field {
+	annotated := make([]metadata.Field, 0, len(fields))
+	for _, field := range fields {
+		field.PermissionLevel = int(maxPermissionLevel(dbLevel, perms.FieldLevel(actorID, resource, field.Name)))
+		annotated = append(annotated, field)
+	}
+	return annotated
+}
+
+func maxPermissionLevel(left, right permission.Level) permission.Level {
+	if left > right {
+		return left
+	}
+	return right
 }
 
 func viewFieldsReadable(perms permission.Set, actorID, resource string, filters []metadata.ViewFilter, sorts []metadata.ViewSort) bool {

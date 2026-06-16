@@ -3,6 +3,7 @@ export type Field = {
   type: string;
   required: boolean;
   deleted: boolean;
+  permission_level?: 0 | 1 | 2;
 };
 
 export type TableViewFilter = {
@@ -29,6 +30,7 @@ export type TableMetadata = {
   display_name: string;
   fields: Field[];
   views: TableView[];
+  permission_level?: 0 | 1 | 2;
 };
 
 export type DatabaseMetadata = {

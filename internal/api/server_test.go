@@ -623,8 +623,14 @@ func TestMetadataAPIOnlyReturnsVisibleDatabasesAndTables(t *testing.T) {
 	if len(visible.Databases[0].Tables) != 1 || visible.Databases[0].Tables[0].Name != "contacts" {
 		t.Fatalf("expected only visible contacts table, got %#v", visible.Databases[0].Tables)
 	}
+	if visible.Databases[0].Tables[0].PermissionLevel != int(permission.None) {
+		t.Fatalf("expected field-only reader to have no table write permission, got %#v", visible.Databases[0].Tables[0])
+	}
 	if len(visible.Databases[0].Tables[0].Fields) != 1 || visible.Databases[0].Tables[0].Fields[0].Name != "email" {
 		t.Fatalf("expected only readable email field, got %#v", visible.Databases[0].Tables[0].Fields)
+	}
+	if visible.Databases[0].Tables[0].Fields[0].PermissionLevel != int(permission.Read) {
+		t.Fatalf("expected readable email field permission level, got %#v", visible.Databases[0].Tables[0].Fields[0])
 	}
 	if len(visible.Databases[0].Tables[0].Views) != 1 || visible.Databases[0].Tables[0].Views[0].Name != "by-email" {
 		t.Fatalf("expected only views based on readable fields, got %#v", visible.Databases[0].Tables[0].Views)

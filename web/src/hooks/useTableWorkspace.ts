@@ -130,11 +130,12 @@ export function useTableWorkspace({
 
   const getCellContent = ([columnIndex, rowIndex]: Item): GridCell => {
     const column = columns[columnIndex];
+    const field = activeFields.find((item) => item.name === column?.id);
     const row = displayedRows[rowIndex];
     const value = row?.[String(column.id)] ?? "";
     return {
       kind: GridCellKind.Text,
-      allowOverlay: true,
+      allowOverlay: (field?.permission_level ?? 2) >= 2,
       displayData: String(value),
       data: String(value)
     };
@@ -143,8 +144,9 @@ export function useTableWorkspace({
   async function editCell([columnIndex, rowIndex]: Item, newValue: EditableGridCell) {
     const column = columns[columnIndex];
     const field = String(column.id);
+    const fieldMeta = activeFields.find((item) => item.name === field);
     const row = displayedRows[rowIndex];
-    if (!row || field === "record_id" || newValue.kind !== GridCellKind.Text) {
+    if (!row || field === "record_id" || newValue.kind !== GridCellKind.Text || (fieldMeta?.permission_level ?? 2) < 2) {
       return;
     }
     const recordID = Number(row.record_id);

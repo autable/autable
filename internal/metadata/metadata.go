@@ -21,17 +21,19 @@ type Database struct {
 }
 
 type Table struct {
-	Name        string  `yaml:"name" json:"name"`
-	DisplayName string  `yaml:"display_name" json:"display_name"`
-	Fields      []Field `yaml:"fields" json:"fields"`
-	Views       []View  `yaml:"views" json:"views"`
+	Name            string  `yaml:"name" json:"name"`
+	DisplayName     string  `yaml:"display_name" json:"display_name"`
+	Fields          []Field `yaml:"fields" json:"fields"`
+	Views           []View  `yaml:"views" json:"views"`
+	PermissionLevel int     `yaml:"-" json:"permission_level,omitempty"`
 }
 
 type Field struct {
-	Name     string `yaml:"name" json:"name"`
-	Type     string `yaml:"type" json:"type"`
-	Required bool   `yaml:"required" json:"required"`
-	Deleted  bool   `yaml:"deleted" json:"deleted"`
+	Name            string `yaml:"name" json:"name"`
+	Type            string `yaml:"type" json:"type"`
+	Required        bool   `yaml:"required" json:"required"`
+	Deleted         bool   `yaml:"deleted" json:"deleted"`
+	PermissionLevel int    `yaml:"-" json:"permission_level,omitempty"`
 }
 
 type View struct {
