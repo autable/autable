@@ -347,3 +347,58 @@ func TestRowsAppliesComposedViewFiltersAndSorts(t *testing.T) {
 		t.Fatalf("unexpected sorted view rows: %#v", rows)
 	}
 }
+
+func TestRowsRejectsViewsUsingUnreadableFields(t *testing.T) {
+	ctx := context.Background()
+	service := NewService(history.NewMemoryStore())
+	catalog := metadata.Catalog{Databases: []metadata.Database{{
+		Name:       "db",
+		SQLitePath: "./db.sqlite",
+		Tables: []metadata.Table{{
+			Name: "contacts",
+			Fields: []metadata.Field{
+				{Name: "name", Type: "text"},
+				{Name: "email", Type: "email"},
+				{Name: "status", Type: "text"},
+			},
+			Views: []metadata.View{
+				{Name: "active", Filters: []metadata.ViewFilter{{Field: "status", Op: "eq", Value: "active"}}},
+				{Name: "email-sort", Sorts: []metadata.ViewSort{{Field: "email", Direction: "asc"}}},
+			},
+		}},
+	}}}
+	writerPerms := permission.New(permission.Grant{
+		SubjectID: "writer",
+		Scope:     permission.ScopeTable,
+		Resource:  "db.contacts",
+		Level:     permission.Write,
+	})
+	if _, err := service.CreateRow(ctx, catalog, writerPerms, "writer", "db", "contacts", map[string]any{
+		"name":   "Ada",
+		"email":  "ada@example.com",
+		"status": "active",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	readerPerms := permission.New(permission.Grant{
+		SubjectID: "reader",
+		Scope:     permission.ScopeField,
+		Resource:  "db.contacts",
+		Field:     "email",
+		Level:     permission.Read,
+	})
+
+	if _, err := service.Rows(ctx, catalog, readerPerms, "reader", "db", "contacts", "active"); !errors.Is(err, ErrPermissionDenied) {
+		t.Fatalf("expected unreadable filter permission error, got %v", err)
+	}
+	rows, err := service.Rows(ctx, catalog, readerPerms, "reader", "db", "contacts", "email-sort")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].Values["email"] != "ada@example.com" {
+		t.Fatalf("expected readable email view rows, got %#v", rows)
+	}
+	if _, ok := rows[0].Values["status"]; ok {
+		t.Fatalf("row leaked unreadable status: %#v", rows[0].Values)
+	}
+}

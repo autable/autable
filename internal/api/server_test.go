@@ -574,7 +574,18 @@ func TestMetadataAPIOnlyReturnsVisibleDatabasesAndTables(t *testing.T) {
 			Name:       "workspace",
 			SQLitePath: "./data/workspace.sqlite",
 			Tables: []metadata.Table{
-				{Name: "contacts", Fields: []metadata.Field{{Name: "name", Type: "text"}, {Name: "email", Type: "email"}}},
+				{
+					Name: "contacts",
+					Fields: []metadata.Field{
+						{Name: "name", Type: "text"},
+						{Name: "email", Type: "email"},
+						{Name: "status", Type: "text"},
+					},
+					Views: []metadata.View{
+						{Name: "by-email", Filters: []metadata.ViewFilter{{Field: "email", Op: "not_empty"}}},
+						{Name: "active", Filters: []metadata.ViewFilter{{Field: "status", Op: "eq", Value: "active"}}},
+					},
+				},
 				{Name: "private_notes", Fields: []metadata.Field{{Name: "body", Type: "text"}}},
 			},
 		},
@@ -611,6 +622,12 @@ func TestMetadataAPIOnlyReturnsVisibleDatabasesAndTables(t *testing.T) {
 	}
 	if len(visible.Databases[0].Tables) != 1 || visible.Databases[0].Tables[0].Name != "contacts" {
 		t.Fatalf("expected only visible contacts table, got %#v", visible.Databases[0].Tables)
+	}
+	if len(visible.Databases[0].Tables[0].Fields) != 1 || visible.Databases[0].Tables[0].Fields[0].Name != "email" {
+		t.Fatalf("expected only readable email field, got %#v", visible.Databases[0].Tables[0].Fields)
+	}
+	if len(visible.Databases[0].Tables[0].Views) != 1 || visible.Databases[0].Tables[0].Views[0].Name != "by-email" {
+		t.Fatalf("expected only views based on readable fields, got %#v", visible.Databases[0].Tables[0].Views)
 	}
 
 	anonymous := httptest.NewRequest(http.MethodGet, "/api/metadata", nil)
@@ -1075,6 +1092,23 @@ func TestListRowsAPIAppliesView(t *testing.T) {
 	}
 	if rows[0].Values["name"] != "Grace" || rows[1].Values["name"] != "Ada" {
 		t.Fatalf("unexpected view order: %#v", rows)
+	}
+
+	if err := system.SaveGrant(ctx, permission.Grant{
+		SubjectID: "reader",
+		Scope:     permission.ScopeField,
+		Resource:  "db.contacts",
+		Field:     "email",
+		Level:     permission.Read,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	deniedView := httptest.NewRequest(http.MethodGet, "/api/tables/db/contacts/rows?view=active-a", nil)
+	deniedView.AddCookie(testSessionCookie(t, system, "reader"))
+	deniedRecorder := httptest.NewRecorder()
+	server.ServeHTTP(deniedRecorder, deniedView)
+	if deniedRecorder.Code != http.StatusForbidden {
+		t.Fatalf("expected unreadable view 403, got %d: %s", deniedRecorder.Code, deniedRecorder.Body.String())
 	}
 }
 

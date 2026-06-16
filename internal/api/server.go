@@ -1236,7 +1236,7 @@ func (server *Server) visibleCatalog(ctx context.Context, actorID string, perms 
 		tables := make([]metadata.Table, 0, len(database.Tables))
 		for _, tableMeta := range database.Tables {
 			if dbWritable || canSeeTableMetadata(perms, actorID, database.Name, tableMeta) {
-				tables = append(tables, tableMeta)
+				tables = append(tables, visibleTableMetadata(perms, actorID, database.Name, tableMeta))
 				dbVisible = true
 			}
 		}
@@ -1253,6 +1253,45 @@ func (server *Server) visibleCatalog(ctx context.Context, actorID string, perms 
 		}
 	}
 	return visible, nil
+}
+
+func visibleTableMetadata(perms permission.Set, actorID, dbName string, tableMeta metadata.Table) metadata.Table {
+	resource := dbName + "." + tableMeta.Name
+	if perms.ResourceLevel(actorID, permission.ScopeDatabase, dbName) >= permission.Write {
+		return tableMeta
+	}
+	visible := tableMeta
+	visible.Fields = make([]metadata.Field, 0, len(tableMeta.Fields))
+	for _, field := range tableMeta.ActiveFields() {
+		if perms.CanReadField(actorID, resource, field.Name) {
+			visible.Fields = append(visible.Fields, field)
+		}
+	}
+	visible.Views = make([]metadata.View, 0, len(tableMeta.Views))
+	for _, view := range tableMeta.Views {
+		resolved, err := tableMeta.ResolveView(view.Name)
+		if err != nil {
+			continue
+		}
+		if viewFieldsReadable(perms, actorID, resource, resolved.Filters, resolved.Sorts) {
+			visible.Views = append(visible.Views, view)
+		}
+	}
+	return visible
+}
+
+func viewFieldsReadable(perms permission.Set, actorID, resource string, filters []metadata.ViewFilter, sorts []metadata.ViewSort) bool {
+	for _, filter := range filters {
+		if !perms.CanReadField(actorID, resource, filter.Field) {
+			return false
+		}
+	}
+	for _, sortDef := range sorts {
+		if !perms.CanReadField(actorID, resource, sortDef.Field) {
+			return false
+		}
+	}
+	return true
 }
 
 func canSeeTableMetadata(perms permission.Set, actorID, dbName string, tableMeta metadata.Table) bool {

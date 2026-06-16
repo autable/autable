@@ -155,6 +155,10 @@ func (service *Service) Rows(ctx context.Context, catalog metadata.Catalog, perm
 		if err != nil {
 			return nil, err
 		}
+		resource := dbName + "." + tableName
+		if !viewFieldsReadable(perms, actorID, resource, resolved.Filters, resolved.Sorts) {
+			return nil, fmt.Errorf("%w: view %s", ErrPermissionDenied, viewName)
+		}
 		rows = applyFilters(rows, resolved.Filters)
 		applySorts(rows, resolved.Sorts)
 	}
@@ -171,6 +175,20 @@ func (service *Service) Rows(ctx context.Context, catalog metadata.Catalog, perm
 		filtered = append(filtered, Row{RecordID: row.RecordID, Values: values})
 	}
 	return filtered, nil
+}
+
+func viewFieldsReadable(perms permission.Set, actorID, resource string, filters []metadata.ViewFilter, sorts []metadata.ViewSort) bool {
+	for _, filter := range filters {
+		if !perms.CanReadField(actorID, resource, filter.Field) {
+			return false
+		}
+	}
+	for _, sortDef := range sorts {
+		if !perms.CanReadField(actorID, resource, sortDef.Field) {
+			return false
+		}
+	}
+	return true
 }
 
 func validateWritableFields(tableMeta metadata.Table, perms permission.Set, actorID, resource string, values map[string]any) error {
