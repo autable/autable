@@ -227,13 +227,14 @@ func TestRoleDefinitionStoresReplaceableGrants(t *testing.T) {
 	role, err = db.ReplaceRoleGrants(ctx, "workspace", "editor", []permission.Grant{
 		{Scope: permission.ScopeTable, Resource: "workspace.contacts", Level: permission.Write},
 		{Scope: permission.ScopeField, Resource: "workspace.contacts", Field: "email", Level: permission.Read},
+		{Scope: permission.ScopeField, Resource: "workspace.contacts", Field: "secret", Level: permission.None},
 		{Scope: permission.ScopeWorkflow, Resource: "9", Level: permission.None},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(role.Grants) != 2 {
-		t.Fatalf("expected two persisted grants, got %#v", role.Grants)
+	if len(role.Grants) != 3 {
+		t.Fatalf("expected table, field read, and field none grants, got %#v", role.Grants)
 	}
 	perms, err := db.GrantsForSubject(ctx, role.SubjectID)
 	if err != nil {
@@ -244,6 +245,9 @@ func TestRoleDefinitionStoresReplaceableGrants(t *testing.T) {
 	}
 	if !perms.CanReadField(role.SubjectID, "workspace.contacts", "email") {
 		t.Fatal("expected field read grant")
+	}
+	if perms.CanReadField(role.SubjectID, "workspace.contacts", "secret") {
+		t.Fatal("expected field none grant to override table write")
 	}
 	role, err = db.ReplaceRoleMembers(ctx, "workspace", "editor", []string{"u1", "u2", "u1", ""})
 	if err != nil {
@@ -261,6 +265,9 @@ func TestRoleDefinitionStoresReplaceableGrants(t *testing.T) {
 	}
 	if !effectivePerms.CanReadField("u1", "workspace.contacts", "email") {
 		t.Fatal("expected role member to inherit field read grant")
+	}
+	if effectivePerms.CanReadField("u1", "workspace.contacts", "secret") {
+		t.Fatal("expected role member to inherit field none grant")
 	}
 
 	role, err = db.ReplaceRoleGrants(ctx, "workspace", "editor", []permission.Grant{

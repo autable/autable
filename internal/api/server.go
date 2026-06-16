@@ -1455,7 +1455,7 @@ func (server *Server) grantDatabaseName(ctx context.Context, grant permission.Gr
 
 func (server *Server) validateRoleGrants(ctx context.Context, dbName string, grants []permission.Grant) error {
 	for _, grant := range grants {
-		if grant.Level == permission.None {
+		if grant.Level == permission.None && grant.Scope != permission.ScopeField {
 			continue
 		}
 		grantDBName, err := server.grantDatabaseName(ctx, grant)

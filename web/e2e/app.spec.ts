@@ -332,6 +332,7 @@ test("covers role members and resource permission grants through the real backen
   expect(role?.grants).toEqual(
     expect.arrayContaining([
       expect.objectContaining({ scope: "table", resource: `${databaseName}.${tableName}`, field: "", level: 2 }),
+      expect.objectContaining({ scope: "field", resource: `${databaseName}.${tableName}`, field: "name", level: 0 }),
       expect.objectContaining({ scope: "field", resource: `${databaseName}.${tableName}`, field: "email", level: 1 })
     ])
   );

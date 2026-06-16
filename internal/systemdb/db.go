@@ -460,7 +460,7 @@ func (db *DB) ReplaceRoleGrants(ctx context.Context, databaseName, roleName stri
 			return err
 		}
 		for _, grant := range grants {
-			if grant.Level == permission.None {
+			if grant.Level == permission.None && grant.Scope != permission.ScopeField {
 				continue
 			}
 			grant.SubjectID = subjectID

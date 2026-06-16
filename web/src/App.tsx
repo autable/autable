@@ -573,7 +573,7 @@ export function App() {
       return;
     }
     try {
-      await saveRoleGrants(database.name, selectedRole.name, compactRoleGrants(roleDraftGrants));
+      await saveRoleGrants(database.name, selectedRole.name, compactRoleGrants(roleDraftGrants, database));
       const saved = await saveRoleMembers(database.name, selectedRole.name, compactMembers(roleDraftMembers));
       setRoles((current) => replaceRole(current, saved));
       setSelectedRoleName(saved.name);

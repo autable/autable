@@ -1046,7 +1046,7 @@ func TestRoleFieldGrantOverridesTableWrite(t *testing.T) {
 	}
 	if _, err := system.ReplaceRoleGrants(ctx, "db", "editor", []permission.Grant{
 		{Scope: permission.ScopeTable, Resource: "db.contacts", Level: permission.Write},
-		{Scope: permission.ScopeField, Resource: "db.contacts", Field: "email", Level: permission.Read},
+		{Scope: permission.ScopeField, Resource: "db.contacts", Field: "email", Level: permission.None},
 	}); err != nil {
 		t.Fatal(err)
 	}
