@@ -1,4 +1,4 @@
-import type { Catalog, FormDefinition, WorkflowDefinition } from "./api";
+import type { Catalog, FormDefinition, WorkflowDefinition, WorkflowNodeInfo } from "./api";
 
 export const demoCatalog: Catalog = {
   databases: [
@@ -86,6 +86,31 @@ export const initialWorkflows: WorkflowDefinition[] = [
 }`,
     secrets: {},
     variables: { CHANNEL: "sales" }
+  }
+];
+
+export const initialWorkflowNodes: WorkflowNodeInfo[] = [
+  {
+    type: "echo",
+    display_name: "Echo",
+    description: "Returns its input unchanged.",
+    inputs: [{ name: "value", type: "any", required: false }],
+    outputs: [{ name: "value", type: "any", required: false }],
+    stateless: true,
+    trigger: false
+  },
+  {
+    type: "table.record.changed",
+    display_name: "Record changed",
+    description: "Loads a row history entry by rhistory key and exposes it as a trigger record.",
+    inputs: [{ name: "history_key", type: "string", required: true }],
+    outputs: [
+      { name: "record", type: "TriggerRecord", required: true },
+      { name: "values", type: "object", required: true },
+      { name: "actor_id", type: "string", required: false }
+    ],
+    stateless: true,
+    trigger: true
   }
 ];
 

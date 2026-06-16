@@ -100,6 +100,7 @@ func (server *Server) routes() {
 	server.mux.HandleFunc("GET /api/tables/", server.handleGetTable)
 	server.mux.HandleFunc("GET /api/databases/", server.handleGetDatabaseResource)
 	server.mux.HandleFunc("POST /api/databases/", server.handlePostDatabaseResource)
+	server.mux.HandleFunc("GET /api/workflow/nodes", server.handleWorkflowNodes)
 	server.mux.HandleFunc("POST /api/workflows", server.handleSaveWorkflow)
 	server.mux.HandleFunc("POST /api/workflows/", server.handleRunWorkflow)
 	server.mux.HandleFunc("GET /api/workflows/", server.handleGetWorkflow)
@@ -356,6 +357,10 @@ func (server *Server) handleSaveWorkflow(w http.ResponseWriter, r *http.Request)
 		}
 	}
 	writeJSON(w, http.StatusCreated, saved)
+}
+
+func (server *Server) handleWorkflowNodes(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, server.runner.NodeInfos())
 }
 
 func (server *Server) handleGetDatabaseResource(w http.ResponseWriter, r *http.Request) {

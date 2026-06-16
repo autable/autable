@@ -25,6 +25,7 @@ This repository currently contains the backend core primitives:
 - User identity model with email fallback for password and OIDC accounts.
 - History key generation and prefix scanning for row/workflow history.
 - Stateless workflow node interface definitions.
+- Workflow node metadata API and frontend node catalog for available stateless nodes and trigger nodes.
 - Synchronous JavaScript workflow runs through registered stateless nodes, with each run persisted as `whistory_id_timestamp`.
 - A `table.record.changed` trigger node that accepts an `rhistory_db_table_record_id_timestamp` key and exposes the decoded row change.
 - Workflow JavaScript editing with JSON editors for GitHub Actions-style secrets and variables.

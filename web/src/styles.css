@@ -215,6 +215,43 @@ select {
   background: #eef5f3;
 }
 
+.node-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  overflow: auto;
+}
+
+.node-item {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 9px;
+  border: 1px solid #d8d6cf;
+  background: #ffffff;
+}
+
+.node-item.trigger {
+  border-left: 3px solid #7a5c00;
+}
+
+.node-title,
+.node-ports {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.node-title {
+  font-weight: 600;
+}
+
+.node-ports {
+  color: #605e5c;
+}
+
 .field-stack {
   display: flex;
   flex-direction: column;

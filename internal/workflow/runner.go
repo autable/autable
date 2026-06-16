@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -41,6 +42,17 @@ func NewRunner(store history.Store, nodes ...Node) *Runner {
 func (runner *Runner) Register(node Node) {
 	info := node.Info()
 	runner.nodes[info.Type] = node
+}
+
+func (runner *Runner) NodeInfos() []NodeInfo {
+	infos := make([]NodeInfo, 0, len(runner.nodes))
+	for _, node := range runner.nodes {
+		infos = append(infos, node.Info())
+	}
+	sort.Slice(infos, func(i, j int) bool {
+		return infos[i].Type < infos[j].Type
+	})
+	return infos
 }
 
 func (runner *Runner) Run(ctx context.Context, definition Definition, inputs map[string]any) (history.WorkflowRun, string, error) {

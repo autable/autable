@@ -26,13 +26,14 @@ import DataEditor, {
   type GridColumn,
   type Item
 } from "@glideapps/glide-data-grid";
-import { demoCatalog, initialForms, initialRows, initialWorkflows } from "./demoData";
+import { demoCatalog, initialForms, initialRows, initialWorkflowNodes, initialWorkflows } from "./demoData";
 import { renderFormScript } from "./formRuntime";
 import {
   createRow,
   listForms,
   listWorkflows,
   loadMetadata,
+  loadWorkflowNodes,
   login,
   logout,
   register,
@@ -45,6 +46,7 @@ import {
   type FormDefinition,
   type TableView,
   type WorkflowDefinition,
+  type WorkflowNodeInfo,
   type WorkflowRunResponse
 } from "./api";
 
@@ -57,6 +59,7 @@ export function App() {
   const [selectedTable, setSelectedTable] = useState("contacts");
   const [selectedTableView, setSelectedTableView] = useState("all");
   const [workflows, setWorkflows] = useState<WorkflowDefinition[]>(initialWorkflows);
+  const [workflowNodes, setWorkflowNodes] = useState<WorkflowNodeInfo[]>(initialWorkflowNodes);
   const [forms, setForms] = useState<FormDefinition[]>(initialForms);
   const [selectedWorkflowID, setSelectedWorkflowID] = useState(initialWorkflows[0]?.id ?? 0);
   const [selectedFormID, setSelectedFormID] = useState(initialForms[0]?.id ?? 0);
@@ -153,9 +156,14 @@ export function App() {
       const dbName = nextCatalog.databases[0]?.name;
       if (dbName) {
         const userID = currentUser ? undefined : "demo-user";
-        const [nextWorkflows, nextForms] = await Promise.all([listWorkflows(dbName, userID), listForms(dbName, userID)]);
+        const [nextWorkflows, nextForms, nextWorkflowNodes] = await Promise.all([
+          listWorkflows(dbName, userID),
+          listForms(dbName, userID),
+          loadWorkflowNodes()
+        ]);
         setWorkflows(nextWorkflows);
         setForms(nextForms);
+        setWorkflowNodes(nextWorkflowNodes);
         setSelectedWorkflowID(nextWorkflows[0]?.id ?? 0);
         setSelectedFormID(nextForms[0]?.id ?? 0);
       }
@@ -481,6 +489,22 @@ export function App() {
                     </button>
                   ))}
                 </div>
+                <Text weight="semibold">Nodes</Text>
+                <div className="node-list">
+                  {workflowNodes.map((node) => (
+                    <div key={node.type} className={node.trigger ? "node-item trigger" : "node-item"}>
+                      <div className="node-title">
+                        <span>{node.type}</span>
+                        <span>{node.stateless ? "stateless" : "stateful"}</span>
+                      </div>
+                      <Text size={200}>{node.description ?? node.display_name}</Text>
+                      <div className="node-ports">
+                        <span>in {formatPorts(node.inputs)}</span>
+                        <span>out {formatPorts(node.outputs)}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
                 <Text weight="semibold">Run flow</Text>
                 <div className="flow-line" aria-label="Workflow run flow">
                   {selectedWorkflowRun && selectedWorkflowRun.run.steps.length > 0 ? (
@@ -617,6 +641,13 @@ function parseStringMap(text: string): { ok: true; value: Record<string, string>
     values[key] = value;
   }
   return { ok: true, value: values };
+}
+
+function formatPorts(ports: Array<{ name: string; type: string }>): string {
+  if (ports.length === 0) {
+    return "none";
+  }
+  return ports.map((port) => `${port.name}:${port.type}`).join(", ");
 }
 
 function applyTableView(rows: Array<Record<string, unknown>>, views: TableView[], selectedView: string) {

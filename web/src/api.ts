@@ -59,6 +59,23 @@ export type WorkflowDefinition = {
   variables: Record<string, string>;
 };
 
+export type WorkflowPort = {
+  name: string;
+  type: string;
+  description?: string;
+  required: boolean;
+};
+
+export type WorkflowNodeInfo = {
+  type: string;
+  display_name: string;
+  description?: string;
+  inputs: WorkflowPort[];
+  outputs: WorkflowPort[];
+  stateless: boolean;
+  trigger: boolean;
+};
+
 export type WorkflowStepRecord = {
   node_id: string;
   input?: Record<string, unknown>;
@@ -211,6 +228,14 @@ export async function saveWorkflow(
     throw new Error(`workflow save failed: ${response.status}`);
   }
   return response.json() as Promise<WorkflowDefinition>;
+}
+
+export async function loadWorkflowNodes(): Promise<WorkflowNodeInfo[]> {
+  const response = await fetch("/api/workflow/nodes");
+  if (!response.ok) {
+    throw new Error(`workflow nodes failed: ${response.status}`);
+  }
+  return response.json() as Promise<WorkflowNodeInfo[]>;
 }
 
 export async function runWorkflow(

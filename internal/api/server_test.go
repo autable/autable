@@ -16,6 +16,7 @@ import (
 	"codetable/internal/recorddb"
 	"codetable/internal/systemdb"
 	"codetable/internal/table"
+	"codetable/internal/workflow"
 )
 
 func TestPasswordAuthSessionLifecycle(t *testing.T) {
@@ -464,6 +465,27 @@ func TestWorkflowRunAPI(t *testing.T) {
 	}
 	if len(runs) != 1 || runs[0].HistoryKey != runResponse.HistoryKey {
 		t.Fatalf("unexpected workflow run list: %#v", runs)
+	}
+}
+
+func TestWorkflowNodesAPI(t *testing.T) {
+	server, _ := newTestServer(t)
+
+	request := httptest.NewRequest(http.MethodGet, "/api/workflow/nodes", nil)
+	recorder := httptest.NewRecorder()
+	server.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected workflow nodes 200, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+	var nodes []workflow.NodeInfo
+	if err := json.NewDecoder(recorder.Body).Decode(&nodes); err != nil {
+		t.Fatal(err)
+	}
+	if len(nodes) != 2 || nodes[0].Type != "echo" || nodes[1].Type != "table.record.changed" {
+		t.Fatalf("unexpected nodes: %#v", nodes)
+	}
+	if !nodes[1].Trigger || len(nodes[1].Inputs) == 0 || len(nodes[1].Outputs) == 0 {
+		t.Fatalf("expected trigger node ports: %#v", nodes[1])
 	}
 }
 
