@@ -17,6 +17,13 @@ describe("renderFormScript", () => {
     ]);
   });
 
+  it("allows submit buttons to target a database table", () => {
+    const result = renderFormScript(`root.append(api.submit("Create contact", { table: "contacts" }));`);
+
+    expect(result.error).toBeUndefined();
+    expect(result.elements).toEqual([{ kind: "submit", label: "Create contact", tableName: "contacts" }]);
+  });
+
   it("returns script errors without throwing", () => {
     const result = renderFormScript(`throw new Error("bad form")`);
 

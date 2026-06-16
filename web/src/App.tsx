@@ -13,7 +13,7 @@ import { compactRoleGrants, PermissionPanel } from "./components/PermissionPanel
 import { TableWorkspace } from "./components/TableWorkspace";
 import { WorkflowWorkspace } from "./components/WorkflowWorkspace";
 import { WorkspaceNavigation, type WorkspaceView } from "./components/WorkspaceNavigation";
-import { renderFormScript } from "./formRuntime";
+import { renderFormScript, type FormElement } from "./formRuntime";
 import { buildTableColumns, rowRecordToValues } from "./tableGrid";
 import {
   createDatabase,
@@ -729,10 +729,11 @@ export function App() {
       return;
     }
     try {
+      const targetTable = table.name ? JSON.stringify(table.name) : "undefined";
       const saved = await saveForm(database.name, {
         database_name: database.name,
         name,
-        script: "root.append(api.input({ name: 'name', label: 'Name' }), api.submit('Submit'));"
+        script: `root.append(api.input({ name: 'name', label: 'Name' }), api.submit('Submit', { table: ${targetTable} }));`
       });
       setForms((current) => replaceResource(current, saved));
       setSelectedFormID(saved.id ?? 0);
@@ -744,8 +745,13 @@ export function App() {
     }
   }
 
-  async function submitRenderedForm(event?: FormEvent<HTMLFormElement>) {
+  async function submitRenderedForm(submitElement?: Extract<FormElement, { kind: "submit" }>, event?: FormEvent<HTMLFormElement>) {
     event?.preventDefault();
+    const targetTableName = submitElement?.tableName || table.name;
+    if (!database.name || !targetTableName) {
+      setStatus("Select a target table before submitting the form");
+      return;
+    }
     const values = Object.fromEntries(
       renderedForm.elements.flatMap((element) => {
         if (element.kind === "input") {
@@ -758,12 +764,14 @@ export function App() {
       })
     );
     try {
-      const saved = await createRow(database.name, table.name, values);
-      setRows((current) => [...current, rowRecordToValues(saved)]);
-      setRowsViewName("local");
-      setSelectedRecordID(saved.record_id);
-      setRowHistory([]);
-      setStatus(`Form created record ${saved.record_id}`);
+      const saved = await createRow(database.name, targetTableName, values);
+      if (targetTableName === table.name) {
+        setRows((current) => [...current, rowRecordToValues(saved)]);
+        setRowsViewName("local");
+        setSelectedRecordID(saved.record_id);
+        setRowHistory([]);
+      }
+      setStatus(`Form created ${targetTableName} record ${saved.record_id}`);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Form submit failed");
     }

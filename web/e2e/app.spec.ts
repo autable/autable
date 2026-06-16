@@ -106,7 +106,7 @@ async function setupWorkspace(page: Page): Promise<WorkspaceSetup> {
     database_name: databaseName,
     name: `quick-status-${suffix}`,
     script:
-      "root.append(api.input({ name: 'name', label: 'Name', required: true }), api.input({ name: 'email', label: 'Email', type: 'email' }), api.select({ name: 'status', label: 'Status', options: ['Active', 'Review'] }), api.submit('Create record'));"
+      "root.append(api.input({ name: 'name', label: 'Name', required: true }), api.input({ name: 'email', label: 'Email', type: 'email' }), api.select({ name: 'status', label: 'Status', options: ['Active', 'Review'] }), api.submit('Create record', { table: 'contacts' }));"
   });
   await page.reload();
   await expect(page.getByRole("button", { name: databaseName })).toBeVisible();
@@ -361,7 +361,7 @@ test("covers form runtime preview and submit through the real backend", async ({
   await expect(page.getByRole("button", { name: formName })).toBeVisible();
   await page.getByRole("textbox", { name: "Name", exact: true }).fill("Margaret Hamilton");
   await page.getByRole("button", { name: "Submit" }).click();
-  await expect(page.getByText(/Form created record \d+/)).toBeVisible();
+  await expect(page.getByText(/Form created contacts record \d+/)).toBeVisible();
 });
 
 test("covers role members and resource permission grants through the real backend", async ({ page }) => {

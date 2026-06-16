@@ -7,7 +7,7 @@ export type FormElement =
       required: boolean;
     }
   | { kind: "select"; name: string; label: string; options: string[] }
-  | { kind: "submit"; label: string }
+  | { kind: "submit"; label: string; tableName?: string }
   | { kind: "html"; html: string };
 
 type InputType = Extract<FormElement, { kind: "input" }>["inputType"];
@@ -28,6 +28,10 @@ type SelectConfig = {
   name: string;
   label?: string;
   options?: string[];
+};
+
+type SubmitConfig = {
+  table?: string;
 };
 
 const inputTypes = new Set<InputType>(["text", "email", "search", "tel", "url", "password"]);
@@ -60,7 +64,11 @@ export function renderFormScript(script: string): FormRenderResult {
       label: config.label ?? config.name,
       options: Array.isArray(config.options) ? config.options.map(String) : []
     }),
-    submit: (label: string): FormElement => ({ kind: "submit", label: String(label) })
+    submit: (label: string, config?: SubmitConfig): FormElement => ({
+      kind: "submit",
+      label: String(label),
+      tableName: config?.table ? String(config.table) : undefined
+    })
   };
 
   try {

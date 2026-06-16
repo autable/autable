@@ -2,7 +2,7 @@ import type { FormEvent } from "react";
 import { Button, Input, Select, Text, Textarea } from "@fluentui/react-components";
 import { SaveRegular } from "@fluentui/react-icons";
 import type { FormDefinition } from "../api";
-import type { FormRenderResult } from "../formRuntime";
+import type { FormElement, FormRenderResult } from "../formRuntime";
 
 type FormWorkspaceProps = {
   databaseName: string;
@@ -10,7 +10,7 @@ type FormWorkspaceProps = {
   formValues: Record<string, string>;
   onFormValueChange: (name: string, value: string) => void;
   onSave: () => void;
-  onSubmit: (event?: FormEvent<HTMLFormElement>) => void | Promise<void>;
+  onSubmit: (submitElement?: Extract<FormElement, { kind: "submit" }>, event?: FormEvent<HTMLFormElement>) => void | Promise<void>;
   onUpdateScript: (script: string) => void;
   renderedForm: FormRenderResult;
 };
@@ -45,7 +45,7 @@ export function FormWorkspace({
           aria-label="Form JavaScript"
         />
       </div>
-      <form className="form-preview" onSubmit={onSubmit}>
+      <form className="form-preview" onSubmit={(event) => onSubmit(undefined, event)}>
         <Text weight="semibold">Preview</Text>
         {renderedForm.error && <Text className="form-error">{renderedForm.error}</Text>}
         {renderedForm.elements.map((element) => {
@@ -81,7 +81,7 @@ export function FormWorkspace({
             return <div key={element.html} className="form-html" dangerouslySetInnerHTML={{ __html: element.html }} />;
           }
           return (
-            <Button key={element.label} type="button" appearance="primary" onClick={() => void onSubmit()}>
+            <Button key={element.label} type="button" appearance="primary" onClick={() => void onSubmit(element)}>
               {element.label}
             </Button>
           );

@@ -430,4 +430,76 @@ describe("App", () => {
     await userEvent.click(screen.getByRole("button", { name: /quick-status/ }));
     expect(screen.getByRole("button", { name: "Update status" })).toBeInTheDocument();
   });
+
+  it("submits forms to the table declared by the submit element", async () => {
+    let submittedURL = "";
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url === "/api/auth/me") {
+        return jsonResponse({ error: "not authenticated" }, 401);
+      }
+      if (url === "/api/auth/oidc/providers") {
+        return jsonResponse([]);
+      }
+      if (url === "/api/metadata") {
+        return jsonResponse({
+          databases: [
+            {
+              name: "workspace",
+              sqlite_path: "./data/workspace.sqlite",
+              tables: [
+                {
+                  name: "projects",
+                  display_name: "Projects",
+                  fields: [{ name: "name", type: "text", required: false, deleted: false }],
+                  views: []
+                },
+                {
+                  name: "contacts",
+                  display_name: "Contacts",
+                  fields: [{ name: "name", type: "text", required: false, deleted: false }],
+                  views: []
+                }
+              ]
+            }
+          ]
+        });
+      }
+      if (url === "/api/tables/workspace/projects/rows") {
+        return jsonResponse([]);
+      }
+      if (url === "/api/tables/workspace/contacts/rows" && init?.method === "POST") {
+        submittedURL = url;
+        return jsonResponse({ record_id: 9, values: JSON.parse(String(init.body)).values }, 201);
+      }
+      if (url === "/api/databases/workspace/workflows") {
+        return jsonResponse([]);
+      }
+      if (url === "/api/databases/workspace/forms") {
+        return jsonResponse([
+          {
+            id: 9,
+            database_name: "workspace",
+            name: "targeted-contact",
+            script: "root.append(api.input({ name: 'name', label: 'Name' }), api.submit('Create contact', { table: 'contacts' }));"
+          }
+        ]);
+      }
+      if (url === "/api/databases/workspace/roles") {
+        return jsonResponse([]);
+      }
+      if (url === "/api/workflow/nodes") {
+        return jsonResponse([]);
+      }
+      return jsonResponse({ error: `unhandled ${url}` }, 404);
+    });
+
+    renderApp();
+    await userEvent.click(await screen.findByRole("button", { name: /^Form$/ }));
+    await userEvent.type(screen.getByRole("textbox", { name: "Name" }), "Ada");
+    await userEvent.click(screen.getByRole("button", { name: "Create contact" }));
+
+    await waitFor(() => expect(submittedURL).toBe("/api/tables/workspace/contacts/rows"));
+    expect(screen.getByText("Form created contacts record 9")).toBeInTheDocument();
+  });
 });
