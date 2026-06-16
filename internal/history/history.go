@@ -28,6 +28,7 @@ type RowChange struct {
 	Table     string         `json:"table"`
 	RecordID  int64          `json:"record_id"`
 	Timestamp time.Time      `json:"timestamp"`
+	Operation string         `json:"operation,omitempty"`
 	Values    map[string]any `json:"values"`
 	ActorID   string         `json:"actor_id,omitempty"`
 }

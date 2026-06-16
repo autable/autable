@@ -17,7 +17,6 @@ import {
 } from "@fluentui/react-components";
 import {
   AddRegular,
-  AppsListRegular,
   DatabaseRegular,
   DocumentFlowchartRegular,
   DocumentTableRegular,
@@ -192,7 +191,6 @@ export function WorkspaceNavigation({
                 onSelectTable={onSelectTable}
                 onSelectTableView={onSelectTableView}
                 newTableName={newTableName}
-                selectedTableView={selectedTableView}
                 table={table}
               />
             </>
@@ -270,7 +268,6 @@ function TableNav(props: {
   onNewTableNameChange: (value: string) => void;
   onSelectTable: (name: string) => void;
   onSelectTableView: (name: string) => void;
-  selectedTableView: string;
   table: TableMetadata;
 }) {
   return (
@@ -306,27 +303,6 @@ function TableNav(props: {
           onClick={props.onCreateTable}
           disabled={!props.database.name}
         />
-      </div>
-      <div className="side-section">
-        <Text size={200} weight="semibold">
-          Views
-        </Text>
-        <Nav
-          className="resource-nav"
-          aria-label="View list"
-          density="small"
-          selectedValue={props.selectedTableView}
-          onNavItemSelect={(_, data) => props.onSelectTableView(data.value)}
-        >
-          <NavItem value="all" icon={<AppsListRegular />}>
-            All records
-          </NavItem>
-          {(props.table.views ?? []).map((item) => (
-            <NavItem key={item.name} value={item.name} icon={<AppsListRegular />}>
-              {item.display_name || item.name}
-            </NavItem>
-          ))}
-        </Nav>
       </div>
     </>
   );

@@ -104,6 +104,25 @@ func (repository *Repository) UpdateRow(ctx context.Context, dbName, tableName s
 	return table.Row{RecordID: record.RecordID, Values: record.Values.Plain()}, nil
 }
 
+func (repository *Repository) DeleteRow(ctx context.Context, dbName, tableName string, recordID int64) (table.Row, error) {
+	db, err := repository.database(dbName)
+	if err != nil {
+		return table.Row{}, err
+	}
+	var record Record
+	err = db.WithContext(ctx).
+		Where(&Record{RecordID: recordID, TableName: tableName}).
+		First(&record).
+		Error
+	if err != nil {
+		return table.Row{}, err
+	}
+	if err := db.WithContext(ctx).Delete(&record).Error; err != nil {
+		return table.Row{}, err
+	}
+	return table.Row{RecordID: record.RecordID, Values: record.Values.Plain()}, nil
+}
+
 func (repository *Repository) Row(ctx context.Context, dbName, tableName string, recordID int64) (table.Row, error) {
 	db, err := repository.database(dbName)
 	if err != nil {

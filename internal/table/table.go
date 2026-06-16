@@ -27,6 +27,7 @@ type Row struct {
 type RowRepository interface {
 	CreateRow(ctx context.Context, dbName, tableName string, values map[string]any) (Row, error)
 	UpdateRow(ctx context.Context, dbName, tableName string, recordID int64, values map[string]any) (Row, error)
+	DeleteRow(ctx context.Context, dbName, tableName string, recordID int64) (Row, error)
 	Rows(ctx context.Context, dbName, tableName string) ([]Row, error)
 }
 
@@ -72,6 +73,7 @@ func (service *Service) CreateRow(ctx context.Context, catalog metadata.Catalog,
 		Table:     tableName,
 		RecordID:  row.RecordID,
 		Timestamp: time.Now().UTC(),
+		Operation: "create",
 		Values:    cloneValues(row.Values),
 		ActorID:   actorID,
 	})
@@ -100,6 +102,35 @@ func (service *Service) UpdateRow(ctx context.Context, catalog metadata.Catalog,
 		Table:     tableName,
 		RecordID:  row.RecordID,
 		Timestamp: time.Now().UTC(),
+		Operation: "update",
+		Values:    cloneValues(row.Values),
+		ActorID:   actorID,
+	})
+	if err != nil {
+		return Row{}, err
+	}
+	return row, nil
+}
+
+func (service *Service) DeleteRow(ctx context.Context, catalog metadata.Catalog, perms permission.Set, actorID, dbName, tableName string, recordID int64) (Row, error) {
+	if _, ok := catalog.Table(dbName, tableName); !ok {
+		return Row{}, fmt.Errorf("table %s.%s not found", dbName, tableName)
+	}
+	resource := dbName + "." + tableName
+	if !perms.CanWriteResource(actorID, permission.ScopeTable, resource) {
+		return Row{}, fmt.Errorf("%w: %s", ErrPermissionDenied, resource)
+	}
+
+	row, err := service.rows.DeleteRow(ctx, dbName, tableName, recordID)
+	if err != nil {
+		return Row{}, err
+	}
+	_, err = history.SaveRowChange(ctx, service.history, history.RowChange{
+		Database:  dbName,
+		Table:     tableName,
+		RecordID:  row.RecordID,
+		Timestamp: time.Now().UTC(),
+		Operation: "delete",
 		Values:    cloneValues(row.Values),
 		ActorID:   actorID,
 	})
@@ -204,6 +235,19 @@ func (repository *MemoryRowRepository) UpdateRow(_ context.Context, dbName, tabl
 	}
 	row.Values = nextValues
 	repository.rows[resource][recordID] = row
+	return Row{RecordID: row.RecordID, Values: cloneValues(row.Values)}, nil
+}
+
+func (repository *MemoryRowRepository) DeleteRow(_ context.Context, dbName, tableName string, recordID int64) (Row, error) {
+	repository.mu.Lock()
+	defer repository.mu.Unlock()
+
+	resource := dbName + "." + tableName
+	row, ok := repository.rows[resource][recordID]
+	if !ok {
+		return Row{}, fmt.Errorf("row %s.%d not found", resource, recordID)
+	}
+	delete(repository.rows[resource], recordID)
 	return Row{RecordID: row.RecordID, Values: cloneValues(row.Values)}, nil
 }
 

@@ -106,6 +106,20 @@ select {
   border-top: 1px solid var(--colorNeutralStroke2);
 }
 
+.field-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 32px;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+}
+
+.field-row > div {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
 .workspace {
   display: grid;
   grid-template-rows: 58px minmax(0, 1fr) 32px;
@@ -139,13 +153,13 @@ select {
 
 .table-view {
   display: grid;
-  grid-template-rows: 48px minmax(0, 1fr) minmax(120px, 24vh);
+  grid-template-rows: auto minmax(0, 1fr) minmax(120px, 24vh);
   gap: 12px;
 }
 
 .section-header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
 }
@@ -159,6 +173,8 @@ select {
 .table-actions {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
@@ -177,6 +193,19 @@ select {
   padding: 12px;
   border: 1px solid var(--colorNeutralStroke2);
   background: var(--colorNeutralBackground1);
+}
+
+.modal-stack,
+.modal-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.modal-list {
+  max-height: 220px;
+  overflow: auto;
+  padding: 4px 0;
 }
 
 .row-history-entry {

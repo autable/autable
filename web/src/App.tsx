@@ -20,6 +20,7 @@ import {
   createRole,
   createRow,
   createTable,
+  deleteRow,
   listOIDCProviders,
   listForms,
   listRowHistory,
@@ -39,6 +40,7 @@ import {
   saveRoleGrants,
   saveRoleMembers,
   saveWorkflow,
+  updateTableMetadata,
   updateRow,
   type AuthUser,
   type Catalog,
@@ -51,6 +53,8 @@ import {
   type RoleDefinition,
   type TableMetadata,
   type TableView,
+  type TableViewFilter,
+  type TableViewSort,
   type WorkflowDefinition,
   type WorkflowNodeInfo,
   type WorkflowRunResponse
@@ -91,6 +95,16 @@ export function App() {
   const [authDialogOpen, setAuthDialogOpen] = useState(false);
   const [newDatabaseName, setNewDatabaseName] = useState("");
   const [newTableName, setNewTableName] = useState("");
+  const [newFieldName, setNewFieldName] = useState("");
+  const [newFieldType, setNewFieldType] = useState("text");
+  const [newFieldRequired, setNewFieldRequired] = useState(false);
+  const [newViewName, setNewViewName] = useState("");
+  const [newViewBase, setNewViewBase] = useState("all");
+  const [newViewFilterField, setNewViewFilterField] = useState("");
+  const [newViewFilterOp, setNewViewFilterOp] = useState<TableViewFilter["op"]>("eq");
+  const [newViewFilterValue, setNewViewFilterValue] = useState("");
+  const [newViewSortField, setNewViewSortField] = useState("");
+  const [newViewSortDirection, setNewViewSortDirection] = useState<TableViewSort["direction"]>("asc");
   const [newRoleName, setNewRoleName] = useState("");
   const [roleDraftGrants, setRoleDraftGrants] = useState<PermissionGrant[]>([]);
   const [roleDraftMembers, setRoleDraftMembers] = useState<string[]>([]);
@@ -101,6 +115,7 @@ export function App() {
     catalog.databases.find((item) => item.name === selectedDatabaseName) ?? catalog.databases[0] ?? emptyDatabase;
   const table = database.tables.find((item) => item.name === selectedTable) ?? database.tables[0] ?? emptyTable;
   const activeFields = table.fields.filter((field) => !field.deleted);
+  const activeFieldNames = useMemo(() => activeFields.map((field) => field.name), [table.fields]);
   const selectedWorkflow = workflows.find((item) => item.id === selectedWorkflowID) ?? workflows[0];
   const selectedForm = forms.find((item) => item.id === selectedFormID) ?? forms[0];
   const selectedRole = roles.find((item) => item.name === selectedRoleName) ?? roles[0];
@@ -115,10 +130,19 @@ export function App() {
   const selectedWorkflowRun =
     workflowRuns.find((run) => run.history_key === selectedWorkflowRunKey) ?? workflowRuns[0] ?? null;
   const renderedForm = useMemo(() => renderFormScript(selectedForm?.script ?? ""), [selectedForm?.script]);
+  const selectedRow = useMemo(
+    () => displayedRows.find((row) => Number(row.record_id) === selectedRecordID) ?? null,
+    [displayedRows, selectedRecordID]
+  );
+  const [selectedRowDraft, setSelectedRowDraft] = useState<Record<string, string>>({});
 
   useEffect(() => {
     setFormValues({});
   }, [selectedForm?.id, selectedForm?.script]);
+
+  useEffect(() => {
+    setSelectedRowDraft(rowDraftFromRecord(selectedRow, activeFieldNames));
+  }, [activeFieldNames, selectedRow]);
 
   useEffect(() => {
     setRoleDraftGrants(selectedRole?.grants ?? []);
@@ -430,6 +454,94 @@ export function App() {
     }
   }
 
+  async function persistTableMetadata(nextTable: TableMetadata, successMessage: string, nextViewName = selectedTableView) {
+    if (!database.name || !table.name) {
+      setStatus("Select a table before updating metadata");
+      return;
+    }
+    try {
+      await updateTableMetadata(database.name, table.name, nextTable);
+      const nextCatalog = await loadMetadata();
+      setCatalog(nextCatalog);
+      setSelectedTable(nextTable.name);
+      setSelectedTableView(nextViewName);
+      setRows([]);
+      setRowsViewName(nextViewName);
+      setRowHistory([]);
+      setStatus(successMessage);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Table metadata update failed");
+    }
+  }
+
+  async function addFieldFromSidebar() {
+    const name = newFieldName.trim();
+    if (!name) {
+      setStatus("Field name is required");
+      return;
+    }
+    if (name === "record_id" || table.fields.some((field) => field.name === name && !field.deleted)) {
+      setStatus(`Field ${name} already exists`);
+      return;
+    }
+    const nextTable = {
+      ...table,
+      fields: [...table.fields, { name, type: newFieldType, required: newFieldRequired, deleted: false }]
+    };
+    await persistTableMetadata(nextTable, `Added field ${name}`);
+    setNewFieldName("");
+    setNewFieldType("text");
+    setNewFieldRequired(false);
+  }
+
+  async function deleteFieldFromSidebar(fieldName: string) {
+    const nextTable = {
+      ...table,
+      fields: table.fields.map((field) => (field.name === fieldName ? { ...field, deleted: true } : field))
+    };
+    await persistTableMetadata(nextTable, `Deleted field ${fieldName}`);
+  }
+
+  async function createViewFromSidebar() {
+    const name = newViewName.trim();
+    if (!name) {
+      setStatus("View name is required");
+      return;
+    }
+    if (name === "all" || table.views.some((viewDef) => viewDef.name === name)) {
+      setStatus(`View ${name} already exists`);
+      return;
+    }
+    const filters: TableViewFilter[] = newViewFilterField
+      ? [
+          {
+            field: newViewFilterField,
+            op: newViewFilterOp,
+            value: newViewFilterOp === "not_empty" ? undefined : newViewFilterValue
+          }
+        ]
+      : [];
+    const sorts: TableViewSort[] = newViewSortField
+      ? [{ field: newViewSortField, direction: newViewSortDirection }]
+      : [];
+    const nextView: TableView = {
+      name,
+      display_name: name,
+      base_view: newViewBase === "all" ? undefined : newViewBase,
+      filters,
+      sorts
+    };
+    const nextTable = { ...table, views: [...(table.views ?? []), nextView] };
+    await persistTableMetadata(nextTable, `Created view ${name}`, name);
+    setNewViewName("");
+    setNewViewBase("all");
+    setNewViewFilterField("");
+    setNewViewFilterOp("eq");
+    setNewViewFilterValue("");
+    setNewViewSortField("");
+    setNewViewSortDirection("asc");
+  }
+
   async function createRoleFromSidebar() {
     if (!database.name) {
       setStatus("Select a database before creating a role");
@@ -484,6 +596,48 @@ export function App() {
       setStatus(`Created record ${saved.record_id}`);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Row creation failed");
+    }
+  }
+
+  function updateSelectedRowDraft(fieldName: string, value: string) {
+    setSelectedRowDraft((current) => ({ ...current, [fieldName]: value }));
+  }
+
+  async function updateSelectedRowFromEditor() {
+    if (!selectedRecordID) {
+      setStatus("Select a row before saving changes");
+      return;
+    }
+    try {
+      const saved = await updateRow(database.name, table.name, selectedRecordID, selectedRowDraft);
+      setRows((current) =>
+        current.map((item) =>
+          Number(item.record_id) === saved.record_id ? rowRecordToValues(saved) : item
+        )
+      );
+      setRowsViewName("local");
+      setSelectedRecordID(saved.record_id);
+      setRowHistory([]);
+      setStatus(`Updated record ${saved.record_id}`);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Row update failed");
+    }
+  }
+
+  async function deleteSelectedRow() {
+    if (!selectedRecordID) {
+      setStatus("Select a row before deleting");
+      return;
+    }
+    try {
+      const deleted = await deleteRow(database.name, table.name, selectedRecordID);
+      setRows((current) => current.filter((item) => Number(item.record_id) !== deleted.record_id));
+      setRowsViewName("local");
+      setSelectedRecordID(0);
+      setRowHistory([]);
+      setStatus(`Deleted record ${deleted.record_id}`);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Row deletion failed");
     }
   }
 
@@ -763,13 +917,42 @@ export function App() {
               displayedRecordIDs={displayedRecordIDs}
               displayedRows={displayedRows}
               getCellContent={getCellContent}
+              newFieldName={newFieldName}
+              newFieldRequired={newFieldRequired}
+              newFieldType={newFieldType}
+              newViewBase={newViewBase}
+              newViewFilterField={newViewFilterField}
+              newViewFilterOp={newViewFilterOp}
+              newViewFilterValue={newViewFilterValue}
+              newViewName={newViewName}
+              newViewSortDirection={newViewSortDirection}
+              newViewSortField={newViewSortField}
               onAddRow={addDraftRow}
+              onAddField={addFieldFromSidebar}
               onCellEdited={editCell}
+              onCreateView={createViewFromSidebar}
+              onDeleteField={deleteFieldFromSidebar}
+              onDeleteSelectedRow={deleteSelectedRow}
               onLoadHistory={loadSelectedRowHistory}
+              onNewFieldNameChange={setNewFieldName}
+              onNewFieldRequiredChange={setNewFieldRequired}
+              onNewFieldTypeChange={setNewFieldType}
+              onNewViewBaseChange={setNewViewBase}
+              onNewViewFilterFieldChange={setNewViewFilterField}
+              onNewViewFilterOpChange={setNewViewFilterOp}
+              onNewViewFilterValueChange={setNewViewFilterValue}
+              onNewViewNameChange={setNewViewName}
+              onNewViewSortDirectionChange={setNewViewSortDirection}
+              onNewViewSortFieldChange={setNewViewSortField}
               onSelectRecordID={setSelectedRecordID}
+              onSelectTableView={setSelectedTableView}
+              onSelectedRowValueChange={updateSelectedRowDraft}
+              onUpdateSelectedRow={updateSelectedRowFromEditor}
               rowHistory={rowHistory}
               rows={rows}
               selectedRecordID={selectedRecordID}
+              selectedRowDraft={selectedRowDraft}
+              selectedTableView={selectedTableView}
               table={table}
             />
           )}
@@ -864,6 +1047,10 @@ function compactMembers(members: string[]): string[] {
 
 function rowRecordToValues(row: RowRecord): Record<string, unknown> {
   return { record_id: row.record_id, ...row.values };
+}
+
+function rowDraftFromRecord(row: Record<string, unknown> | null, fieldNames: string[]): Record<string, string> {
+  return Object.fromEntries(fieldNames.map((fieldName) => [fieldName, row?.[fieldName] === undefined ? "" : String(row[fieldName])]));
 }
 
 function stringMapToJSON(values: Record<string, string>): string {

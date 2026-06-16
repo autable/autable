@@ -130,3 +130,45 @@ func TestRepositoryUpdateRowMergesValuesAcrossReopen(t *testing.T) {
 		t.Fatalf("unexpected persisted update: %#v", loaded)
 	}
 }
+
+func TestRepositoryDeleteRowRemovesPersistedRecord(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "workspace.sqlite")
+	catalog := metadata.Catalog{Databases: []metadata.Database{{Name: "workspace", SQLitePath: path}}}
+
+	repository, err := OpenCatalog(ctx, catalog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	row, err := repository.CreateRow(ctx, "workspace", "contacts", map[string]any{"name": "Ada"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	deleted, err := repository.DeleteRow(ctx, "workspace", "contacts", row.RecordID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if deleted.Values["name"] != "Ada" {
+		t.Fatalf("unexpected deleted row: %#v", deleted)
+	}
+	if err := repository.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	reopened, err := OpenCatalog(ctx, catalog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := reopened.Close(); err != nil {
+			t.Fatal(err)
+		}
+	})
+	rows, err := reopened.Rows(ctx, "workspace", "contacts")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 0 {
+		t.Fatalf("expected deleted row to stay deleted after reopen, got %#v", rows)
+	}
+}

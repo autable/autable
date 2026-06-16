@@ -168,6 +168,39 @@ func (catalog Catalog) AddTable(dbName string, table Table) (Catalog, error) {
 	return Catalog{}, fmt.Errorf("database %q not found", dbName)
 }
 
+func (catalog Catalog) UpdateTable(dbName, tableName string, table Table) (Catalog, error) {
+	if tableName == "" {
+		return Catalog{}, errors.New("table name is required")
+	}
+	if table.Name == "" {
+		table.Name = tableName
+	}
+	if table.Name != tableName {
+		return Catalog{}, errors.New("table name cannot be changed")
+	}
+	next := Catalog{Databases: slices.Clone(catalog.Databases)}
+	for dbIndex, db := range next.Databases {
+		if db.Name != dbName {
+			continue
+		}
+		tables := slices.Clone(db.Tables)
+		for tableIndex, existing := range tables {
+			if existing.Name != tableName {
+				continue
+			}
+			tables[tableIndex] = table
+			db.Tables = tables
+			next.Databases[dbIndex] = db
+			if err := next.Validate(); err != nil {
+				return Catalog{}, err
+			}
+			return next, nil
+		}
+		return Catalog{}, fmt.Errorf("database %q table %q not found", dbName, tableName)
+	}
+	return Catalog{}, fmt.Errorf("database %q not found", dbName)
+}
+
 func (table Table) validate(dbName string, tableIndex int) error {
 	if table.Name == "" {
 		return fmt.Errorf("database %q tables[%d].name is required", dbName, tableIndex)

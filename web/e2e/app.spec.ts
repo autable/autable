@@ -80,7 +80,7 @@ async function setupWorkspace(page: Page): Promise<WorkspaceSetup> {
         name: "active",
         display_name: "Active",
         filters: [{ field: "status", op: "eq", value: "Active" }],
-        sorts: [{ field: "name", direction: "asc" }]
+        sorts: []
       }
     ]
   });
@@ -150,12 +150,63 @@ test("covers table views, row creation, and row history through the real backend
   const workspace = await setupWorkspace(page);
 
   await expect(page.getByText(/\d+ of \d+ records/).first()).toBeVisible();
-  await page.getByRole("button", { name: "Active", exact: true }).click();
-  await expect(page.getByText(/\d+ of \d+ records/).first()).toBeVisible();
-  await page.getByRole("button", { name: "History" }).click();
-  await expect(page.getByText(new RegExp(`rhistory_${workspace.databaseName}_contacts_`))).toBeVisible();
+  await page.getByRole("button", { name: "Fields" }).click();
+  let dialog = page.getByRole("dialog");
+  await dialog.getByLabel("New field name").fill("priority");
+  await dialog.getByLabel("New field type").selectOption("text");
+  await dialog.getByRole("button", { name: "Add Field" }).click();
+  await expect(page.getByText("Added field priority")).toBeVisible();
+  await dialog.getByRole("button", { name: "Delete field email" }).click();
+  await expect(page.getByText("Deleted field email")).toBeVisible();
+  await dialog.getByRole("button", { name: "Close" }).click();
+
   await page.getByRole("button", { name: "Row", exact: true }).click();
   await expect(page.getByText(/Created record \d+/)).toBeVisible();
+  await page.getByRole("button", { name: "Edit Row" }).click();
+  dialog = page.getByRole("dialog");
+  await dialog.getByLabel("name value").fill("Grace Hopper");
+  await dialog.getByLabel("status value").fill("Active");
+  await dialog.getByRole("button", { name: "Save Row" }).click();
+  await expect(page.getByText(/Updated record \d+/)).toBeVisible();
+  await dialog.getByRole("button", { name: "Close" }).click();
+
+  await page.getByRole("button", { name: "View", exact: true }).click();
+  dialog = page.getByRole("dialog");
+  await dialog.getByLabel("New view name").fill("active-desc");
+  await dialog.getByLabel("Base view").selectOption("active");
+  await dialog.getByLabel("View sort field").selectOption("name");
+  await dialog.getByLabel("View sort direction").selectOption("desc");
+  await dialog.getByRole("button", { name: "Create View" }).click();
+  await expect(page.getByText("Created view active-desc")).toBeVisible();
+  await dialog.getByRole("button", { name: "Close" }).click();
+
+  const viewRows = (await api(
+    page,
+    "GET",
+    `/api/tables/${workspace.databaseName}/${workspace.tableName}/rows?view=active-desc`
+  )) as Array<{ values: { name?: string } }>;
+  expect(viewRows.map((row) => row.values.name)).toEqual(["Grace Hopper", "Ada Lovelace"]);
+
+  await page.getByLabel("Table view").selectOption("active");
+  await expect(page.getByText(/\d+ of \d+ records/).first()).toBeVisible();
+  await page.getByRole("button", { name: "History" }).click();
+  await expect(page.getByText(new RegExp(`rhistory_${workspace.databaseName}_contacts_`)).first()).toBeVisible();
+  await page.getByRole("button", { name: "Delete Row" }).click();
+  await expect(page.getByText(/Deleted record \d+/)).toBeVisible();
+
+  const metadata = (await api(page, "GET", "/api/metadata")) as {
+    databases: Array<{ name: string; tables: Array<{ name: string; fields: Array<{ name: string; deleted: boolean }>; views: Array<{ name: string; base_view?: string }> }> }>;
+  };
+  const table = metadata.databases
+    .find((database) => database.name === workspace.databaseName)
+    ?.tables.find((item) => item.name === workspace.tableName);
+  expect(table?.fields).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ name: "priority", deleted: false }),
+      expect.objectContaining({ name: "email", deleted: true })
+    ])
+  );
+  expect(table?.views).toEqual(expect.arrayContaining([expect.objectContaining({ name: "active-desc", base_view: "active" })]));
 });
 
 test("covers workflow editor, node list, and run history through the real backend", async ({ page }) => {

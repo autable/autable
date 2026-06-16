@@ -120,3 +120,57 @@ func TestAddDatabaseAddTableAndSave(t *testing.T) {
 		t.Fatalf("unexpected loaded catalog: %#v", loaded)
 	}
 }
+
+func TestUpdateTableCanSoftDeleteFieldAndAddBasedView(t *testing.T) {
+	catalog := Catalog{Databases: []Database{{
+		Name:       "workspace",
+		SQLitePath: "./data/workspace.sqlite",
+		Tables: []Table{{
+			Name: "contacts",
+			Fields: []Field{
+				{Name: "name", Type: "text"},
+				{Name: "status", Type: "text"},
+				{Name: "legacy", Type: "text"},
+			},
+			Views: []View{{
+				Name:    "active",
+				Filters: []ViewFilter{{Field: "status", Op: "eq", Value: "active"}},
+			}},
+		}},
+	}}}
+
+	updated, err := catalog.UpdateTable("workspace", "contacts", Table{
+		Name: "contacts",
+		Fields: []Field{
+			{Name: "name", Type: "text"},
+			{Name: "status", Type: "text"},
+			{Name: "legacy", Type: "text", Deleted: true},
+			{Name: "email", Type: "email"},
+		},
+		Views: []View{
+			{Name: "active", Filters: []ViewFilter{{Field: "status", Op: "eq", Value: "active"}}},
+			{Name: "active-by-name", BaseView: "active", Sorts: []ViewSort{{Field: "name", Direction: "asc"}}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	table, ok := updated.Table("workspace", "contacts")
+	if !ok {
+		t.Fatal("expected updated table")
+	}
+	if _, ok := table.Field("email"); !ok {
+		t.Fatalf("expected added email field, got %#v", table.Fields)
+	}
+	activeFields := table.ActiveFields()
+	if len(activeFields) != 3 {
+		t.Fatalf("expected legacy to be soft-deleted, got %#v", activeFields)
+	}
+	resolved, err := table.ResolveView("active-by-name")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resolved.Filters) != 1 || len(resolved.Sorts) != 1 {
+		t.Fatalf("expected based view composition, got %#v", resolved)
+	}
+}

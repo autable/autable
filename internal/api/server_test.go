@@ -377,6 +377,66 @@ func TestUpdateRowAPIEnforcesPermissionsAndWritesHistory(t *testing.T) {
 	}
 }
 
+func TestDeleteRowAPIEnforcesPermissionsAndWritesHistory(t *testing.T) {
+	ctx := context.Background()
+	server, system := newTestServer(t)
+	if err := system.SaveGrant(ctx, permission.Grant{
+		SubjectID: "u1",
+		Scope:     permission.ScopeTable,
+		Resource:  "db.contacts",
+		Level:     permission.Write,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	createRequest := httptest.NewRequest(http.MethodPost, "/api/tables/db/contacts/rows", bytes.NewBufferString(`{
+		"values":{"name":"Ada","email":"ada@example.com"}
+	}`))
+	createRequest.AddCookie(testSessionCookie(t, system, "u1"))
+	createRecorder := httptest.NewRecorder()
+	server.ServeHTTP(createRecorder, createRequest)
+	if createRecorder.Code != http.StatusCreated {
+		t.Fatalf("expected create 201, got %d: %s", createRecorder.Code, createRecorder.Body.String())
+	}
+
+	deleteRequest := httptest.NewRequest(http.MethodDelete, "/api/tables/db/contacts/rows/1", nil)
+	deleteRequest.AddCookie(testSessionCookie(t, system, "u1"))
+	deleteRecorder := httptest.NewRecorder()
+	server.ServeHTTP(deleteRecorder, deleteRequest)
+	if deleteRecorder.Code != http.StatusOK {
+		t.Fatalf("expected delete 200, got %d: %s", deleteRecorder.Code, deleteRecorder.Body.String())
+	}
+
+	rowsRequest := httptest.NewRequest(http.MethodGet, "/api/tables/db/contacts/rows", nil)
+	rowsRequest.AddCookie(testSessionCookie(t, system, "u1"))
+	rowsRecorder := httptest.NewRecorder()
+	server.ServeHTTP(rowsRecorder, rowsRequest)
+	if rowsRecorder.Code != http.StatusOK {
+		t.Fatalf("expected row list 200, got %d: %s", rowsRecorder.Code, rowsRecorder.Body.String())
+	}
+	var rows []rowResponse
+	if err := json.NewDecoder(rowsRecorder.Body).Decode(&rows); err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 0 {
+		t.Fatalf("expected deleted row to disappear, got %#v", rows)
+	}
+
+	historyRequest := httptest.NewRequest(http.MethodGet, "/api/tables/db/contacts/rows/1/history", nil)
+	historyRequest.AddCookie(testSessionCookie(t, system, "u1"))
+	historyRecorder := httptest.NewRecorder()
+	server.ServeHTTP(historyRecorder, historyRequest)
+	if historyRecorder.Code != http.StatusOK {
+		t.Fatalf("expected history 200, got %d: %s", historyRecorder.Code, historyRecorder.Body.String())
+	}
+	var changes []history.RowChange
+	if err := json.NewDecoder(historyRecorder.Body).Decode(&changes); err != nil {
+		t.Fatal(err)
+	}
+	if len(changes) != 2 || changes[1].Operation != "delete" || changes[1].Values["name"] != "Ada" {
+		t.Fatalf("unexpected delete history: %#v", changes)
+	}
+}
+
 func TestRowHistoryAPIRequiresAuthAndFiltersReadableFields(t *testing.T) {
 	ctx := context.Background()
 	server, system := newTestServer(t)
@@ -639,6 +699,76 @@ func TestDatabaseOwnerCanCreateTable(t *testing.T) {
 	}
 	if !perms.CanWriteField("owner", "workspace.contacts", "name") {
 		t.Fatal("expected table creator to receive table write permission")
+	}
+}
+
+func TestTableOwnerCanUpdateFieldsAndViews(t *testing.T) {
+	ctx := context.Background()
+	catalog := metadata.Catalog{Databases: []metadata.Database{{
+		Name:       "workspace",
+		SQLitePath: "./data/workspace.sqlite",
+		Tables: []metadata.Table{{
+			Name: "contacts",
+			Fields: []metadata.Field{
+				{Name: "name", Type: "text"},
+				{Name: "status", Type: "text"},
+			},
+			Views: []metadata.View{{
+				Name:    "active",
+				Filters: []metadata.ViewFilter{{Field: "status", Op: "eq", Value: "active"}},
+			}},
+		}},
+	}}}
+	server, system, metadataPath := newTestServerWithMetadataFile(t, catalog)
+	if err := system.SaveGrant(ctx, permission.Grant{
+		SubjectID: "owner",
+		Scope:     permission.ScopeTable,
+		Resource:  "workspace.contacts",
+		Level:     permission.Write,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	request := httptest.NewRequest(http.MethodPut, "/api/databases/workspace/tables/contacts", bytes.NewBufferString(`{
+		"name":"contacts",
+		"fields":[
+			{"name":"name","type":"text"},
+			{"name":"status","type":"text","deleted":true},
+			{"name":"email","type":"email"}
+		],
+		"views":[
+			{"name":"active","filters":[{"field":"status","op":"eq","value":"active"}]},
+			{"name":"active-by-name","base_view":"active","sorts":[{"field":"name","direction":"asc"}]}
+		]
+	}`))
+	request.AddCookie(testSessionCookie(t, system, "owner"))
+	recorder := httptest.NewRecorder()
+	server.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected table metadata update 200, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+
+	loaded, err := metadata.Load(metadataPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tableMeta, ok := loaded.Table("workspace", "contacts")
+	if !ok {
+		t.Fatal("expected contacts table")
+	}
+	if _, ok := tableMeta.Field("email"); !ok {
+		t.Fatalf("expected added email field, got %#v", tableMeta.Fields)
+	}
+	statusField, _ := tableMeta.Field("status")
+	if !statusField.Deleted {
+		t.Fatalf("expected status to be soft-deleted, got %#v", tableMeta.Fields)
+	}
+	resolved, err := tableMeta.ResolveView("active-by-name")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resolved.Filters) != 1 || len(resolved.Sorts) != 1 {
+		t.Fatalf("expected composed based view, got %#v", resolved)
 	}
 }
 

@@ -202,6 +202,68 @@ func TestUpdateRowRejectsRecordIDAndReadOnlyField(t *testing.T) {
 	}
 }
 
+func TestDeleteRowRequiresTableWriteRemovesRowAndWritesHistory(t *testing.T) {
+	ctx := context.Background()
+	store := history.NewMemoryStore()
+	service := NewService(store)
+	catalog := metadata.Catalog{Databases: []metadata.Database{{
+		Name:       "db",
+		SQLitePath: "./db.sqlite",
+		Tables: []metadata.Table{{
+			Name:   "contacts",
+			Fields: []metadata.Field{{Name: "name", Type: "text"}},
+		}},
+	}}}
+	writePerms := permission.New(permission.Grant{
+		SubjectID: "u1",
+		Scope:     permission.ScopeTable,
+		Resource:  "db.contacts",
+		Level:     permission.Write,
+	})
+	readPerms := permission.New(permission.Grant{
+		SubjectID: "u1",
+		Scope:     permission.ScopeTable,
+		Resource:  "db.contacts",
+		Level:     permission.Read,
+	})
+
+	row, err := service.CreateRow(ctx, catalog, writePerms, "u1", "db", "contacts", map[string]any{"name": "Ada"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.DeleteRow(ctx, catalog, readPerms, "u1", "db", "contacts", row.RecordID); !errors.Is(err, ErrPermissionDenied) {
+		t.Fatalf("expected read-only delete permission error, got %v", err)
+	}
+	deleted, err := service.DeleteRow(ctx, catalog, writePerms, "u1", "db", "contacts", row.RecordID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if deleted.Values["name"] != "Ada" {
+		t.Fatalf("expected deleted row values, got %#v", deleted)
+	}
+	rows, err := service.Rows(ctx, catalog, writePerms, "u1", "db", "contacts", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 0 {
+		t.Fatalf("expected row to be deleted, got %#v", rows)
+	}
+	entries, err := store.GetPrefix(ctx, history.RowPrefix("db", "contacts", row.RecordID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("expected create and delete history entries, got %d", len(entries))
+	}
+	change, err := history.DecodeRowChange(entries[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if change.Operation != "delete" || change.Values["name"] != "Ada" {
+		t.Fatalf("unexpected delete history: %#v", change)
+	}
+}
+
 func TestCreateRowUsesInjectedRepository(t *testing.T) {
 	ctx := context.Background()
 	store := history.NewMemoryStore()

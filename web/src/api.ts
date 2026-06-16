@@ -47,6 +47,7 @@ export type RowChange = {
   table: string;
   record_id: number;
   timestamp: string;
+  operation?: string;
   values: Record<string, unknown>;
   actor_id?: string;
 };
@@ -175,6 +176,23 @@ export async function createTable(dbName: string, table: TableMetadata): Promise
   return response.json() as Promise<TableMetadata>;
 }
 
+export async function updateTableMetadata(
+  dbName: string,
+  tableName: string,
+  table: TableMetadata
+): Promise<TableMetadata> {
+  const response = await fetch(`/api/databases/${dbName}/tables/${tableName}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(table)
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: response.statusText }));
+    throw new Error(error.error ?? "table metadata update failed");
+  }
+  return response.json() as Promise<TableMetadata>;
+}
+
 export async function createRow(
   dbName: string,
   tableName: string,
@@ -206,6 +224,17 @@ export async function updateRow(
   if (!response.ok) {
     const error = await response.json().catch(() => ({ error: response.statusText }));
     throw new Error(error.error ?? "row update failed");
+  }
+  return response.json() as Promise<RowRecord>;
+}
+
+export async function deleteRow(dbName: string, tableName: string, recordID: number): Promise<RowRecord> {
+  const response = await fetch(`/api/tables/${dbName}/${tableName}/rows/${recordID}`, {
+    method: "DELETE"
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: response.statusText }));
+    throw new Error(error.error ?? "row deletion failed");
   }
   return response.json() as Promise<RowRecord>;
 }

@@ -177,6 +177,7 @@ func (server *Server) routes() {
 	server.mux.HandleFunc("POST /api/permissions/grants", server.handleSaveGrant)
 	server.mux.HandleFunc("POST /api/tables/", server.handleCreateRow)
 	server.mux.HandleFunc("PATCH /api/tables/", server.handleUpdateRow)
+	server.mux.HandleFunc("DELETE /api/tables/", server.handleDeleteRow)
 	server.mux.HandleFunc("GET /api/tables/", server.handleGetTable)
 	server.mux.HandleFunc("POST /api/databases", server.handleCreateDatabase)
 	server.mux.HandleFunc("GET /api/databases/", server.handleGetDatabaseResource)
@@ -539,6 +540,38 @@ func (server *Server) handleUpdateRow(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, rowResponse{RecordID: row.RecordID, Values: row.Values})
 }
 
+func (server *Server) handleDeleteRow(w http.ResponseWriter, r *http.Request) {
+	dbName, tableName, recordID, ok := parseTableRowPath(r.URL.Path)
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	actorID, ok, err := server.currentUserID(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
+	if !ok {
+		writeError(w, http.StatusUnauthorized, errors.New("authentication is required"))
+		return
+	}
+	perms, err := server.system.EffectiveGrantsForSubject(r.Context(), actorID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	row, err := server.tables.DeleteRow(r.Context(), server.catalogSnapshot(), perms, actorID, dbName, tableName, recordID)
+	if err != nil {
+		status := http.StatusBadRequest
+		if errors.Is(err, table.ErrPermissionDenied) {
+			status = http.StatusForbidden
+		}
+		writeError(w, status, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, rowResponse{RecordID: row.RecordID, Values: row.Values})
+}
+
 func (server *Server) handleGetTable(w http.ResponseWriter, r *http.Request) {
 	if dbName, tableName, ok := parseTableRowsPath(r.URL.Path); ok {
 		server.handleListRows(w, r, dbName, tableName)
@@ -830,6 +863,10 @@ func (server *Server) handlePostDatabaseResource(w http.ResponseWriter, r *http.
 }
 
 func (server *Server) handlePutDatabaseResource(w http.ResponseWriter, r *http.Request) {
+	if dbName, tableName, ok := parseDatabaseTablePath(r.URL.Path); ok {
+		server.handleUpdateTableMetadata(w, r, dbName, tableName)
+		return
+	}
 	dbName, roleName, action, ok := parseRoleActionPath(r.URL.Path)
 	if !ok {
 		http.NotFound(w, r)
@@ -868,6 +905,29 @@ func (server *Server) handlePutDatabaseResource(w http.ResponseWriter, r *http.R
 		return
 	}
 	writeJSON(w, http.StatusOK, role)
+}
+
+func (server *Server) handleUpdateTableMetadata(w http.ResponseWriter, r *http.Request, dbName, tableName string) {
+	actorID, ok := server.requireUserID(w, r)
+	if !ok {
+		return
+	}
+	if !server.requireDatabaseOrSpecificTableWrite(w, r, actorID, dbName, tableName) {
+		return
+	}
+	var tableMeta metadata.Table
+	if err := readJSON(r, &tableMeta); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if tableMeta.Name == "" {
+		tableMeta.Name = tableName
+	}
+	if err := server.updateTable(dbName, tableName, tableMeta); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, tableMeta)
 }
 
 func (server *Server) handleGetWorkflow(w http.ResponseWriter, r *http.Request) {
@@ -1084,6 +1144,17 @@ func parseDatabaseResourcePath(path string) (string, string, bool) {
 	return parts[2], parts[3], true
 }
 
+func parseDatabaseTablePath(path string) (string, string, bool) {
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(parts) != 5 || parts[0] != "api" || parts[1] != "databases" || parts[3] != "tables" {
+		return "", "", false
+	}
+	if parts[2] == "" || parts[4] == "" {
+		return "", "", false
+	}
+	return parts[2], parts[4], true
+}
+
 func parseRoleActionPath(path string) (string, string, string, bool) {
 	parts := strings.Split(strings.Trim(path, "/"), "/")
 	if len(parts) != 6 || parts[0] != "api" || parts[1] != "databases" || parts[3] != "roles" {
@@ -1242,6 +1313,23 @@ func (server *Server) addTable(dbName string, tableMeta metadata.Table) error {
 	return nil
 }
 
+func (server *Server) updateTable(dbName, tableName string, tableMeta metadata.Table) error {
+	if server.metadataPath == "" {
+		return errors.New("metadata writes are not configured")
+	}
+	server.catalogMu.Lock()
+	defer server.catalogMu.Unlock()
+	next, err := server.catalog.UpdateTable(dbName, tableName, tableMeta)
+	if err != nil {
+		return err
+	}
+	if err := metadata.Save(server.metadataPath, next); err != nil {
+		return err
+	}
+	server.catalog = next
+	return nil
+}
+
 func (server *Server) requireUserID(w http.ResponseWriter, r *http.Request) (string, bool) {
 	actorID, ok, err := server.currentUserID(r)
 	if err != nil {
@@ -1332,6 +1420,30 @@ func (server *Server) requireDatabaseOrTableWrite(w http.ResponseWriter, r *http
 		if perms.ResourceLevel(actorID, permission.ScopeTable, dbName+"."+tableMeta.Name) >= permission.Write {
 			return true
 		}
+	}
+	writeError(w, http.StatusForbidden, table.ErrPermissionDenied)
+	return false
+}
+
+func (server *Server) requireDatabaseOrSpecificTableWrite(w http.ResponseWriter, r *http.Request, actorID string, dbName string, tableName string) bool {
+	if dbName == "" || tableName == "" {
+		writeError(w, http.StatusBadRequest, errors.New("database and table are required"))
+		return false
+	}
+	if _, ok := server.catalogSnapshot().Table(dbName, tableName); !ok {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("table %s.%s not found", dbName, tableName))
+		return false
+	}
+	perms, err := server.system.EffectiveGrantsForSubject(r.Context(), actorID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return false
+	}
+	if perms.ResourceLevel(actorID, permission.ScopeDatabase, dbName) >= permission.Write {
+		return true
+	}
+	if perms.ResourceLevel(actorID, permission.ScopeTable, dbName+"."+tableName) >= permission.Write {
+		return true
 	}
 	writeError(w, http.StatusForbidden, table.ErrPermissionDenied)
 	return false
