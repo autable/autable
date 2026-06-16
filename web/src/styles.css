@@ -58,6 +58,13 @@ select {
   gap: 8px;
 }
 
+.auth-options,
+.oidc-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
 .metadata-block {
   display: flex;
   flex-direction: column;

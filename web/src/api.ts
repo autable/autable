@@ -110,6 +110,12 @@ export type AuthUser = {
   provider: string;
 };
 
+export type OIDCProvider = {
+  name: string;
+  issuer_url: string;
+  scopes: string[];
+};
+
 function userHeaders(userID?: string): Record<string, string> {
   return userID ? { "X-Codetable-User": userID } : {};
 }
@@ -195,6 +201,29 @@ export async function login(email: string, password: string): Promise<AuthUser> 
     throw new Error(error.error ?? "login failed");
   }
   return response.json() as Promise<AuthUser>;
+}
+
+export async function loadCurrentUser(): Promise<AuthUser | null> {
+  const response = await fetch("/api/auth/me");
+  if (response.status === 401) {
+    return null;
+  }
+  if (!response.ok) {
+    throw new Error(`current user request failed: ${response.status}`);
+  }
+  return response.json() as Promise<AuthUser>;
+}
+
+export async function listOIDCProviders(): Promise<OIDCProvider[]> {
+  const response = await fetch("/api/auth/oidc/providers");
+  if (!response.ok) {
+    throw new Error(`oidc providers failed: ${response.status}`);
+  }
+  return response.json() as Promise<OIDCProvider[]>;
+}
+
+export function oidcStartURL(providerName: string): string {
+  return `/api/auth/oidc/${encodeURIComponent(providerName)}/start`;
 }
 
 export async function logout(): Promise<void> {

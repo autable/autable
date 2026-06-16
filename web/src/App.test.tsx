@@ -1,8 +1,22 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { FluentProvider, webLightTheme } from "@fluentui/react-components";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
+
+beforeEach(() => {
+  vi.restoreAllMocks();
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    const url = String(input);
+    if (url === "/api/auth/me") {
+      return new Response(JSON.stringify({ error: "not authenticated" }), { status: 401 });
+    }
+    if (url === "/api/auth/oidc/providers") {
+      return new Response(JSON.stringify([]), { status: 200 });
+    }
+    return new Response(JSON.stringify({ error: `unhandled ${url}` }), { status: 404 });
+  });
+});
 
 function renderApp() {
   return render(
@@ -19,6 +33,25 @@ describe("App", () => {
     expect(screen.getByRole("button", { name: "Register" })).toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: "Table" })).toHaveValue("contacts");
     expect(screen.getByText("3 of 3 records")).toBeInTheDocument();
+  });
+
+  it("shows configured OIDC providers as login actions", async () => {
+    vi.mocked(fetch).mockImplementation(async (input) => {
+      const url = String(input);
+      if (url === "/api/auth/me") {
+        return new Response(JSON.stringify({ error: "not authenticated" }), { status: 401 });
+      }
+      if (url === "/api/auth/oidc/providers") {
+        return new Response(
+          JSON.stringify([{ name: "example", issuer_url: "https://accounts.example.com", scopes: ["openid"] }]),
+          { status: 200 }
+        );
+      }
+      return new Response(JSON.stringify({ error: `unhandled ${url}` }), { status: 404 });
+    });
+
+    renderApp();
+    expect(await screen.findByRole("button", { name: "Continue with example" })).toBeInTheDocument();
   });
 
   it("shows workflow JavaScript as the workflow view", async () => {

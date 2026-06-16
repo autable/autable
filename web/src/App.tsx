@@ -30,12 +30,15 @@ import { demoCatalog, initialForms, initialRows, initialWorkflowNodes, initialWo
 import { renderFormScript } from "./formRuntime";
 import {
   createRow,
+  listOIDCProviders,
   listForms,
   listWorkflows,
+  loadCurrentUser,
   loadMetadata,
   loadWorkflowNodes,
   login,
   logout,
+  oidcStartURL,
   register,
   runWorkflow,
   saveForm,
@@ -44,6 +47,7 @@ import {
   type AuthUser,
   type Catalog,
   type FormDefinition,
+  type OIDCProvider,
   type TableView,
   type WorkflowDefinition,
   type WorkflowNodeInfo,
@@ -66,6 +70,7 @@ export function App() {
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
+  const [oidcProviders, setOIDCProviders] = useState<OIDCProvider[]>([]);
   const [lastWorkflowRun, setLastWorkflowRun] = useState<WorkflowRunResponse | null>(null);
   const [formValues, setFormValues] = useState<Record<string, string>>({});
   const [workflowSecretsText, setWorkflowSecretsText] = useState("{}");
@@ -88,6 +93,29 @@ export function App() {
   useEffect(() => {
     setFormValues({});
   }, [selectedForm?.id, selectedForm?.script]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void loadCurrentUser()
+      .then((user) => {
+        if (cancelled || !user) {
+          return;
+        }
+        setCurrentUser(user);
+        setStatus(`Signed in as ${user.email}`);
+      })
+      .catch(() => undefined);
+    void listOIDCProviders()
+      .then((providers) => {
+        if (!cancelled) {
+          setOIDCProviders(providers);
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     setWorkflowSecretsText(stringMapToJSON(selectedWorkflow?.secrets ?? {}));
@@ -297,6 +325,10 @@ export function App() {
     }
   }
 
+  function loginWithOIDC(providerName: string) {
+    window.location.assign(oidcStartURL(providerName));
+  }
+
   function updateSelectedWorkflowScript(script: string) {
     setWorkflows((current) =>
       current.map((item) => (item.id === selectedWorkflow?.id ? { ...item, script } : item))
@@ -355,11 +387,22 @@ export function App() {
           {currentUser ? (
             <Button onClick={logoutUser}>{currentUser.email}</Button>
           ) : (
-            <div className="auth-actions">
-              <Button onClick={loginUser}>Login</Button>
-              <Button appearance="primary" onClick={registerUser}>
-                Register
-              </Button>
+            <div className="auth-options">
+              <div className="auth-actions">
+                <Button onClick={loginUser}>Login</Button>
+                <Button appearance="primary" onClick={registerUser}>
+                  Register
+                </Button>
+              </div>
+              {oidcProviders.length > 0 && (
+                <div className="oidc-actions">
+                  {oidcProviders.map((provider) => (
+                    <Button key={provider.name} onClick={() => loginWithOIDC(provider.name)}>
+                      Continue with {provider.name}
+                    </Button>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>
