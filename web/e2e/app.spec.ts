@@ -255,6 +255,78 @@ test("hides workflow and form resources without resource permission", async ({ p
   await expect(page.getByRole("button", { name: formName })).toHaveCount(0);
 });
 
+test("renders read-only workflow and form resources as non-editable", async ({ page }) => {
+  const readOnlyUser = await registerUser(page);
+  await api(page, "POST", "/api/auth/logout");
+  await registerUser(page);
+  const suffix = `${Date.now()}-${sequence}`;
+  const databaseName = `readonly${suffix}`;
+  const workflowName = `read-workflow-${suffix}`;
+  const formName = `read-form-${suffix}`;
+
+  await api(page, "POST", "/api/databases", {
+    name: databaseName,
+    sqlite_path: `./data/${databaseName}.sqlite`
+  });
+  await api(page, "POST", `/api/databases/${databaseName}/tables`, {
+    name: "contacts",
+    display_name: "Contacts",
+    fields: [{ name: "name", type: "text", required: false, deleted: false }],
+    views: []
+  });
+  const workflow = (await api(page, "POST", `/api/databases/${databaseName}/workflows`, {
+    name: workflowName,
+    script: "function run() { return {}; }",
+    secrets: {},
+    variables: {}
+  })) as { id: number };
+  const form = (await api(page, "POST", `/api/databases/${databaseName}/forms`, {
+    name: formName,
+    script: "root.append(api.input({ name: 'name', label: 'Name' }), api.submit('Submit record'));"
+  })) as { id: number };
+  await api(page, "POST", "/api/permissions/grants", {
+    subject_id: readOnlyUser.id,
+    scope: "table",
+    resource: `${databaseName}.contacts`,
+    field: "",
+    level: 1
+  });
+  await api(page, "POST", "/api/permissions/grants", {
+    subject_id: readOnlyUser.id,
+    scope: "workflow",
+    resource: String(workflow.id),
+    field: "",
+    level: 1
+  });
+  await api(page, "POST", "/api/permissions/grants", {
+    subject_id: readOnlyUser.id,
+    scope: "form",
+    resource: String(form.id),
+    field: "",
+    level: 1
+  });
+
+  await api(page, "POST", "/api/auth/logout");
+  await loginUser(page, readOnlyUser.email);
+  await page.goto("/");
+  await expect(page.getByRole("button", { name: databaseName })).toBeVisible();
+
+  await page.getByRole("button", { name: "Workflow", exact: true }).click();
+  await expect(page.getByRole("button", { name: workflowName })).toBeVisible();
+  await expect(page.getByLabel("Workflow JavaScript")).toBeDisabled();
+  await expect(page.getByLabel("Workflow Variables JSON")).toBeDisabled();
+  await expect(page.getByLabel("Workflow Secrets JSON")).toBeDisabled();
+  await expect(page.getByLabel("Workflow Inputs JSON")).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Save" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Run" })).toBeDisabled();
+
+  await page.getByRole("button", { name: "Form", exact: true }).click();
+  await expect(page.getByRole("button", { name: formName })).toBeVisible();
+  await expect(page.getByLabel("Form JavaScript")).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Save" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Submit record" })).toBeEnabled();
+});
+
 test("covers database and table creation through the real backend", async ({ page }) => {
   const workspace = await setupWorkspace(page);
 

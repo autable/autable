@@ -59,6 +59,7 @@ export type WorkflowDefinition = {
   script: string;
   secrets: Record<string, string>;
   variables: Record<string, string>;
+  permission_level?: 0 | 1 | 2;
 };
 
 export type WorkflowPort = {
@@ -104,6 +105,7 @@ export type FormDefinition = {
   database_name: string;
   name: string;
   script: string;
+  permission_level?: 0 | 1 | 2;
 };
 
 export type PermissionGrant = {

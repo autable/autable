@@ -35,6 +35,8 @@ export function WorkflowWorkspace({
   workflowNodes,
   workflowRuns
 }: WorkflowWorkspaceProps) {
+  const canWriteWorkflow = (workflow?.permission_level ?? 2) >= 2;
+
   return (
     <div className="split-view">
       <div className="editor-pane">
@@ -43,7 +45,7 @@ export function WorkflowWorkspace({
             <Text weight="semibold">{workflow?.name ?? "workflow"}.js</Text>
             <Text size={200}>{databaseName} workflow</Text>
           </div>
-          <Button icon={<SaveRegular />} appearance="primary" onClick={onSave}>
+          <Button icon={<SaveRegular />} appearance="primary" onClick={onSave} disabled={!canWriteWorkflow}>
             Save
           </Button>
         </div>
@@ -52,6 +54,7 @@ export function WorkflowWorkspace({
           value={workflow?.script ?? ""}
           onChange={(_, data) => onUpdateScript(data.value)}
           resize="none"
+          disabled={!canWriteWorkflow}
           aria-label="Workflow JavaScript"
         />
         <div className="workflow-config-grid">
@@ -72,6 +75,7 @@ export function WorkflowWorkspace({
               value={variablesText}
               onChange={(_, data) => onUpdateConfigJSON("variables", data.value)}
               resize="none"
+              disabled={!canWriteWorkflow}
               aria-label="Workflow Variables JSON"
             />
           </label>
@@ -82,6 +86,7 @@ export function WorkflowWorkspace({
               value={secretsText}
               onChange={(_, data) => onUpdateConfigJSON("secrets", data.value)}
               resize="none"
+              disabled={!canWriteWorkflow}
               aria-label="Workflow Secrets JSON"
             />
           </label>
@@ -131,7 +136,7 @@ export function WorkflowWorkspace({
             <span className="flow-empty">No runs yet</span>
           )}
         </div>
-        <Button icon={<PlayRegular />} onClick={onExecute} disabled={!workflow?.id}>
+        <Button icon={<PlayRegular />} onClick={onExecute} disabled={!workflow?.id || !canWriteWorkflow}>
           Run
         </Button>
       </div>

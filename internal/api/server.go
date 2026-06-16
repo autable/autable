@@ -687,6 +687,7 @@ func (server *Server) handleSaveWorkflow(w http.ResponseWriter, r *http.Request)
 			return
 		}
 	}
+	saved = server.workflowWithPermissionLevel(r.Context(), actorID, saved)
 	writeJSON(w, http.StatusCreated, saved)
 }
 
@@ -818,6 +819,7 @@ func (server *Server) handlePostDatabaseResource(w http.ResponseWriter, r *http.
 				return
 			}
 		}
+		saved = server.workflowWithPermissionLevel(r.Context(), actorID, saved)
 		writeJSON(w, http.StatusCreated, saved)
 	case "forms":
 		var form systemdb.FormDefinition
@@ -849,6 +851,7 @@ func (server *Server) handlePostDatabaseResource(w http.ResponseWriter, r *http.
 				return
 			}
 		}
+		saved = server.formWithPermissionLevel(r.Context(), actorID, saved)
 		writeJSON(w, http.StatusCreated, saved)
 	case "roles":
 		if !server.requireDatabaseWrite(w, r, actorID, dbName) {
@@ -970,6 +973,7 @@ func (server *Server) handleGetWorkflow(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+	workflow = server.workflowWithPermissionLevel(r.Context(), actorID, workflow)
 	writeJSON(w, http.StatusOK, workflow)
 }
 
@@ -1076,6 +1080,7 @@ func (server *Server) handleSaveForm(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	saved = server.formWithPermissionLevel(r.Context(), actorID, saved)
 	writeJSON(w, http.StatusCreated, saved)
 }
 
@@ -1102,6 +1107,7 @@ func (server *Server) handleGetForm(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+	form = server.formWithPermissionLevel(r.Context(), actorID, form)
 	writeJSON(w, http.StatusOK, form)
 }
 
@@ -1678,6 +1684,7 @@ func (server *Server) filterReadableWorkflows(ctx context.Context, actorID strin
 	for _, workflow := range workflows {
 		if perms.ResourceLevel(actorID, permission.ScopeDatabase, workflow.DatabaseName) >= permission.Write ||
 			perms.CanReadResource(actorID, permission.ScopeWorkflow, resourceID(workflow.ID)) {
+			workflow.PermissionLevel = workflowPermissionLevel(perms, actorID, workflow)
 			filtered = append(filtered, workflow)
 		}
 	}
@@ -1693,10 +1700,43 @@ func (server *Server) filterReadableForms(ctx context.Context, actorID string, f
 	for _, form := range forms {
 		if perms.ResourceLevel(actorID, permission.ScopeDatabase, form.DatabaseName) >= permission.Write ||
 			perms.CanReadResource(actorID, permission.ScopeForm, resourceID(form.ID)) {
+			form.PermissionLevel = formPermissionLevel(perms, actorID, form)
 			filtered = append(filtered, form)
 		}
 	}
 	return filtered, nil
+}
+
+func (server *Server) workflowWithPermissionLevel(ctx context.Context, actorID string, workflow systemdb.WorkflowDefinition) systemdb.WorkflowDefinition {
+	perms, err := server.system.EffectiveGrantsForSubject(ctx, actorID)
+	if err != nil {
+		return workflow
+	}
+	workflow.PermissionLevel = workflowPermissionLevel(perms, actorID, workflow)
+	return workflow
+}
+
+func (server *Server) formWithPermissionLevel(ctx context.Context, actorID string, form systemdb.FormDefinition) systemdb.FormDefinition {
+	perms, err := server.system.EffectiveGrantsForSubject(ctx, actorID)
+	if err != nil {
+		return form
+	}
+	form.PermissionLevel = formPermissionLevel(perms, actorID, form)
+	return form
+}
+
+func workflowPermissionLevel(perms permission.Set, actorID string, workflow systemdb.WorkflowDefinition) permission.Level {
+	if perms.ResourceLevel(actorID, permission.ScopeDatabase, workflow.DatabaseName) >= permission.Write {
+		return permission.Write
+	}
+	return perms.ResourceLevel(actorID, permission.ScopeWorkflow, resourceID(workflow.ID))
+}
+
+func formPermissionLevel(perms permission.Set, actorID string, form systemdb.FormDefinition) permission.Level {
+	if perms.ResourceLevel(actorID, permission.ScopeDatabase, form.DatabaseName) >= permission.Write {
+		return permission.Write
+	}
+	return perms.ResourceLevel(actorID, permission.ScopeForm, resourceID(form.ID))
 }
 
 func canReadRowHistory(perms permission.Set, actorID, resource string, tableMeta metadata.Table) bool {

@@ -41,7 +41,8 @@ const workflowFixture = [
     name: "record-review",
     script: 'function run(info) { return info.node("echo", { value: info.inputs.name }); }',
     secrets: { TOKEN: "" },
-    variables: { CHANNEL: "ops" }
+    variables: { CHANNEL: "ops" },
+    permission_level: 2
   },
   {
     id: 2,
@@ -49,7 +50,8 @@ const workflowFixture = [
     name: "welcome-contact",
     script: 'function run(info) { return info.node("echo", { value: info.inputs.name }); }',
     secrets: {},
-    variables: { CHANNEL: "sales" }
+    variables: { CHANNEL: "sales" },
+    permission_level: 2
   }
 ];
 
@@ -59,14 +61,16 @@ const formFixture = [
     database_name: "workspace",
     name: "contact-intake",
     script:
-      'root.append(api.input({ name: "name", label: "Name", required: true }), api.submit("Create record"));'
+      'root.append(api.input({ name: "name", label: "Name", required: true }), api.submit("Create record"));',
+    permission_level: 2
   },
   {
     id: 2,
     database_name: "workspace",
     name: "quick-status",
     script:
-      'root.append(api.select({ name: "status", label: "Status", options: ["Active", "Review"] }), api.submit("Update status"));'
+      'root.append(api.select({ name: "status", label: "Status", options: ["Active", "Review"] }), api.submit("Update status"));',
+    permission_level: 2
   }
 ];
 
@@ -419,6 +423,33 @@ describe("App", () => {
     await userEvent.click(await screen.findByRole("button", { name: /^Workflow$/ }));
     expect(await screen.findByText("whistory_00000000000000000001_00000000000000000100")).toBeInTheDocument();
     expect(screen.queryByText("No runs yet")).not.toBeInTheDocument();
+  });
+
+  it("renders read-only workflow and form resources as non-editable", async () => {
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url === "/api/databases/workspace/workflows") {
+        return jsonResponse([{ ...workflowFixture[0], permission_level: 1 }]);
+      }
+      if (url === "/api/databases/workspace/forms") {
+        return jsonResponse([{ ...formFixture[0], permission_level: 1 }]);
+      }
+      return defaultFetch(input, init);
+    });
+
+    renderApp();
+    await userEvent.click(await screen.findByRole("button", { name: /^Workflow$/ }));
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Run" })).toBeDisabled();
+    expect(screen.getByLabelText("Workflow JavaScript")).toBeDisabled();
+    expect(screen.getByLabelText("Workflow Variables JSON")).toBeDisabled();
+    expect(screen.getByLabelText("Workflow Secrets JSON")).toBeDisabled();
+    expect(screen.getByLabelText("Workflow Inputs JSON")).not.toBeDisabled();
+
+    await userEvent.click(screen.getByRole("button", { name: /^Form$/ }));
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    expect(screen.getByLabelText("Form JavaScript")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Create record" })).not.toBeDisabled();
   });
 
   it("runs workflows with only the explicit inputs JSON", async () => {

@@ -25,6 +25,8 @@ export function FormWorkspace({
   onUpdateScript,
   renderedForm
 }: FormWorkspaceProps) {
+  const canWriteForm = (form?.permission_level ?? 2) >= 2;
+
   return (
     <div className="split-view">
       <div className="editor-pane">
@@ -33,7 +35,7 @@ export function FormWorkspace({
             <Text weight="semibold">{form?.name ?? "form"}.js</Text>
             <Text size={200}>{databaseName} form</Text>
           </div>
-          <Button icon={<SaveRegular />} appearance="primary" onClick={onSave}>
+          <Button icon={<SaveRegular />} appearance="primary" onClick={onSave} disabled={!canWriteForm}>
             Save
           </Button>
         </div>
@@ -42,6 +44,7 @@ export function FormWorkspace({
           value={form?.script ?? ""}
           onChange={(_, data) => onUpdateScript(data.value)}
           resize="none"
+          disabled={!canWriteForm}
           aria-label="Form JavaScript"
         />
       </div>

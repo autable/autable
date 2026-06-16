@@ -21,23 +21,25 @@ type DB struct {
 }
 
 type WorkflowDefinition struct {
-	ID           int64             `json:"id"`
-	DatabaseName string            `json:"database_name"`
-	Name         string            `json:"name"`
-	Script       string            `json:"script"`
-	Secrets      map[string]string `json:"secrets"`
-	Variables    map[string]string `json:"variables"`
-	CreatedAt    time.Time         `json:"created_at"`
-	UpdatedAt    time.Time         `json:"updated_at"`
+	ID              int64             `json:"id"`
+	DatabaseName    string            `json:"database_name"`
+	Name            string            `json:"name"`
+	Script          string            `json:"script"`
+	Secrets         map[string]string `json:"secrets"`
+	Variables       map[string]string `json:"variables"`
+	PermissionLevel permission.Level  `json:"permission_level,omitempty" gorm:"-"`
+	CreatedAt       time.Time         `json:"created_at"`
+	UpdatedAt       time.Time         `json:"updated_at"`
 }
 
 type FormDefinition struct {
-	ID           int64     `json:"id"`
-	DatabaseName string    `json:"database_name"`
-	Name         string    `json:"name"`
-	Script       string    `json:"script"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	ID              int64            `json:"id"`
+	DatabaseName    string           `json:"database_name"`
+	Name            string           `json:"name"`
+	Script          string           `json:"script"`
+	PermissionLevel permission.Level `json:"permission_level,omitempty" gorm:"-"`
+	CreatedAt       time.Time        `json:"created_at"`
+	UpdatedAt       time.Time        `json:"updated_at"`
 }
 
 type RoleDefinition struct {

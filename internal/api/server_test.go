@@ -1829,6 +1829,13 @@ func TestWorkflowAndFormPermissions(t *testing.T) {
 	if workflowRecorder.Code != http.StatusCreated {
 		t.Fatalf("expected workflow 201, got %d: %s", workflowRecorder.Code, workflowRecorder.Body.String())
 	}
+	var createdWorkflow systemdb.WorkflowDefinition
+	if err := json.NewDecoder(workflowRecorder.Body).Decode(&createdWorkflow); err != nil {
+		t.Fatal(err)
+	}
+	if createdWorkflow.PermissionLevel != permission.Write {
+		t.Fatalf("expected created workflow write permission, got %d", createdWorkflow.PermissionLevel)
+	}
 
 	formRequest := httptest.NewRequest(http.MethodPost, "/api/databases/db/forms", bytes.NewBufferString(`{
 		"name":"restricted-form",
@@ -1839,6 +1846,13 @@ func TestWorkflowAndFormPermissions(t *testing.T) {
 	server.ServeHTTP(formRecorder, formRequest)
 	if formRecorder.Code != http.StatusCreated {
 		t.Fatalf("expected form 201, got %d: %s", formRecorder.Code, formRecorder.Body.String())
+	}
+	var createdForm systemdb.FormDefinition
+	if err := json.NewDecoder(formRecorder.Body).Decode(&createdForm); err != nil {
+		t.Fatal(err)
+	}
+	if createdForm.PermissionLevel != permission.Write {
+		t.Fatalf("expected created form write permission, got %d", createdForm.PermissionLevel)
 	}
 
 	otherWorkflow := httptest.NewRequest(http.MethodGet, "/api/workflows/1", nil)
@@ -1879,6 +1893,13 @@ func TestWorkflowAndFormPermissions(t *testing.T) {
 	if readWorkflowRecorder.Code != http.StatusOK {
 		t.Fatalf("expected workflow 200, got %d: %s", readWorkflowRecorder.Code, readWorkflowRecorder.Body.String())
 	}
+	var readableWorkflow systemdb.WorkflowDefinition
+	if err := json.NewDecoder(readWorkflowRecorder.Body).Decode(&readableWorkflow); err != nil {
+		t.Fatal(err)
+	}
+	if readableWorkflow.PermissionLevel != permission.Read {
+		t.Fatalf("expected read-only workflow permission, got %d", readableWorkflow.PermissionLevel)
+	}
 
 	runWorkflow := httptest.NewRequest(http.MethodPost, "/api/workflows/1/runs", bytes.NewBufferString(`{"inputs":{"name":"Ada"}}`))
 	runWorkflow.AddCookie(testSessionCookie(t, system, "other"))
@@ -1886,6 +1907,55 @@ func TestWorkflowAndFormPermissions(t *testing.T) {
 	server.ServeHTTP(runWorkflowRecorder, runWorkflow)
 	if runWorkflowRecorder.Code != http.StatusForbidden {
 		t.Fatalf("expected read-only workflow run 403, got %d: %s", runWorkflowRecorder.Code, runWorkflowRecorder.Body.String())
+	}
+
+	if err := system.SaveGrant(context.Background(), permission.Grant{
+		SubjectID: "other",
+		Scope:     permission.ScopeForm,
+		Resource:  "1",
+		Level:     permission.Read,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	readForms := httptest.NewRequest(http.MethodGet, "/api/databases/db/forms", nil)
+	readForms.AddCookie(testSessionCookie(t, system, "other"))
+	readFormsRecorder := httptest.NewRecorder()
+	server.ServeHTTP(readFormsRecorder, readForms)
+	if readFormsRecorder.Code != http.StatusOK {
+		t.Fatalf("expected form list 200, got %d: %s", readFormsRecorder.Code, readFormsRecorder.Body.String())
+	}
+	if err := json.NewDecoder(readFormsRecorder.Body).Decode(&forms); err != nil {
+		t.Fatal(err)
+	}
+	if len(forms) != 1 || forms[0].PermissionLevel != permission.Read {
+		t.Fatalf("expected read-only form permission in list, got %#v", forms)
+	}
+
+	readForm := httptest.NewRequest(http.MethodGet, "/api/forms/1", nil)
+	readForm.AddCookie(testSessionCookie(t, system, "other"))
+	readFormRecorder := httptest.NewRecorder()
+	server.ServeHTTP(readFormRecorder, readForm)
+	if readFormRecorder.Code != http.StatusOK {
+		t.Fatalf("expected form 200, got %d: %s", readFormRecorder.Code, readFormRecorder.Body.String())
+	}
+	var readableForm systemdb.FormDefinition
+	if err := json.NewDecoder(readFormRecorder.Body).Decode(&readableForm); err != nil {
+		t.Fatal(err)
+	}
+	if readableForm.PermissionLevel != permission.Read {
+		t.Fatalf("expected read-only form permission, got %d", readableForm.PermissionLevel)
+	}
+
+	updateForm := httptest.NewRequest(http.MethodPost, "/api/databases/db/forms", bytes.NewBufferString(`{
+		"id":1,
+		"name":"restricted-form",
+		"script":"root.append(api.input({ name: 'other' }))"
+	}`))
+	updateForm.AddCookie(testSessionCookie(t, system, "other"))
+	updateFormRecorder := httptest.NewRecorder()
+	server.ServeHTTP(updateFormRecorder, updateForm)
+	if updateFormRecorder.Code != http.StatusForbidden {
+		t.Fatalf("expected read-only form update 403, got %d: %s", updateFormRecorder.Code, updateFormRecorder.Body.String())
 	}
 }
 
