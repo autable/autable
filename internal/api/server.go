@@ -88,6 +88,10 @@ type workflowRunResponse struct {
 	Run        history.WorkflowRun `json:"run"`
 }
 
+type roleGrantsRequest struct {
+	Grants []permission.Grant `json:"grants"`
+}
+
 const (
 	sessionCookieName   = "codetable_session"
 	oidcStateCookieName = "codetable_oidc_state"
@@ -161,6 +165,7 @@ func (server *Server) routes() {
 	server.mux.HandleFunc("POST /api/databases", server.handleCreateDatabase)
 	server.mux.HandleFunc("GET /api/databases/", server.handleGetDatabaseResource)
 	server.mux.HandleFunc("POST /api/databases/", server.handlePostDatabaseResource)
+	server.mux.HandleFunc("PUT /api/databases/", server.handlePutDatabaseResource)
 	server.mux.HandleFunc("GET /api/workflow/nodes", server.handleWorkflowNodes)
 	server.mux.HandleFunc("POST /api/workflows", server.handleSaveWorkflow)
 	server.mux.HandleFunc("POST /api/workflows/", server.handleRunWorkflow)
@@ -617,6 +622,16 @@ func (server *Server) handleGetDatabaseResource(w http.ResponseWriter, r *http.R
 			return
 		}
 		writeJSON(w, http.StatusOK, filtered)
+	case "roles":
+		if !server.requireDatabaseWrite(w, r, actorID, dbName) {
+			return
+		}
+		roles, err := server.system.Roles(r.Context(), dbName)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, roles)
 	default:
 		http.NotFound(w, r)
 	}
@@ -704,9 +719,51 @@ func (server *Server) handlePostDatabaseResource(w http.ResponseWriter, r *http.
 			}
 		}
 		writeJSON(w, http.StatusCreated, saved)
+	case "roles":
+		if !server.requireDatabaseWrite(w, r, actorID, dbName) {
+			return
+		}
+		var role systemdb.RoleDefinition
+		if err := readJSON(r, &role); err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		role.DatabaseName = dbName
+		saved, err := server.system.SaveRole(r.Context(), role)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		writeJSON(w, http.StatusCreated, saved)
 	default:
 		http.NotFound(w, r)
 	}
+}
+
+func (server *Server) handlePutDatabaseResource(w http.ResponseWriter, r *http.Request) {
+	dbName, roleName, ok := parseRoleGrantsPath(r.URL.Path)
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	actorID, ok := server.requireUserID(w, r)
+	if !ok {
+		return
+	}
+	if !server.requireDatabaseWrite(w, r, actorID, dbName) {
+		return
+	}
+	var request roleGrantsRequest
+	if err := readJSON(r, &request); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	role, err := server.system.ReplaceRoleGrants(r.Context(), dbName, roleName, request.Grants)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, role)
 }
 
 func (server *Server) handleGetWorkflow(w http.ResponseWriter, r *http.Request) {
@@ -895,10 +952,22 @@ func parseDatabaseResourcePath(path string) (string, string, bool) {
 	if len(parts) != 4 || parts[0] != "api" || parts[1] != "databases" {
 		return "", "", false
 	}
-	if parts[3] != "tables" && parts[3] != "workflows" && parts[3] != "forms" {
+	if parts[3] != "tables" && parts[3] != "workflows" && parts[3] != "forms" && parts[3] != "roles" {
 		return "", "", false
 	}
 	return parts[2], parts[3], true
+}
+
+func parseRoleGrantsPath(path string) (string, string, bool) {
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(parts) != 6 || parts[0] != "api" || parts[1] != "databases" || parts[3] != "roles" || parts[5] != "grants" {
+		return "", "", false
+	}
+	roleName, err := url.PathUnescape(parts[4])
+	if err != nil || roleName == "" {
+		return "", "", false
+	}
+	return parts[2], roleName, true
 }
 
 func parseWorkflowRunsPath(path string) (int64, bool) {
@@ -996,6 +1065,19 @@ func (server *Server) requireUserID(w http.ResponseWriter, r *http.Request) (str
 
 func (server *Server) requireResourceRead(w http.ResponseWriter, r *http.Request, actorID string, scope permission.Scope, id int64) bool {
 	return server.requireResourceLevel(w, r, actorID, scope, id, permission.Read)
+}
+
+func (server *Server) requireDatabaseWrite(w http.ResponseWriter, r *http.Request, actorID string, dbName string) bool {
+	perms, err := server.system.GrantsForSubject(r.Context(), actorID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return false
+	}
+	if perms.ResourceLevel(actorID, permission.ScopeDatabase, dbName) < permission.Write {
+		writeError(w, http.StatusForbidden, table.ErrPermissionDenied)
+		return false
+	}
+	return true
 }
 
 func (server *Server) requireResourceWrite(w http.ResponseWriter, r *http.Request, actorID string, scope permission.Scope, id int64) bool {

@@ -40,6 +40,16 @@ type FormDefinition struct {
 	UpdatedAt    time.Time `json:"updated_at"`
 }
 
+type RoleDefinition struct {
+	ID           int64              `json:"id"`
+	DatabaseName string             `json:"database_name"`
+	Name         string             `json:"name"`
+	SubjectID    string             `json:"subject_id"`
+	Grants       []permission.Grant `json:"grants"`
+	CreatedAt    time.Time          `json:"created_at"`
+	UpdatedAt    time.Time          `json:"updated_at"`
+}
+
 type userModel struct {
 	ID           string `gorm:"primaryKey"`
 	Email        string `gorm:"uniqueIndex;not null"`
@@ -88,6 +98,14 @@ type formModel struct {
 	UpdatedAt    time.Time
 }
 
+type roleModel struct {
+	ID           int64  `gorm:"primaryKey;autoIncrement"`
+	DatabaseName string `gorm:"uniqueIndex:idx_role_database_name;not null"`
+	Name         string `gorm:"uniqueIndex:idx_role_database_name;not null"`
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+}
+
 func Open(ctx context.Context, path string) (*DB, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, err
@@ -119,6 +137,7 @@ func (db *DB) Migrate(ctx context.Context) error {
 		&permissionGrantModel{},
 		&workflowModel{},
 		&formModel{},
+		&roleModel{},
 	)
 }
 
@@ -230,6 +249,14 @@ func (db *DB) SaveGrant(ctx context.Context, grant permission.Grant) error {
 }
 
 func (db *DB) GrantsForSubject(ctx context.Context, subjectID string) (permission.Set, error) {
+	grants, err := db.GrantListForSubject(ctx, subjectID)
+	if err != nil {
+		return permission.Set{}, err
+	}
+	return permission.New(grants...), nil
+}
+
+func (db *DB) GrantListForSubject(ctx context.Context, subjectID string) ([]permission.Grant, error) {
 	var models []permissionGrantModel
 	err := db.orm.WithContext(ctx).
 		Where(&permissionGrantModel{SubjectID: subjectID}).
@@ -237,14 +264,14 @@ func (db *DB) GrantsForSubject(ctx context.Context, subjectID string) (permissio
 		Order(clause.OrderByColumn{Column: clause.Column{Name: "field"}}).
 		Find(&models).Error
 	if err != nil {
-		return permission.Set{}, err
+		return nil, err
 	}
 
 	grants := make([]permission.Grant, 0, len(models))
 	for _, model := range models {
 		grants = append(grants, modelToGrant(model))
 	}
-	return permission.New(grants...), nil
+	return grants, nil
 }
 
 func (db *DB) SaveWorkflow(ctx context.Context, workflow WorkflowDefinition) (WorkflowDefinition, error) {
@@ -336,6 +363,89 @@ func (db *DB) Forms(ctx context.Context, databaseName string) ([]FormDefinition,
 		forms = append(forms, modelToForm(model))
 	}
 	return forms, nil
+}
+
+func (db *DB) SaveRole(ctx context.Context, role RoleDefinition) (RoleDefinition, error) {
+	if role.DatabaseName == "" {
+		return RoleDefinition{}, errors.New("database_name is required")
+	}
+	if role.Name == "" {
+		return RoleDefinition{}, errors.New("role name is required")
+	}
+	model := roleToModel(role)
+	if role.ID == 0 {
+		if err := db.orm.WithContext(ctx).Create(&model).Error; err != nil {
+			return RoleDefinition{}, err
+		}
+		return db.roleDefinition(ctx, model)
+	}
+	if err := db.orm.WithContext(ctx).Save(&model).Error; err != nil {
+		return RoleDefinition{}, err
+	}
+	return db.roleDefinition(ctx, model)
+}
+
+func (db *DB) Role(ctx context.Context, databaseName, roleName string) (RoleDefinition, error) {
+	var model roleModel
+	if err := db.orm.WithContext(ctx).
+		Where(&roleModel{DatabaseName: databaseName, Name: roleName}).
+		First(&model).Error; err != nil {
+		return RoleDefinition{}, err
+	}
+	return db.roleDefinition(ctx, model)
+}
+
+func (db *DB) Roles(ctx context.Context, databaseName string) ([]RoleDefinition, error) {
+	var models []roleModel
+	err := db.orm.WithContext(ctx).
+		Where(&roleModel{DatabaseName: databaseName}).
+		Order(clause.OrderByColumn{Column: clause.Column{Name: "id"}}).
+		Find(&models).
+		Error
+	if err != nil {
+		return nil, err
+	}
+	roles := make([]RoleDefinition, 0, len(models))
+	for _, model := range models {
+		role, err := db.roleDefinition(ctx, model)
+		if err != nil {
+			return nil, err
+		}
+		roles = append(roles, role)
+	}
+	return roles, nil
+}
+
+func (db *DB) ReplaceRoleGrants(ctx context.Context, databaseName, roleName string, grants []permission.Grant) (RoleDefinition, error) {
+	role, err := db.Role(ctx, databaseName, roleName)
+	if err != nil {
+		return RoleDefinition{}, err
+	}
+	subjectID := RoleSubjectID(databaseName, roleName)
+	err = db.orm.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where(&permissionGrantModel{SubjectID: subjectID}).Delete(&permissionGrantModel{}).Error; err != nil {
+			return err
+		}
+		for _, grant := range grants {
+			if grant.Level == permission.None {
+				continue
+			}
+			grant.SubjectID = subjectID
+			model := grantToModel(grant)
+			if err := tx.Create(&model).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return RoleDefinition{}, err
+	}
+	return db.Role(ctx, role.DatabaseName, role.Name)
+}
+
+func RoleSubjectID(databaseName, roleName string) string {
+	return "role:" + databaseName + ":" + roleName
 }
 
 func userToModel(user auth.User) userModel {
@@ -439,6 +549,33 @@ func modelToForm(model formModel) FormDefinition {
 		CreatedAt:    model.CreatedAt,
 		UpdatedAt:    model.UpdatedAt,
 	}
+}
+
+func roleToModel(role RoleDefinition) roleModel {
+	return roleModel{
+		ID:           role.ID,
+		DatabaseName: role.DatabaseName,
+		Name:         role.Name,
+		CreatedAt:    role.CreatedAt,
+		UpdatedAt:    role.UpdatedAt,
+	}
+}
+
+func (db *DB) roleDefinition(ctx context.Context, model roleModel) (RoleDefinition, error) {
+	subjectID := RoleSubjectID(model.DatabaseName, model.Name)
+	grants, err := db.GrantListForSubject(ctx, subjectID)
+	if err != nil {
+		return RoleDefinition{}, err
+	}
+	return RoleDefinition{
+		ID:           model.ID,
+		DatabaseName: model.DatabaseName,
+		Name:         model.Name,
+		SubjectID:    subjectID,
+		Grants:       grants,
+		CreatedAt:    model.CreatedAt,
+		UpdatedAt:    model.UpdatedAt,
+	}, nil
 }
 
 func emptyStringMap(values map[string]string) map[string]string {

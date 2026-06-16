@@ -487,6 +487,74 @@ func TestDatabaseOwnerCanCreateTable(t *testing.T) {
 	}
 }
 
+func TestDatabaseOwnerCanManageRoles(t *testing.T) {
+	ctx := context.Background()
+	catalog := metadata.Catalog{Databases: []metadata.Database{{Name: "workspace", SQLitePath: "./data/workspace.sqlite"}}}
+	server, system, _ := newTestServerWithMetadataFile(t, catalog)
+	if err := system.SaveGrant(ctx, permission.Grant{
+		SubjectID: "owner",
+		Scope:     permission.ScopeDatabase,
+		Resource:  "workspace",
+		Level:     permission.Write,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	createRole := httptest.NewRequest(http.MethodPost, "/api/databases/workspace/roles", bytes.NewBufferString(`{
+		"name":"editor"
+	}`))
+	createRole.Header.Set("X-Codetable-User", "owner")
+	recorder := httptest.NewRecorder()
+	server.ServeHTTP(recorder, createRole)
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("expected role create 201, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+
+	updateGrants := httptest.NewRequest(http.MethodPut, "/api/databases/workspace/roles/editor/grants", bytes.NewBufferString(`{
+		"grants":[
+			{"scope":"table","resource":"workspace.contacts","level":2},
+			{"scope":"field","resource":"workspace.contacts","field":"email","level":1},
+			{"scope":"form","resource":"3","level":0}
+		]
+	}`))
+	updateGrants.Header.Set("X-Codetable-User", "owner")
+	recorder = httptest.NewRecorder()
+	server.ServeHTTP(recorder, updateGrants)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected role grants update 200, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+
+	rolesRequest := httptest.NewRequest(http.MethodGet, "/api/databases/workspace/roles", nil)
+	rolesRequest.Header.Set("X-Codetable-User", "owner")
+	recorder = httptest.NewRecorder()
+	server.ServeHTTP(recorder, rolesRequest)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected role list 200, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+	var roles []systemdb.RoleDefinition
+	if err := json.Unmarshal(recorder.Body.Bytes(), &roles); err != nil {
+		t.Fatal(err)
+	}
+	if len(roles) != 1 || roles[0].SubjectID != "role:workspace:editor" || len(roles[0].Grants) != 2 {
+		t.Fatalf("unexpected roles response: %#v", roles)
+	}
+}
+
+func TestRoleManagementRequiresDatabaseWrite(t *testing.T) {
+	catalog := metadata.Catalog{Databases: []metadata.Database{{Name: "workspace", SQLitePath: "./data/workspace.sqlite"}}}
+	server, _, _ := newTestServerWithMetadataFile(t, catalog)
+
+	request := httptest.NewRequest(http.MethodPost, "/api/databases/workspace/roles", bytes.NewBufferString(`{
+		"name":"viewer"
+	}`))
+	request.Header.Set("X-Codetable-User", "viewer")
+	recorder := httptest.NewRecorder()
+	server.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusForbidden {
+		t.Fatalf("expected role create forbidden, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+}
+
 func TestNonDatabaseOwnerCannotCreateTable(t *testing.T) {
 	catalog := metadata.Catalog{Databases: []metadata.Database{{Name: "workspace", SQLitePath: "./data/workspace.sqlite"}}}
 	server, _, _ := newTestServerWithMetadataFile(t, catalog)

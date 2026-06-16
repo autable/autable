@@ -389,18 +389,42 @@ select {
   background: var(--colorNeutralBackground1);
 }
 
+.permission-resource {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--colorNeutralStroke2);
+}
+
+.permission-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-left: 14px;
+}
+
 .permission-row {
   display: flex;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 8px 0;
-  border-top: 1px solid var(--colorNeutralStroke2);
   color: var(--colorNeutralForeground3);
   font-size: 13px;
 }
 
 .permission-row span:first-child {
   font-weight: 600;
+}
+
+.empty-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 220px;
+  border: 1px solid var(--colorNeutralStroke2);
+  background: var(--colorNeutralBackground1);
+  color: var(--colorNeutralForeground3);
 }
 
 .statusbar {

@@ -212,6 +212,58 @@ func TestFormDefinitionAutoincrementsID(t *testing.T) {
 	}
 }
 
+func TestRoleDefinitionStoresReplaceableGrants(t *testing.T) {
+	ctx := context.Background()
+	db := openTestDB(t)
+
+	role, err := db.SaveRole(ctx, RoleDefinition{DatabaseName: "workspace", Name: "editor"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if role.ID == 0 || role.SubjectID != "role:workspace:editor" {
+		t.Fatalf("unexpected role: %#v", role)
+	}
+
+	role, err = db.ReplaceRoleGrants(ctx, "workspace", "editor", []permission.Grant{
+		{Scope: permission.ScopeTable, Resource: "workspace.contacts", Level: permission.Write},
+		{Scope: permission.ScopeField, Resource: "workspace.contacts", Field: "email", Level: permission.Read},
+		{Scope: permission.ScopeWorkflow, Resource: "9", Level: permission.None},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(role.Grants) != 2 {
+		t.Fatalf("expected two persisted grants, got %#v", role.Grants)
+	}
+	perms, err := db.GrantsForSubject(ctx, role.SubjectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !perms.CanWriteField(role.SubjectID, "workspace.contacts", "name") {
+		t.Fatal("expected table write grant")
+	}
+	if !perms.CanReadField(role.SubjectID, "workspace.contacts", "email") {
+		t.Fatal("expected field read grant")
+	}
+
+	role, err = db.ReplaceRoleGrants(ctx, "workspace", "editor", []permission.Grant{
+		{Scope: permission.ScopeForm, Resource: "3", Level: permission.Read},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(role.Grants) != 1 || role.Grants[0].Scope != permission.ScopeForm {
+		t.Fatalf("expected replacement grants, got %#v", role.Grants)
+	}
+	roles, err := db.Roles(ctx, "workspace")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(roles) != 1 || roles[0].Name != "editor" {
+		t.Fatalf("unexpected roles: %#v", roles)
+	}
+}
+
 func openTestDB(t *testing.T) *DB {
 	t.Helper()
 	db, err := Open(context.Background(), filepath.Join(t.TempDir(), "system.sqlite"))

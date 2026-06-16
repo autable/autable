@@ -105,6 +105,22 @@ export type FormDefinition = {
   script: string;
 };
 
+export type PermissionGrant = {
+  subject_id: string;
+  scope: "database" | "table" | "field" | "workflow" | "form";
+  resource: string;
+  field: string;
+  level: 0 | 1 | 2;
+};
+
+export type RoleDefinition = {
+  id?: number;
+  database_name: string;
+  name: string;
+  subject_id: string;
+  grants: PermissionGrant[];
+};
+
 export type AuthUser = {
   id: string;
   email: string;
@@ -383,4 +399,45 @@ export async function saveForm(dbName: string, form: FormDefinition, userID?: st
     throw new Error(`form save failed: ${response.status}`);
   }
   return response.json() as Promise<FormDefinition>;
+}
+
+export async function listRoles(dbName: string, userID?: string): Promise<RoleDefinition[]> {
+  const response = await fetch(`/api/databases/${dbName}/roles`, {
+    headers: userHeaders(userID)
+  });
+  if (!response.ok) {
+    throw new Error(`role list failed: ${response.status}`);
+  }
+  return response.json() as Promise<RoleDefinition[]>;
+}
+
+export async function createRole(dbName: string, name: string, userID?: string): Promise<RoleDefinition> {
+  const response = await fetch(`/api/databases/${dbName}/roles`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...userHeaders(userID) },
+    body: JSON.stringify({ name })
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: response.statusText }));
+    throw new Error(error.error ?? "role creation failed");
+  }
+  return response.json() as Promise<RoleDefinition>;
+}
+
+export async function saveRoleGrants(
+  dbName: string,
+  roleName: string,
+  grants: PermissionGrant[],
+  userID?: string
+): Promise<RoleDefinition> {
+  const response = await fetch(`/api/databases/${dbName}/roles/${encodeURIComponent(roleName)}/grants`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...userHeaders(userID) },
+    body: JSON.stringify({ grants })
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: response.statusText }));
+    throw new Error(error.error ?? "role grant save failed");
+  }
+  return response.json() as Promise<RoleDefinition>;
 }
