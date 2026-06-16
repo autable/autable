@@ -1352,6 +1352,118 @@ func TestWorkflowAndFormCreationRequiresDatabaseOrTableWrite(t *testing.T) {
 	}
 }
 
+func TestWorkflowAndFormUpdatesCannotMoveAcrossDatabases(t *testing.T) {
+	ctx := context.Background()
+	catalog := metadata.Catalog{Databases: []metadata.Database{
+		{Name: "db", SQLitePath: "./data/db.sqlite", Tables: []metadata.Table{{Name: "contacts", Fields: []metadata.Field{{Name: "name", Type: "text"}}}}},
+		{Name: "other", SQLitePath: "./data/other.sqlite", Tables: []metadata.Table{{Name: "contacts", Fields: []metadata.Field{{Name: "name", Type: "text"}}}}},
+	}}
+	server, system, _ := newTestServerWithMetadataFile(t, catalog)
+	if err := system.SaveGrant(ctx, permission.Grant{
+		SubjectID: "u1",
+		Scope:     permission.ScopeTable,
+		Resource:  "db.contacts",
+		Level:     permission.Write,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	workflowRequest := httptest.NewRequest(http.MethodPost, "/api/databases/db/workflows", bytes.NewBufferString(`{
+		"name":"notify",
+		"script":"function run() { return {}; }"
+	}`))
+	workflowRequest.AddCookie(testSessionCookie(t, system, "u1"))
+	workflowRecorder := httptest.NewRecorder()
+	server.ServeHTTP(workflowRecorder, workflowRequest)
+	if workflowRecorder.Code != http.StatusCreated {
+		t.Fatalf("expected workflow create 201, got %d: %s", workflowRecorder.Code, workflowRecorder.Body.String())
+	}
+	var savedWorkflow systemdb.WorkflowDefinition
+	if err := json.NewDecoder(workflowRecorder.Body).Decode(&savedWorkflow); err != nil {
+		t.Fatal(err)
+	}
+
+	formRequest := httptest.NewRequest(http.MethodPost, "/api/databases/db/forms", bytes.NewBufferString(`{
+		"name":"intake",
+		"script":"root.append(api.input({ name: 'email' }))"
+	}`))
+	formRequest.AddCookie(testSessionCookie(t, system, "u1"))
+	formRecorder := httptest.NewRecorder()
+	server.ServeHTTP(formRecorder, formRequest)
+	if formRecorder.Code != http.StatusCreated {
+		t.Fatalf("expected form create 201, got %d: %s", formRecorder.Code, formRecorder.Body.String())
+	}
+	var savedForm systemdb.FormDefinition
+	if err := json.NewDecoder(formRecorder.Body).Decode(&savedForm); err != nil {
+		t.Fatal(err)
+	}
+
+	moveWorkflowByPath := httptest.NewRequest(http.MethodPost, "/api/databases/other/workflows", bytes.NewBufferString(`{
+		"id":1,
+		"name":"notify",
+		"script":"function run() { return { moved: true }; }"
+	}`))
+	moveWorkflowByPath.AddCookie(testSessionCookie(t, system, "u1"))
+	moveWorkflowByPathRecorder := httptest.NewRecorder()
+	server.ServeHTTP(moveWorkflowByPathRecorder, moveWorkflowByPath)
+	if moveWorkflowByPathRecorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected cross-db workflow path update 400, got %d: %s", moveWorkflowByPathRecorder.Code, moveWorkflowByPathRecorder.Body.String())
+	}
+
+	moveWorkflowByBody := httptest.NewRequest(http.MethodPost, "/api/workflows", bytes.NewBufferString(`{
+		"id":1,
+		"database_name":"other",
+		"name":"notify",
+		"script":"function run() { return { moved: true }; }"
+	}`))
+	moveWorkflowByBody.AddCookie(testSessionCookie(t, system, "u1"))
+	moveWorkflowByBodyRecorder := httptest.NewRecorder()
+	server.ServeHTTP(moveWorkflowByBodyRecorder, moveWorkflowByBody)
+	if moveWorkflowByBodyRecorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected cross-db workflow body update 400, got %d: %s", moveWorkflowByBodyRecorder.Code, moveWorkflowByBodyRecorder.Body.String())
+	}
+
+	moveFormByPath := httptest.NewRequest(http.MethodPost, "/api/databases/other/forms", bytes.NewBufferString(`{
+		"id":1,
+		"name":"intake",
+		"script":"root.append(api.input({ name: 'moved' }))"
+	}`))
+	moveFormByPath.AddCookie(testSessionCookie(t, system, "u1"))
+	moveFormByPathRecorder := httptest.NewRecorder()
+	server.ServeHTTP(moveFormByPathRecorder, moveFormByPath)
+	if moveFormByPathRecorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected cross-db form path update 400, got %d: %s", moveFormByPathRecorder.Code, moveFormByPathRecorder.Body.String())
+	}
+
+	moveFormByBody := httptest.NewRequest(http.MethodPost, "/api/forms", bytes.NewBufferString(`{
+		"id":1,
+		"database_name":"other",
+		"name":"intake",
+		"script":"root.append(api.input({ name: 'moved' }))"
+	}`))
+	moveFormByBody.AddCookie(testSessionCookie(t, system, "u1"))
+	moveFormByBodyRecorder := httptest.NewRecorder()
+	server.ServeHTTP(moveFormByBodyRecorder, moveFormByBody)
+	if moveFormByBodyRecorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected cross-db form body update 400, got %d: %s", moveFormByBodyRecorder.Code, moveFormByBodyRecorder.Body.String())
+	}
+
+	workflowAfter, err := system.Workflow(ctx, savedWorkflow.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if workflowAfter.DatabaseName != "db" || workflowAfter.Script != savedWorkflow.Script {
+		t.Fatalf("expected workflow to remain in db unchanged, got %#v", workflowAfter)
+	}
+	formAfter, err := system.Form(ctx, savedForm.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if formAfter.DatabaseName != "db" || formAfter.Script != savedForm.Script {
+		t.Fatalf("expected form to remain in db unchanged, got %#v", formAfter)
+	}
+}
+
 func TestWorkflowRunAPI(t *testing.T) {
 	server, system := newTestServer(t)
 	if err := system.SaveGrant(context.Background(), permission.Grant{

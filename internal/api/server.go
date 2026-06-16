@@ -670,6 +670,9 @@ func (server *Server) handleSaveWorkflow(w http.ResponseWriter, r *http.Request)
 	if workflow.ID != 0 && !server.requireResourceWrite(w, r, actorID, permission.ScopeWorkflow, workflow.ID) {
 		return
 	}
+	if workflow.ID != 0 && !server.requireExistingWorkflowDatabase(w, r, workflow.ID, workflow.DatabaseName) {
+		return
+	}
 	saved, err := server.system.SaveWorkflow(r.Context(), workflow)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
@@ -797,6 +800,9 @@ func (server *Server) handlePostDatabaseResource(w http.ResponseWriter, r *http.
 		if workflow.ID != 0 && !server.requireResourceWrite(w, r, actorID, permission.ScopeWorkflow, workflow.ID) {
 			return
 		}
+		if workflow.ID != 0 && !server.requireExistingWorkflowDatabase(w, r, workflow.ID, dbName) {
+			return
+		}
 		workflow.DatabaseName = dbName
 		saved, err := server.system.SaveWorkflow(r.Context(), workflow)
 		if err != nil {
@@ -823,6 +829,9 @@ func (server *Server) handlePostDatabaseResource(w http.ResponseWriter, r *http.
 			return
 		}
 		if form.ID != 0 && !server.requireResourceWrite(w, r, actorID, permission.ScopeForm, form.ID) {
+			return
+		}
+		if form.ID != 0 && !server.requireExistingFormDatabase(w, r, form.ID, dbName) {
 			return
 		}
 		form.DatabaseName = dbName
@@ -1048,6 +1057,9 @@ func (server *Server) handleSaveForm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if form.ID != 0 && !server.requireResourceWrite(w, r, actorID, permission.ScopeForm, form.ID) {
+		return
+	}
+	if form.ID != 0 && !server.requireExistingFormDatabase(w, r, form.ID, form.DatabaseName) {
 		return
 	}
 	saved, err := server.system.SaveForm(r.Context(), form)
@@ -1545,6 +1557,40 @@ func (server *Server) requireDatabaseOrSpecificTableWrite(w http.ResponseWriter,
 
 func (server *Server) requireResourceWrite(w http.ResponseWriter, r *http.Request, actorID string, scope permission.Scope, id int64) bool {
 	return server.requireResourceLevel(w, r, actorID, scope, id, permission.Write)
+}
+
+func (server *Server) requireExistingWorkflowDatabase(w http.ResponseWriter, r *http.Request, id int64, dbName string) bool {
+	if dbName == "" {
+		writeError(w, http.StatusBadRequest, errors.New("database_name is required"))
+		return false
+	}
+	workflowDefinition, err := server.system.Workflow(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err)
+		return false
+	}
+	if workflowDefinition.DatabaseName != dbName {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("workflow %d belongs to database %q, not %q", id, workflowDefinition.DatabaseName, dbName))
+		return false
+	}
+	return true
+}
+
+func (server *Server) requireExistingFormDatabase(w http.ResponseWriter, r *http.Request, id int64, dbName string) bool {
+	if dbName == "" {
+		writeError(w, http.StatusBadRequest, errors.New("database_name is required"))
+		return false
+	}
+	form, err := server.system.Form(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err)
+		return false
+	}
+	if form.DatabaseName != dbName {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("form %d belongs to database %q, not %q", id, form.DatabaseName, dbName))
+		return false
+	}
+	return true
 }
 
 func (server *Server) requireResourceLevel(w http.ResponseWriter, r *http.Request, actorID string, scope permission.Scope, id int64, level permission.Level) bool {
