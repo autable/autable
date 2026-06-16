@@ -467,6 +467,50 @@ func TestWorkflowRunAPI(t *testing.T) {
 	}
 }
 
+func TestWorkflowRunAPIWithRecordChangedTrigger(t *testing.T) {
+	ctx := context.Background()
+	server, _ := newTestServer(t)
+	historyKey, err := history.SaveRowChange(ctx, server.history, history.RowChange{
+		Database: "db",
+		Table:    "contacts",
+		RecordID: 9,
+		Values:   map[string]any{"name": "Ada"},
+		ActorID:  "u1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	workflowRequest := httptest.NewRequest(http.MethodPost, "/api/databases/db/workflows", bytes.NewBufferString(`{
+		"name":"triggered",
+		"script":"function run(info) { const changed = info.node(\"table.record.changed\", { history_key: info.inputs.history_key }); return { record_id: changed.record.record_id, name: changed.values.name }; }"
+	}`))
+	workflowRequest.Header.Set("X-Codetable-User", "u1")
+	workflowRecorder := httptest.NewRecorder()
+	server.ServeHTTP(workflowRecorder, workflowRequest)
+	if workflowRecorder.Code != http.StatusCreated {
+		t.Fatalf("expected workflow 201, got %d: %s", workflowRecorder.Code, workflowRecorder.Body.String())
+	}
+
+	runRequest := httptest.NewRequest(http.MethodPost, "/api/workflows/1/runs", bytes.NewBufferString(`{"inputs":{"history_key":"`+historyKey+`"}}`))
+	runRequest.Header.Set("X-Codetable-User", "u1")
+	runRecorder := httptest.NewRecorder()
+	server.ServeHTTP(runRecorder, runRequest)
+	if runRecorder.Code != http.StatusCreated {
+		t.Fatalf("expected workflow run 201, got %d: %s", runRecorder.Code, runRecorder.Body.String())
+	}
+	var response workflowRunResponse
+	if err := json.NewDecoder(runRecorder.Body).Decode(&response); err != nil {
+		t.Fatal(err)
+	}
+	if response.Run.Outputs["record_id"] != float64(9) || response.Run.Outputs["name"] != "Ada" {
+		t.Fatalf("unexpected trigger outputs: %#v", response.Run.Outputs)
+	}
+	if len(response.Run.Steps) != 1 || response.Run.Steps[0].NodeID != "table.record.changed" {
+		t.Fatalf("unexpected trigger steps: %#v", response.Run.Steps)
+	}
+}
+
 func TestWorkflowAndFormPermissions(t *testing.T) {
 	server, system := newTestServer(t)
 

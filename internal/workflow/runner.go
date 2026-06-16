@@ -52,6 +52,7 @@ func (runner *Runner) Run(ctx context.Context, definition Definition, inputs map
 		Steps:      []history.StepRecord{},
 	}
 	runtime := goja.New()
+	runtime.SetFieldNameMapper(goja.TagFieldNameMapper("json", true))
 	info := map[string]any{
 		"workflow_id": definition.ID,
 		"run_id":      runID,

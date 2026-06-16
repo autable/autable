@@ -2,6 +2,7 @@ package history
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 )
@@ -12,7 +13,8 @@ func TestRowHistoryKeysSupportPrefixScan(t *testing.T) {
 	ts1 := time.Unix(10, 0).UTC()
 	ts2 := time.Unix(11, 0).UTC()
 
-	if _, err := SaveRowChange(ctx, store, RowChange{Database: "db", Table: "contacts", RecordID: 42, Timestamp: ts2, Values: map[string]any{"name": "second"}}); err != nil {
+	secondKey, err := SaveRowChange(ctx, store, RowChange{Database: "db", Table: "contacts", RecordID: 42, Timestamp: ts2, Values: map[string]any{"name": "second"}})
+	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := SaveRowChange(ctx, store, RowChange{Database: "db", Table: "contacts", RecordID: 42, Timestamp: ts1, Values: map[string]any{"name": "first"}}); err != nil {
@@ -35,6 +37,20 @@ func TestRowHistoryKeysSupportPrefixScan(t *testing.T) {
 	}
 	if first.Values["name"] != "first" {
 		t.Fatalf("expected sorted history by key timestamp, got %#v", first.Values)
+	}
+	exact, err := store.Get(ctx, secondKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := DecodeRowChange(exact)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Values["name"] != "second" {
+		t.Fatalf("unexpected exact history entry: %#v", second.Values)
+	}
+	if _, err := store.Get(ctx, "missing"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected ErrNotFound, got %v", err)
 	}
 }
 

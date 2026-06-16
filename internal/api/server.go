@@ -62,7 +62,13 @@ const (
 )
 
 func NewServer(catalog metadata.Catalog, system *systemdb.DB, tables *table.Service, historyStore history.Store) *Server {
-	return NewServerWithWorkflowRunner(catalog, system, tables, historyStore, workflow.NewRunner(historyStore, workflow.EchoNode{}))
+	return NewServerWithWorkflowRunner(
+		catalog,
+		system,
+		tables,
+		historyStore,
+		workflow.NewRunner(historyStore, workflow.EchoNode{}, workflow.NewRecordChangedTriggerNode(historyStore)),
+	)
 }
 
 func NewServerWithWorkflowRunner(catalog metadata.Catalog, system *systemdb.DB, tables *table.Service, historyStore history.Store, runner *workflow.Runner) *Server {

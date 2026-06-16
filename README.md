@@ -26,6 +26,7 @@ This repository currently contains the backend core primitives:
 - History key generation and prefix scanning for row/workflow history.
 - Stateless workflow node interface definitions.
 - Synchronous JavaScript workflow runs through registered stateless nodes, with each run persisted as `whistory_id_timestamp`.
+- A `table.record.changed` trigger node that accepts an `rhistory_db_table_record_id_timestamp` key and exposes the decoded row change.
 
 ## Development
 

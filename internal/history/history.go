@@ -3,14 +3,18 @@ package history
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
 	"time"
 )
 
+var ErrNotFound = errors.New("history entry not found")
+
 type Store interface {
 	Put(ctx context.Context, key string, value []byte) error
+	Get(ctx context.Context, key string) (Entry, error)
 	GetPrefix(ctx context.Context, prefix string) ([]Entry, error)
 }
 

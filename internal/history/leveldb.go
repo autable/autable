@@ -2,6 +2,7 @@ package history
 
 import (
 	"context"
+	"errors"
 
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/util"
@@ -28,6 +29,20 @@ func (store *LevelDBStore) Put(ctx context.Context, key string, value []byte) er
 		return err
 	}
 	return store.db.Put([]byte(key), value, nil)
+}
+
+func (store *LevelDBStore) Get(ctx context.Context, key string) (Entry, error) {
+	if err := ctx.Err(); err != nil {
+		return Entry{}, err
+	}
+	value, err := store.db.Get([]byte(key), nil)
+	if errors.Is(err, leveldb.ErrNotFound) {
+		return Entry{}, ErrNotFound
+	}
+	if err != nil {
+		return Entry{}, err
+	}
+	return Entry{Key: key, Value: append([]byte(nil), value...)}, nil
 }
 
 func (store *LevelDBStore) GetPrefix(ctx context.Context, prefix string) ([]Entry, error) {

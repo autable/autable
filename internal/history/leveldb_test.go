@@ -18,13 +18,14 @@ func TestLevelDBStorePersistsPrefixScannableHistory(t *testing.T) {
 		}
 	})
 
-	if _, err := SaveRowChange(ctx, store, RowChange{
+	key, err := SaveRowChange(ctx, store, RowChange{
 		Database:  "db",
 		Table:     "contacts",
 		RecordID:  1,
 		Timestamp: time.Unix(1, 0).UTC(),
 		Values:    map[string]any{"name": "Ada"},
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -41,5 +42,16 @@ func TestLevelDBStorePersistsPrefixScannableHistory(t *testing.T) {
 	}
 	if change.Values["name"] != "Ada" {
 		t.Fatalf("unexpected change: %#v", change)
+	}
+	exact, err := store.Get(ctx, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	exactChange, err := DecodeRowChange(exact)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if exactChange.RecordID != 1 {
+		t.Fatalf("unexpected exact change: %#v", exactChange)
 	}
 }

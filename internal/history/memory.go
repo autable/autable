@@ -23,6 +23,17 @@ func (store *MemoryStore) Put(_ context.Context, key string, value []byte) error
 	return nil
 }
 
+func (store *MemoryStore) Get(_ context.Context, key string) (Entry, error) {
+	store.mu.RLock()
+	defer store.mu.RUnlock()
+
+	value, ok := store.data[key]
+	if !ok {
+		return Entry{}, ErrNotFound
+	}
+	return Entry{Key: key, Value: append([]byte(nil), value...)}, nil
+}
+
 func (store *MemoryStore) GetPrefix(_ context.Context, prefix string) ([]Entry, error) {
 	store.mu.RLock()
 	defer store.mu.RUnlock()
