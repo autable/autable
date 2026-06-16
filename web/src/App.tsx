@@ -32,6 +32,7 @@ import {
   createRow,
   listOIDCProviders,
   listForms,
+  listRows,
   listWorkflows,
   loadCurrentUser,
   loadMetadata,
@@ -48,6 +49,7 @@ import {
   type Catalog,
   type FormDefinition,
   type OIDCProvider,
+  type RowRecord,
   type TableView,
   type WorkflowDefinition,
   type WorkflowNodeInfo,
@@ -59,6 +61,7 @@ type View = "table" | "workflow" | "form";
 export function App() {
   const [catalog, setCatalog] = useState<Catalog>(demoCatalog);
   const [rows, setRows] = useState(initialRows);
+  const [rowsViewName, setRowsViewName] = useState("all");
   const [view, setView] = useState<View>("table");
   const [selectedTable, setSelectedTable] = useState("contacts");
   const [selectedTableView, setSelectedTableView] = useState("all");
@@ -83,8 +86,8 @@ export function App() {
   const selectedWorkflow = workflows.find((item) => item.id === selectedWorkflowID) ?? workflows[0];
   const selectedForm = forms.find((item) => item.id === selectedFormID) ?? forms[0];
   const displayedRows = useMemo(
-    () => applyTableView(rows, table.views ?? [], selectedTableView),
-    [rows, table.views, selectedTableView]
+    () => (rowsViewName === selectedTableView ? rows : applyTableView(rows, table.views ?? [], selectedTableView)),
+    [rows, rowsViewName, table.views, selectedTableView]
   );
   const selectedWorkflowRun =
     lastWorkflowRun?.run.workflow_id === selectedWorkflow?.id ? lastWorkflowRun : null;
@@ -116,6 +119,23 @@ export function App() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const userID = currentUser ? undefined : "demo-user";
+    void listRows(database.name, table.name, selectedTableView, userID)
+      .then((nextRows) => {
+        if (cancelled) {
+          return;
+        }
+        setRows(nextRows.map(rowRecordToValues));
+        setRowsViewName(selectedTableView);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUser?.id, database.name, table.name, selectedTableView]);
 
   useEffect(() => {
     setWorkflowSecretsText(stringMapToJSON(selectedWorkflow?.secrets ?? {}));
@@ -168,9 +188,10 @@ export function App() {
       );
       setRows((current) =>
         current.map((item) =>
-          Number(item.record_id) === saved.record_id ? { record_id: saved.record_id, ...saved.values } : item
+          Number(item.record_id) === saved.record_id ? rowRecordToValues(saved) : item
         )
       );
+      setRowsViewName("local");
       setStatus(`Updated record ${saved.record_id}`);
     } catch (error) {
       setStatus(error instanceof Error ? `Local edit: ${error.message}` : "Local edit saved");
@@ -206,11 +227,13 @@ export function App() {
     values.name = `New record ${rows.length + 1}`;
     try {
       const saved = await createRow(database.name, table.name, values, currentUser ? undefined : "demo-user");
-      setRows((current) => [...current, { record_id: saved.record_id, ...saved.values }]);
+      setRows((current) => [...current, rowRecordToValues(saved)]);
+      setRowsViewName("local");
       setStatus(`Created record ${saved.record_id}`);
     } catch (error) {
       const localID = Math.max(0, ...rows.map((row) => Number(row.record_id))) + 1;
       setRows((current) => [...current, { record_id: localID, ...values }]);
+      setRowsViewName("local");
       setStatus(error instanceof Error ? `Local draft: ${error.message}` : "Local draft added");
     }
   }
@@ -281,16 +304,19 @@ export function App() {
     if (!currentUser) {
       const localID = Math.max(0, ...rows.map((row) => Number(row.record_id))) + 1;
       setRows((current) => [...current, { record_id: localID, ...values }]);
+      setRowsViewName("local");
       setStatus("Local form submitted");
       return;
     }
     try {
       const saved = await createRow(database.name, table.name, values);
-      setRows((current) => [...current, { record_id: saved.record_id, ...saved.values }]);
+      setRows((current) => [...current, rowRecordToValues(saved)]);
+      setRowsViewName("local");
       setStatus(`Form created record ${saved.record_id}`);
     } catch (error) {
       const localID = Math.max(0, ...rows.map((row) => Number(row.record_id))) + 1;
       setRows((current) => [...current, { record_id: localID, ...values }]);
+      setRowsViewName("local");
       setStatus(error instanceof Error ? `Local form: ${error.message}` : "Local form submitted");
     }
   }
@@ -407,7 +433,14 @@ export function App() {
           )}
         </div>
         <Label htmlFor="table-select">Table</Label>
-        <Select id="table-select" value={selectedTable} onChange={(_, data) => setSelectedTable(data.value)}>
+        <Select
+          id="table-select"
+          value={selectedTable}
+          onChange={(_, data) => {
+            setSelectedTable(data.value);
+            setSelectedTableView("all");
+          }}
+        >
           {database.tables.map((item) => (
             <option key={item.name} value={item.name}>
               {item.display_name || item.name}
@@ -659,6 +692,10 @@ function replaceResource<T extends { id?: number }>(items: T[], saved: T): T[] {
     return [...items, saved];
   }
   return items.map((item) => (item.id === saved.id ? saved : item));
+}
+
+function rowRecordToValues(row: RowRecord): Record<string, unknown> {
+  return { record_id: row.record_id, ...row.values };
 }
 
 function stringMapToJSON(values: Record<string, string>): string {

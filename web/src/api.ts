@@ -110,6 +110,11 @@ export type AuthUser = {
   provider: string;
 };
 
+export type RowRecord = {
+  record_id: number;
+  values: Record<string, unknown>;
+};
+
 export type OIDCProvider = {
   name: string;
   issuer_url: string;
@@ -133,7 +138,7 @@ export async function createRow(
   tableName: string,
   values: Record<string, unknown>,
   userID?: string
-): Promise<{ record_id: number; values: Record<string, unknown> }> {
+): Promise<RowRecord> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json"
   };
@@ -149,7 +154,7 @@ export async function createRow(
     const error = await response.json().catch(() => ({ error: response.statusText }));
     throw new Error(error.error ?? "row creation failed");
   }
-  return response.json() as Promise<{ record_id: number; values: Record<string, unknown> }>;
+  return response.json() as Promise<RowRecord>;
 }
 
 export async function updateRow(
@@ -158,7 +163,7 @@ export async function updateRow(
   recordID: number,
   values: Record<string, unknown>,
   userID?: string
-): Promise<{ record_id: number; values: Record<string, unknown> }> {
+): Promise<RowRecord> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json"
   };
@@ -174,7 +179,24 @@ export async function updateRow(
     const error = await response.json().catch(() => ({ error: response.statusText }));
     throw new Error(error.error ?? "row update failed");
   }
-  return response.json() as Promise<{ record_id: number; values: Record<string, unknown> }>;
+  return response.json() as Promise<RowRecord>;
+}
+
+export async function listRows(
+  dbName: string,
+  tableName: string,
+  viewName?: string,
+  userID?: string
+): Promise<RowRecord[]> {
+  const query = viewName && viewName !== "all" ? `?view=${encodeURIComponent(viewName)}` : "";
+  const response = await fetch(`/api/tables/${dbName}/${tableName}/rows${query}`, {
+    headers: userHeaders(userID)
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: response.statusText }));
+    throw new Error(error.error ?? `row list failed: ${response.status}`);
+  }
+  return response.json() as Promise<RowRecord[]>;
 }
 
 export async function register(email: string, password: string): Promise<AuthUser> {
