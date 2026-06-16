@@ -6,10 +6,12 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"codetable/internal/config"
 	"codetable/internal/history"
 	"codetable/internal/metadata"
 	"codetable/internal/permission"
@@ -84,6 +86,92 @@ func TestLoginRejectsInvalidPassword(t *testing.T) {
 	server.ServeHTTP(recorder, login)
 	if recorder.Code != http.StatusUnauthorized {
 		t.Fatalf("expected login 401, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestOIDCProvidersExposePublicConfig(t *testing.T) {
+	server, _ := newTestServerWithOIDC(t, []config.OIDCProvider{
+		{
+			Name:         "main",
+			IssuerURL:    "https://issuer.example",
+			ClientID:     "codetable",
+			ClientSecret: "secret",
+			Scopes:       []string{"email"},
+		},
+	})
+
+	request := httptest.NewRequest(http.MethodGet, "/api/auth/oidc/providers", nil)
+	recorder := httptest.NewRecorder()
+	server.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected providers 200, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+
+	var providers []map[string]any
+	if err := json.NewDecoder(recorder.Body).Decode(&providers); err != nil {
+		t.Fatal(err)
+	}
+	if len(providers) != 1 {
+		t.Fatalf("expected one provider, got %#v", providers)
+	}
+	if providers[0]["name"] != "main" || providers[0]["issuer_url"] != "https://issuer.example" {
+		t.Fatalf("unexpected provider response: %#v", providers[0])
+	}
+	if _, ok := providers[0]["client_secret"]; ok {
+		t.Fatalf("provider response leaked client_secret: %#v", providers[0])
+	}
+	scopes, ok := providers[0]["scopes"].([]any)
+	if !ok || len(scopes) != 2 || scopes[0] != "openid" || scopes[1] != "email" {
+		t.Fatalf("expected openid to be prepended to custom scopes, got %#v", providers[0]["scopes"])
+	}
+}
+
+func TestOIDCStartRedirectsToAuthorizeEndpoint(t *testing.T) {
+	server, _ := newTestServerWithOIDC(t, []config.OIDCProvider{
+		{
+			Name:      "main",
+			IssuerURL: "https://issuer.example/",
+			ClientID:  "codetable",
+		},
+	})
+
+	request := httptest.NewRequest(http.MethodGet, "/api/auth/oidc/main/start", nil)
+	request.Host = "app.example"
+	request.Header.Set("X-Forwarded-Proto", "https")
+	recorder := httptest.NewRecorder()
+	server.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusFound {
+		t.Fatalf("expected start 302, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+
+	location := recorder.Header().Get("Location")
+	authorizeURL, err := url.Parse(location)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if authorizeURL.Scheme != "https" || authorizeURL.Host != "issuer.example" || authorizeURL.Path != "/authorize" {
+		t.Fatalf("unexpected authorize url: %s", location)
+	}
+	query := authorizeURL.Query()
+	if query.Get("response_type") != "code" || query.Get("client_id") != "codetable" {
+		t.Fatalf("unexpected authorize query: %s", authorizeURL.RawQuery)
+	}
+	if query.Get("scope") != "openid email profile" {
+		t.Fatalf("unexpected default scopes: %q", query.Get("scope"))
+	}
+	if query.Get("redirect_uri") != "https://app.example/api/auth/oidc/main/callback" {
+		t.Fatalf("unexpected redirect_uri: %q", query.Get("redirect_uri"))
+	}
+	if query.Get("state") == "" {
+		t.Fatal("expected non-empty state")
+	}
+
+	cookie := oidcStateCookie(t, recorder)
+	if !cookie.HttpOnly || cookie.Path != "/api/auth/oidc" {
+		t.Fatalf("unexpected oidc state cookie: %#v", cookie)
+	}
+	if cookie.Value != "main:"+query.Get("state") {
+		t.Fatalf("expected state cookie to match redirect state, got %q and %q", cookie.Value, query.Get("state"))
 	}
 }
 
@@ -608,6 +696,11 @@ func TestWorkflowAndFormPermissions(t *testing.T) {
 
 func newTestServer(t *testing.T) (*Server, *systemdb.DB) {
 	t.Helper()
+	return newTestServerWithOIDC(t, nil)
+}
+
+func newTestServerWithOIDC(t *testing.T, providers []config.OIDCProvider) (*Server, *systemdb.DB) {
+	t.Helper()
 	system, err := systemdb.Open(context.Background(), filepath.Join(t.TempDir(), "system.sqlite"))
 	if err != nil {
 		t.Fatal(err)
@@ -619,7 +712,7 @@ func newTestServer(t *testing.T) (*Server, *systemdb.DB) {
 	})
 	historyStore := history.NewMemoryStore()
 	catalog := testCatalog("./db.sqlite")
-	return NewServer(catalog, system, table.NewService(historyStore), historyStore), system
+	return NewServerWithOIDCProviders(catalog, system, table.NewService(historyStore), historyStore, providers), system
 }
 
 func testCatalog(sqlitePath string) metadata.Catalog {
@@ -657,5 +750,16 @@ func sessionCookie(t *testing.T, recorder *httptest.ResponseRecorder) *http.Cook
 		}
 	}
 	t.Fatalf("missing session cookie in Set-Cookie headers: %s", strings.Join(recorder.Result().Header.Values("Set-Cookie"), ", "))
+	return nil
+}
+
+func oidcStateCookie(t *testing.T, recorder *httptest.ResponseRecorder) *http.Cookie {
+	t.Helper()
+	for _, cookie := range recorder.Result().Cookies() {
+		if cookie.Name == oidcStateCookieName {
+			return cookie
+		}
+	}
+	t.Fatalf("missing oidc state cookie in Set-Cookie headers: %s", strings.Join(recorder.Result().Header.Values("Set-Cookie"), ", "))
 	return nil
 }

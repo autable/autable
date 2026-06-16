@@ -4,12 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
 
 	"codetable/internal/auth"
+	"codetable/internal/config"
 	"codetable/internal/history"
 	"codetable/internal/metadata"
 	"codetable/internal/permission"
@@ -24,6 +27,7 @@ type Server struct {
 	tables  *table.Service
 	history history.Store
 	runner  *workflow.Runner
+	oidc    []config.OIDCProvider
 	mux     *http.ServeMux
 }
 
@@ -47,6 +51,12 @@ type userResponse struct {
 	Provider string `json:"provider"`
 }
 
+type oidcProviderResponse struct {
+	Name      string   `json:"name"`
+	IssuerURL string   `json:"issuer_url"`
+	Scopes    []string `json:"scopes"`
+}
+
 type workflowRunRequest struct {
 	Inputs map[string]any `json:"inputs"`
 }
@@ -57,8 +67,10 @@ type workflowRunResponse struct {
 }
 
 const (
-	sessionCookieName = "codetable_session"
-	sessionTTL        = 14 * 24 * time.Hour
+	sessionCookieName   = "codetable_session"
+	oidcStateCookieName = "codetable_oidc_state"
+	sessionTTL          = 14 * 24 * time.Hour
+	oidcStateTTL        = 10 * time.Minute
 )
 
 func NewServer(catalog metadata.Catalog, system *systemdb.DB, tables *table.Service, historyStore history.Store) *Server {
@@ -72,12 +84,28 @@ func NewServer(catalog metadata.Catalog, system *systemdb.DB, tables *table.Serv
 }
 
 func NewServerWithWorkflowRunner(catalog metadata.Catalog, system *systemdb.DB, tables *table.Service, historyStore history.Store, runner *workflow.Runner) *Server {
+	return NewServerWithWorkflowRunnerAndOIDC(catalog, system, tables, historyStore, runner, nil)
+}
+
+func NewServerWithOIDCProviders(catalog metadata.Catalog, system *systemdb.DB, tables *table.Service, historyStore history.Store, providers []config.OIDCProvider) *Server {
+	return NewServerWithWorkflowRunnerAndOIDC(
+		catalog,
+		system,
+		tables,
+		historyStore,
+		workflow.NewRunner(historyStore, workflow.EchoNode{}, workflow.NewRecordChangedTriggerNode(historyStore)),
+		providers,
+	)
+}
+
+func NewServerWithWorkflowRunnerAndOIDC(catalog metadata.Catalog, system *systemdb.DB, tables *table.Service, historyStore history.Store, runner *workflow.Runner, providers []config.OIDCProvider) *Server {
 	server := &Server{
 		catalog: catalog,
 		system:  system,
 		tables:  tables,
 		history: historyStore,
 		runner:  runner,
+		oidc:    append([]config.OIDCProvider(nil), providers...),
 		mux:     http.NewServeMux(),
 	}
 	server.routes()
@@ -91,6 +119,8 @@ func (server *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (server *Server) routes() {
 	server.mux.HandleFunc("POST /api/auth/register", server.handleRegister)
 	server.mux.HandleFunc("POST /api/auth/login", server.handleLogin)
+	server.mux.HandleFunc("GET /api/auth/oidc/providers", server.handleOIDCProviders)
+	server.mux.HandleFunc("GET /api/auth/oidc/", server.handleOIDC)
 	server.mux.HandleFunc("GET /api/auth/me", server.handleMe)
 	server.mux.HandleFunc("POST /api/auth/logout", server.handleLogout)
 	server.mux.HandleFunc("GET /api/metadata", server.handleMetadata)
@@ -154,6 +184,43 @@ func (server *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	setSessionCookie(w, session)
 	writeJSON(w, http.StatusOK, toUserResponse(user))
+}
+
+func (server *Server) handleOIDCProviders(w http.ResponseWriter, _ *http.Request) {
+	providers := make([]oidcProviderResponse, 0, len(server.oidc))
+	for _, provider := range server.oidc {
+		providers = append(providers, oidcProviderResponse{
+			Name:      provider.Name,
+			IssuerURL: provider.IssuerURL,
+			Scopes:    oidcScopes(provider),
+		})
+	}
+	writeJSON(w, http.StatusOK, providers)
+}
+
+func (server *Server) handleOIDC(w http.ResponseWriter, r *http.Request) {
+	providerName, action, ok := parseOIDCPath(r.URL.Path)
+	if !ok || action != "start" || r.Method != http.MethodGet {
+		http.NotFound(w, r)
+		return
+	}
+	provider, ok := server.oidcProvider(providerName)
+	if !ok {
+		writeError(w, http.StatusNotFound, fmt.Errorf("oidc provider %q not found", providerName))
+		return
+	}
+	state, err := auth.NewSessionToken()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	setOIDCStateCookie(w, providerName, state)
+	authURL, err := oidcAuthorizeURL(r, provider, state)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	http.Redirect(w, r, authURL, http.StatusFound)
 }
 
 func (server *Server) handleMe(w http.ResponseWriter, r *http.Request) {
@@ -606,6 +673,18 @@ func parseTableRowsPath(path string) (string, string, bool) {
 	return parts[2], parts[3], true
 }
 
+func parseOIDCPath(path string) (string, string, bool) {
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(parts) != 5 || parts[0] != "api" || parts[1] != "auth" || parts[2] != "oidc" {
+		return "", "", false
+	}
+	providerName, err := url.PathUnescape(parts[3])
+	if err != nil || providerName == "" {
+		return "", "", false
+	}
+	return providerName, parts[4], true
+}
+
 func parseRowHistoryPath(path string) (string, string, int64, bool) {
 	parts := strings.Split(strings.Trim(path, "/"), "/")
 	if len(parts) != 7 || parts[0] != "api" || parts[1] != "tables" || parts[4] != "rows" || parts[6] != "history" {
@@ -802,6 +881,77 @@ func clearSessionCookie(w http.ResponseWriter) {
 		Expires:  time.Unix(0, 0).UTC(),
 		MaxAge:   -1,
 	})
+}
+
+func (server *Server) oidcProvider(name string) (config.OIDCProvider, bool) {
+	for _, provider := range server.oidc {
+		if provider.Name == name {
+			return provider, true
+		}
+	}
+	return config.OIDCProvider{}, false
+}
+
+func oidcScopes(provider config.OIDCProvider) []string {
+	if len(provider.Scopes) == 0 {
+		return []string{"openid", "email", "profile"}
+	}
+	scopes := append([]string(nil), provider.Scopes...)
+	for _, scope := range scopes {
+		if scope == "openid" {
+			return scopes
+		}
+	}
+	return append([]string{"openid"}, scopes...)
+}
+
+func setOIDCStateCookie(w http.ResponseWriter, providerName, state string) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     oidcStateCookieName,
+		Value:    providerName + ":" + state,
+		Path:     "/api/auth/oidc",
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		Expires:  time.Now().Add(oidcStateTTL),
+	})
+}
+
+func oidcAuthorizeURL(r *http.Request, provider config.OIDCProvider, state string) (string, error) {
+	issuerURL := strings.TrimRight(provider.IssuerURL, "/")
+	if issuerURL == "" {
+		return "", errors.New("oidc issuer_url is required")
+	}
+	authorizeURL, err := url.Parse(issuerURL + "/authorize")
+	if err != nil {
+		return "", err
+	}
+	query := authorizeURL.Query()
+	query.Set("response_type", "code")
+	query.Set("client_id", provider.ClientID)
+	query.Set("redirect_uri", oidcCallbackURL(r, provider.Name))
+	query.Set("scope", strings.Join(oidcScopes(provider), " "))
+	query.Set("state", state)
+	authorizeURL.RawQuery = query.Encode()
+	return authorizeURL.String(), nil
+}
+
+func oidcCallbackURL(r *http.Request, providerName string) string {
+	scheme := r.Header.Get("X-Forwarded-Proto")
+	if scheme == "" {
+		scheme = "http"
+		if r.TLS != nil {
+			scheme = "https"
+		}
+	}
+	host := r.Header.Get("X-Forwarded-Host")
+	if host == "" {
+		host = r.Host
+	}
+	return (&url.URL{
+		Scheme: scheme,
+		Host:   host,
+		Path:   "/api/auth/oidc/" + url.PathEscape(providerName) + "/callback",
+	}).String()
 }
 
 func toUserResponse(user auth.User) userResponse {

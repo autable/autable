@@ -58,7 +58,13 @@ func run(ctx context.Context, configPath, metadataPath string) error {
 	if address == "" {
 		address = "127.0.0.1:8080"
 	}
-	server := api.NewServer(catalog, system, table.NewServiceWithRepository(historyStore, rowRepository), historyStore)
+	server := api.NewServerWithOIDCProviders(
+		catalog,
+		system,
+		table.NewServiceWithRepository(historyStore, rowRepository),
+		historyStore,
+		cfg.OIDC.Providers,
+	)
 	slog.Info("codetable listening", "address", address)
 	return http.ListenAndServe(address, server)
 }

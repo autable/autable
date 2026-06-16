@@ -20,6 +20,7 @@ This repository currently contains the backend core primitives:
 - Row create/update history written to LevelDB-compatible storage.
 - Table views with composable `base_view`, filters, and sorts.
 - Password registration/login with HttpOnly session cookies.
+- OIDC provider listing and authorization-start redirect using config-managed providers and HttpOnly state cookies.
 - Field-level permissions: none, read, write.
 - Workflow and form resource permissions using their auto-incrementing IDs.
 - User identity model with email fallback for password and OIDC accounts.
