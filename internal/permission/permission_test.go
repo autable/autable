@@ -22,6 +22,27 @@ func TestFieldLevelPermission(t *testing.T) {
 	}
 }
 
+func TestFieldGrantOverridesTableDefault(t *testing.T) {
+	perms := New(
+		Grant{SubjectID: "u1", Scope: ScopeTable, Resource: "db.contacts", Level: Write},
+		Grant{SubjectID: "u1", Scope: ScopeField, Resource: "db.contacts", Field: "email", Level: Read},
+		Grant{SubjectID: "u1", Scope: ScopeField, Resource: "db.contacts", Field: "secret", Level: None},
+	)
+
+	if !perms.CanWriteField("u1", "db.contacts", "name") {
+		t.Fatal("expected table write permission to apply without a field grant")
+	}
+	if !perms.CanReadField("u1", "db.contacts", "email") {
+		t.Fatal("expected field read grant to allow reads")
+	}
+	if perms.CanWriteField("u1", "db.contacts", "email") {
+		t.Fatal("did not expect table write to override field read")
+	}
+	if perms.CanReadField("u1", "db.contacts", "secret") {
+		t.Fatal("did not expect table write to override explicit field none")
+	}
+}
+
 func TestResourceLevelPermission(t *testing.T) {
 	perms := New(
 		Grant{SubjectID: "u1", Scope: ScopeDatabase, Resource: "workspace", Level: Write},

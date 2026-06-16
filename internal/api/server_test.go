@@ -1020,6 +1020,61 @@ func TestRoleMembershipGrantsEffectiveTableAccess(t *testing.T) {
 	}
 }
 
+func TestRoleFieldGrantOverridesTableWrite(t *testing.T) {
+	ctx := context.Background()
+	server, system := newTestServer(t)
+	if err := system.SaveGrant(ctx, permission.Grant{
+		SubjectID: "owner",
+		Scope:     permission.ScopeTable,
+		Resource:  "db.contacts",
+		Level:     permission.Write,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	createRequest := httptest.NewRequest(http.MethodPost, "/api/tables/db/contacts/rows", bytes.NewBufferString(`{
+		"values":{"name":"Ada","email":"ada@example.com"}
+	}`))
+	createRequest.AddCookie(testSessionCookie(t, system, "owner"))
+	createRecorder := httptest.NewRecorder()
+	server.ServeHTTP(createRecorder, createRequest)
+	if createRecorder.Code != http.StatusCreated {
+		t.Fatalf("expected owner create 201, got %d: %s", createRecorder.Code, createRecorder.Body.String())
+	}
+
+	if _, err := system.SaveRole(ctx, systemdb.RoleDefinition{DatabaseName: "db", Name: "editor"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := system.ReplaceRoleGrants(ctx, "db", "editor", []permission.Grant{
+		{Scope: permission.ScopeTable, Resource: "db.contacts", Level: permission.Write},
+		{Scope: permission.ScopeField, Resource: "db.contacts", Field: "email", Level: permission.Read},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := system.ReplaceRoleMembers(ctx, "db", "editor", []string{"u1"}); err != nil {
+		t.Fatal(err)
+	}
+
+	allowedRequest := httptest.NewRequest(http.MethodPatch, "/api/tables/db/contacts/rows/1", bytes.NewBufferString(`{
+		"values":{"name":"Grace"}
+	}`))
+	allowedRequest.AddCookie(testSessionCookie(t, system, "u1"))
+	allowedRecorder := httptest.NewRecorder()
+	server.ServeHTTP(allowedRecorder, allowedRequest)
+	if allowedRecorder.Code != http.StatusOK {
+		t.Fatalf("expected role member name update 200, got %d: %s", allowedRecorder.Code, allowedRecorder.Body.String())
+	}
+
+	deniedRequest := httptest.NewRequest(http.MethodPatch, "/api/tables/db/contacts/rows/1", bytes.NewBufferString(`{
+		"values":{"email":"blocked@example.com"}
+	}`))
+	deniedRequest.AddCookie(testSessionCookie(t, system, "u1"))
+	deniedRecorder := httptest.NewRecorder()
+	server.ServeHTTP(deniedRecorder, deniedRequest)
+	if deniedRecorder.Code != http.StatusForbidden {
+		t.Fatalf("expected role member field override 403, got %d: %s", deniedRecorder.Code, deniedRecorder.Body.String())
+	}
+}
+
 func TestRoleManagementRequiresDatabaseWrite(t *testing.T) {
 	catalog := metadata.Catalog{Databases: []metadata.Database{{Name: "workspace", SQLitePath: "./data/workspace.sqlite"}}}
 	server, system, _ := newTestServerWithMetadataFile(t, catalog)

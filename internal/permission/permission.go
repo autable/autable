@@ -35,19 +35,31 @@ func New(grants ...Grant) Set {
 }
 
 func (set Set) FieldLevel(subjectID, resource, field string) Level {
-	level := None
+	tableLevel := None
+	fieldLevel := None
+	hasFieldGrant := false
 	for _, grant := range set.grants {
 		if grant.SubjectID != subjectID || grant.Resource != resource {
 			continue
 		}
-		if grant.Scope == ScopeTable && grant.Level > level {
-			level = grant.Level
-		}
-		if grant.Scope == ScopeField && grant.Field == field && grant.Level > level {
-			level = grant.Level
+		switch grant.Scope {
+		case ScopeTable:
+			if grant.Level > tableLevel {
+				tableLevel = grant.Level
+			}
+		case ScopeField:
+			if grant.Field == field {
+				hasFieldGrant = true
+				if grant.Level > fieldLevel {
+					fieldLevel = grant.Level
+				}
+			}
 		}
 	}
-	return level
+	if hasFieldGrant {
+		return fieldLevel
+	}
+	return tableLevel
 }
 
 func (set Set) ResourceLevel(subjectID string, scope Scope, resource string) Level {

@@ -110,6 +110,48 @@ func TestCreateRowEnforcesFieldWritePermission(t *testing.T) {
 	}
 }
 
+func TestCreateRowHonorsFieldOverrideOfTableWrite(t *testing.T) {
+	ctx := context.Background()
+	service := NewService(history.NewMemoryStore())
+	catalog := metadata.Catalog{Databases: []metadata.Database{{
+		Name:       "db",
+		SQLitePath: "./db.sqlite",
+		Tables: []metadata.Table{{
+			Name: "contacts",
+			Fields: []metadata.Field{
+				{Name: "name", Type: "text"},
+				{Name: "email", Type: "email"},
+			},
+		}},
+	}}}
+	perms := permission.New(
+		permission.Grant{
+			SubjectID: "u1",
+			Scope:     permission.ScopeTable,
+			Resource:  "db.contacts",
+			Level:     permission.Write,
+		},
+		permission.Grant{
+			SubjectID: "u1",
+			Scope:     permission.ScopeField,
+			Resource:  "db.contacts",
+			Field:     "email",
+			Level:     permission.Read,
+		},
+	)
+
+	if _, err := service.CreateRow(ctx, catalog, perms, "u1", "db", "contacts", map[string]any{"name": "Ada"}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := service.CreateRow(ctx, catalog, perms, "u1", "db", "contacts", map[string]any{
+		"name":  "Grace",
+		"email": "grace@example.com",
+	})
+	if !errors.Is(err, ErrPermissionDenied) {
+		t.Fatalf("expected field override permission error, got %v", err)
+	}
+}
+
 func TestUpdateRowMergesValuesAndWritesHistory(t *testing.T) {
 	ctx := context.Background()
 	store := history.NewMemoryStore()
@@ -199,6 +241,58 @@ func TestUpdateRowRejectsRecordIDAndReadOnlyField(t *testing.T) {
 	_, err = service.UpdateRow(ctx, catalog, readPerms, "u1", "db", "contacts", row.RecordID, map[string]any{"name": "Grace"})
 	if !errors.Is(err, ErrPermissionDenied) {
 		t.Fatalf("expected read-only permission error, got %v", err)
+	}
+}
+
+func TestUpdateRowHonorsFieldOverrideOfTableWrite(t *testing.T) {
+	ctx := context.Background()
+	service := NewService(history.NewMemoryStore())
+	catalog := metadata.Catalog{Databases: []metadata.Database{{
+		Name:       "db",
+		SQLitePath: "./db.sqlite",
+		Tables: []metadata.Table{{
+			Name: "contacts",
+			Fields: []metadata.Field{
+				{Name: "name", Type: "text"},
+				{Name: "email", Type: "email"},
+			},
+		}},
+	}}}
+	writePerms := permission.New(permission.Grant{
+		SubjectID: "u1",
+		Scope:     permission.ScopeTable,
+		Resource:  "db.contacts",
+		Level:     permission.Write,
+	})
+	fieldReadPerms := permission.New(
+		permission.Grant{
+			SubjectID: "u1",
+			Scope:     permission.ScopeTable,
+			Resource:  "db.contacts",
+			Level:     permission.Write,
+		},
+		permission.Grant{
+			SubjectID: "u1",
+			Scope:     permission.ScopeField,
+			Resource:  "db.contacts",
+			Field:     "email",
+			Level:     permission.Read,
+		},
+	)
+	row, err := service.CreateRow(ctx, catalog, writePerms, "u1", "db", "contacts", map[string]any{
+		"name":  "Ada",
+		"email": "ada@example.com",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := service.UpdateRow(ctx, catalog, fieldReadPerms, "u1", "db", "contacts", row.RecordID, map[string]any{"name": "Grace"}); err != nil {
+		t.Fatal(err)
+	}
+	_, err = service.UpdateRow(ctx, catalog, fieldReadPerms, "u1", "db", "contacts", row.RecordID, map[string]any{"email": "blocked@example.com"})
+	if !errors.Is(err, ErrPermissionDenied) {
+		t.Fatalf("expected field override permission error, got %v", err)
 	}
 }
 
