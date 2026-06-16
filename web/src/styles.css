@@ -406,6 +406,16 @@ select {
   min-height: 0;
 }
 
+.permission-dialog {
+  width: min(1080px, calc(100vw - 48px));
+  max-width: min(1080px, calc(100vw - 48px));
+}
+
+.permission-dialog-content {
+  max-height: min(680px, calc(100vh - 220px));
+  overflow: auto;
+}
+
 .permission-card {
   display: flex;
   flex-direction: column;
