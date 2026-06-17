@@ -4,10 +4,27 @@ import (
 	"context"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"codetable/internal/metadata"
 	"codetable/internal/table"
+
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
 )
+
+type oldRecordTimestampModel struct {
+	ID        int64  `gorm:"primaryKey;autoIncrement"`
+	RecordID  int64  `gorm:"column:record_id"`
+	Table     string `gorm:"column:table_name"`
+	Values    JSONMap
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+func (oldRecordTimestampModel) TableName() string {
+	return "records"
+}
 
 func TestRepositoryCreatesOneSQLiteFilePerMetadataDatabase(t *testing.T) {
 	ctx := context.Background()
@@ -93,6 +110,65 @@ func TestRepositoryPersistsRowsAcrossReopen(t *testing.T) {
 	}
 	if stored.CreatedAt <= 0 || stored.UpdatedAt <= 0 {
 		t.Fatalf("expected millisecond integer timestamps, got created=%d updated=%d", stored.CreatedAt, stored.UpdatedAt)
+	}
+}
+
+func TestRepositoryDropsIncompatibleTimestampTable(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "workspace.sqlite")
+	raw, err := gorm.Open(sqlite.Open(path), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := raw.WithContext(ctx).AutoMigrate(&oldRecordTimestampModel{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := raw.WithContext(ctx).Create(&oldRecordTimestampModel{
+		RecordID: 1,
+		Table:    "contacts",
+		Values:   JSONMap{"name": "Legacy"},
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	sqlDB, err := raw.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sqlDB.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	catalog := metadata.Catalog{Databases: []metadata.Database{{Name: "workspace", SQLitePath: path}}}
+	repository, err := OpenCatalog(ctx, catalog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := repository.Close(); err != nil {
+			t.Fatal(err)
+		}
+	})
+	rows, err := repository.Rows(ctx, "workspace", "contacts")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 0 {
+		t.Fatalf("expected incompatible records table to be dropped, got %#v", rows)
+	}
+	row, err := repository.CreateRow(ctx, "workspace", "contacts", map[string]any{"name": "Current"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := repository.database("workspace")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stored Record
+	if err := db.First(&stored, &Record{RecordID: row.RecordID, TableName: "contacts"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if stored.CreatedAt <= 0 || stored.UpdatedAt <= 0 {
+		t.Fatalf("expected millisecond row timestamps after schema rebuild, got %#v", stored)
 	}
 }
 

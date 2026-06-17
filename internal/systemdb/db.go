@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"codetable/internal/auth"
@@ -148,6 +149,9 @@ func (db *DB) Close() error {
 }
 
 func (db *DB) Migrate(ctx context.Context) error {
+	if err := db.dropIncompatibleTimestampTables(ctx); err != nil {
+		return err
+	}
 	return db.orm.WithContext(ctx).AutoMigrate(
 		&userModel{},
 		&sessionModel{},
@@ -157,6 +161,57 @@ func (db *DB) Migrate(ctx context.Context) error {
 		&roleModel{},
 		&roleMemberModel{},
 	)
+}
+
+func (db *DB) dropIncompatibleTimestampTables(ctx context.Context) error {
+	for _, spec := range []struct {
+		model   any
+		columns []string
+	}{
+		{model: &userModel{}, columns: []string{"created_at", "updated_at"}},
+		{model: &sessionModel{}, columns: []string{"expires_at", "created_at", "updated_at"}},
+		{model: &workflowModel{}, columns: []string{"created_at", "updated_at"}},
+		{model: &formModel{}, columns: []string{"created_at", "updated_at"}},
+		{model: &roleModel{}, columns: []string{"created_at", "updated_at"}},
+		{model: &roleMemberModel{}, columns: []string{"created_at", "updated_at"}},
+	} {
+		drop, err := db.hasIncompatibleTimestampColumn(ctx, spec.model, spec.columns)
+		if err != nil {
+			return err
+		}
+		if drop {
+			if err := db.orm.WithContext(ctx).Migrator().DropTable(spec.model); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (db *DB) hasIncompatibleTimestampColumn(ctx context.Context, model any, columns []string) (bool, error) {
+	migrator := db.orm.WithContext(ctx).Migrator()
+	if !migrator.HasTable(model) {
+		return false, nil
+	}
+	columnTypes, err := migrator.ColumnTypes(model)
+	if err != nil {
+		return false, err
+	}
+	wanted := map[string]struct{}{}
+	for _, column := range columns {
+		wanted[column] = struct{}{}
+	}
+	for _, columnType := range columnTypes {
+		name := strings.ToLower(columnType.Name())
+		if _, ok := wanted[name]; !ok {
+			continue
+		}
+		dbType := strings.ToUpper(columnType.DatabaseTypeName())
+		if !strings.Contains(dbType, "INT") {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (db *DB) UpsertUserByEmail(ctx context.Context, user auth.User) (auth.User, error) {

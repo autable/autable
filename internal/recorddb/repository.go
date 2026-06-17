@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"codetable/internal/metadata"
@@ -51,6 +52,13 @@ func (repository *Repository) OpenDatabase(ctx context.Context, name, path strin
 	if err != nil {
 		return err
 	}
+	if err := dropIncompatibleRecordTimestampTable(ctx, db); err != nil {
+		handle, closeErr := db.DB()
+		if closeErr == nil {
+			_ = handle.Close()
+		}
+		return err
+	}
 	if err := db.WithContext(ctx).AutoMigrate(&Record{}); err != nil {
 		handle, closeErr := db.DB()
 		if closeErr == nil {
@@ -62,6 +70,27 @@ func (repository *Repository) OpenDatabase(ctx context.Context, name, path strin
 	repository.mu.Lock()
 	defer repository.mu.Unlock()
 	repository.dbs[name] = db
+	return nil
+}
+
+func dropIncompatibleRecordTimestampTable(ctx context.Context, db *gorm.DB) error {
+	migrator := db.WithContext(ctx).Migrator()
+	if !migrator.HasTable(&Record{}) {
+		return nil
+	}
+	columnTypes, err := migrator.ColumnTypes(&Record{})
+	if err != nil {
+		return err
+	}
+	for _, columnType := range columnTypes {
+		name := strings.ToLower(columnType.Name())
+		if name != "created_at" && name != "updated_at" {
+			continue
+		}
+		if !strings.Contains(strings.ToUpper(columnType.DatabaseTypeName()), "INT") {
+			return migrator.DropTable(&Record{})
+		}
+	}
 	return nil
 }
 

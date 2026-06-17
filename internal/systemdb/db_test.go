@@ -9,8 +9,25 @@ import (
 
 	"codetable/internal/auth"
 	"codetable/internal/permission"
+	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
+
+type oldWorkflowTimestampModel struct {
+	ID            int64 `gorm:"primaryKey;autoIncrement"`
+	DatabaseName  string
+	Name          string
+	Script        string
+	CreatorID     string
+	SecretsJSON   string
+	VariablesJSON string
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+}
+
+func (oldWorkflowTimestampModel) TableName() string {
+	return "workflow_models"
+}
 
 func TestUserUpsertUsesEmailFallback(t *testing.T) {
 	ctx := context.Background()
@@ -66,6 +83,64 @@ func TestOpenCreatesParentDirectory(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
+}
+
+func TestOpenDropsIncompatibleTimestampTables(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "system.sqlite")
+	raw, err := gorm.Open(sqlite.Open(path), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := raw.WithContext(ctx).AutoMigrate(&oldWorkflowTimestampModel{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := raw.WithContext(ctx).Create(&oldWorkflowTimestampModel{
+		DatabaseName:  "workspace",
+		Name:          "legacy",
+		Script:        "function run() {}",
+		SecretsJSON:   "{}",
+		VariablesJSON: "{}",
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	sqlDB, err := raw.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sqlDB.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	db, err := Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := db.Close(); err != nil {
+			t.Fatal(err)
+		}
+	})
+	workflows, err := db.Workflows(ctx, "workspace")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(workflows) != 0 {
+		t.Fatalf("expected incompatible workflow table to be dropped, got %#v", workflows)
+	}
+	saved, err := db.SaveWorkflow(ctx, WorkflowDefinition{
+		DatabaseName: "workspace",
+		Name:         "current",
+		Script:       "function run() {}",
+		Secrets:      map[string]string{},
+		Variables:    map[string]string{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if saved.CreatedAt <= 0 || saved.UpdatedAt <= 0 {
+		t.Fatalf("expected millisecond workflow timestamps after schema rebuild, got %#v", saved)
+	}
 }
 
 func TestSessionLifecycle(t *testing.T) {
