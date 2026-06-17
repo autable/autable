@@ -25,10 +25,18 @@ Do not call this trigger node from `run(info)`. The backend runs it before start
 ### Example
 
 ```js
+/**
+ * @param {CodeTableWorkflowDefinitionInfo} info
+ * @returns {Record<string, string | CodeTableWorkflowInstanceDeclaration>}
+ */
 function instances(info) {
   return { row_change: "table.record.changed" };
 }
 
+/**
+ * @param {CodeTableWorkflowDefinitionInfo} info
+ * @returns {CodeTableWorkflowTriggerDeclaration}
+ */
 function trigger(info) {
   return {
     instance: "row_change",
@@ -40,6 +48,10 @@ function trigger(info) {
   };
 }
 
+/**
+ * @param {CodeTableWorkflowRunInfo} info
+ * @returns {Record<string, unknown>}
+ */
 function run(info) {
   return {
     record_id: info.inputs.record_id,

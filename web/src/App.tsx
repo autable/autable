@@ -67,6 +67,7 @@ function WorkspaceApp() {
     databaseName: database.name,
     selectedTableView,
     table,
+    tables: database.tables,
     onCatalogChanged: (nextCatalog, tableName, viewName) => {
       setCatalog(nextCatalog);
       setSelectedTable(tableName);
@@ -90,7 +91,7 @@ function WorkspaceApp() {
     selectedForm,
     selectedWorkflow,
     selectedWorkflowRun,
-    workflowInputsText,
+    workflowTrigger,
     workflowInstances,
     workflowNodes,
     workflowRuns,
@@ -102,9 +103,11 @@ function WorkspaceApp() {
     onStatus: setStatus
   });
   const {
-    newRoleMemberID,
+    memberSearchResults,
+    newRoleMemberEmail,
     newRoleName,
     roleDraftGrants,
+    roleDraftMemberUsers,
     roleDraftMembers,
     roles,
     selectedRole
@@ -386,6 +389,10 @@ function WorkspaceApp() {
         table={table}
         view={view}
         workflows={workflows}
+        onDeleteForm={workflowFormWorkspace.deleteSelectedForm}
+        onDeleteWorkflow={workflowFormWorkspace.deleteSelectedWorkflow}
+        onRenameForm={workflowFormWorkspace.renameSelectedForm}
+        onRenameWorkflow={workflowFormWorkspace.renameSelectedWorkflow}
       />
 
       <main className="workspace">
@@ -429,6 +436,7 @@ function WorkspaceApp() {
               newFieldName={tableWorkspace.newFieldName}
               newFieldType={tableWorkspace.newFieldType}
               newFormulaValueType={tableWorkspace.newFormulaValueType}
+              newRelationTable={tableWorkspace.newRelationTable}
               newViewBase={tableWorkspace.newViewBase}
               newViewFilterField={tableWorkspace.newViewFilterField}
               newViewFilterOp={tableWorkspace.newViewFilterOp}
@@ -444,6 +452,7 @@ function WorkspaceApp() {
               onNewFieldNameChange={tableWorkspace.setNewFieldName}
               onNewFieldTypeChange={tableWorkspace.setNewFieldType}
               onNewFormulaValueTypeChange={tableWorkspace.setNewFormulaValueType}
+              onNewRelationTableChange={tableWorkspace.setNewRelationTable}
               onNewViewBaseChange={tableWorkspace.setNewViewBase}
               onNewViewFilterFieldChange={tableWorkspace.setNewViewFilterField}
               onNewViewFilterOpChange={tableWorkspace.setNewViewFilterOp}
@@ -458,11 +467,14 @@ function WorkspaceApp() {
               onUpdateSelectedRow={tableWorkspace.updateSelectedRowFromEditor}
               onUpdateSelectedView={tableWorkspace.updateSelectedViewFromCanvas}
               rowHistory={tableWorkspace.rowHistory}
+              relationDetail={tableWorkspace.relationDetail}
+              onCloseRelationDetail={() => tableWorkspace.setRelationDetail(null)}
               rows={tableWorkspace.rows}
               selectedRecordID={tableWorkspace.selectedRecordID}
               selectedRowDraft={tableWorkspace.selectedRowDraft}
               selectedTableView={selectedTableView}
               table={table}
+              tables={database.tables}
               openViewPanelRequest={openViewPanelRequest}
             />
           )}
@@ -474,10 +486,10 @@ function WorkspaceApp() {
               onSave={workflowFormWorkspace.persistWorkflow}
               onSaveInstanceConfig={workflowFormWorkspace.saveSelectedWorkflowInstanceConfig}
               onSelectRunKey={workflowFormWorkspace.setSelectedWorkflowRunKey}
-              onUpdateInputsJSON={workflowFormWorkspace.updateWorkflowInputsJSON}
               onUpdateScript={workflowFormWorkspace.updateSelectedWorkflowScript}
-              inputsText={workflowInputsText}
+              onToggleEnabled={workflowFormWorkspace.toggleSelectedWorkflowEnabled}
               language={language}
+              workflowTrigger={workflowTrigger}
               workflowInstances={workflowInstances}
               selectedRun={selectedWorkflowRun}
               workflow={selectedWorkflow}
@@ -495,6 +507,7 @@ function WorkspaceApp() {
               onPublish={workflowFormWorkspace.publishSelectedForm}
               onSave={workflowFormWorkspace.persistForm}
               onSubmit={workflowFormWorkspace.submitRenderedForm}
+              onUnpublish={workflowFormWorkspace.unpublishSelectedForm}
               onUpdateScript={workflowFormWorkspace.updateSelectedFormScript}
               renderedForm={renderedForm}
             />
@@ -506,11 +519,13 @@ function WorkspaceApp() {
               forms={forms}
               grants={roleDraftGrants}
               members={roleDraftMembers}
-              newMemberID={newRoleMemberID}
+              memberOptions={memberSearchResults}
+              memberUsers={roleDraftMemberUsers}
+              newMemberEmail={newRoleMemberEmail}
               onAddMember={permissionWorkspace.addRoleMember}
               onGrantChange={permissionWorkspace.updateRoleGrant}
               onMemberRemove={permissionWorkspace.removeRoleMember}
-              onNewMemberIDChange={permissionWorkspace.setNewRoleMemberID}
+              onNewMemberEmailChange={permissionWorkspace.setNewRoleMemberEmail}
               onSave={permissionWorkspace.persistRoleGrants}
               role={selectedRole}
               workflows={workflows}

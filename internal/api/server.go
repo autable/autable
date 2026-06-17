@@ -106,12 +106,25 @@ type workflowDefinitionResponse struct {
 	DatabaseName    string            `json:"database_name"`
 	Name            string            `json:"name"`
 	Script          string            `json:"script"`
+	Enabled         bool              `json:"enabled"`
 	CreatorID       string            `json:"creator_id,omitempty"`
 	Secrets         map[string]int    `json:"secrets"`
 	Variables       map[string]string `json:"variables"`
 	PermissionLevel permission.Level  `json:"permission_level,omitempty"`
 	CreatedAt       int64             `json:"created_at"`
 	UpdatedAt       int64             `json:"updated_at"`
+}
+
+type roleDefinitionResponse struct {
+	ID           int64              `json:"id"`
+	DatabaseName string             `json:"database_name"`
+	Name         string             `json:"name"`
+	SubjectID    string             `json:"subject_id"`
+	Grants       []permission.Grant `json:"grants"`
+	Members      []string           `json:"members"`
+	MemberUsers  []userResponse     `json:"member_users"`
+	CreatedAt    int64              `json:"created_at"`
+	UpdatedAt    int64              `json:"updated_at"`
 }
 
 type workflowEventKind string
@@ -217,6 +230,7 @@ func (server *Server) routes() {
 	server.mux.HandleFunc("GET /api/auth/oidc/", server.handleOIDC)
 	server.mux.HandleFunc("GET /api/auth/me", server.handleMe)
 	server.mux.HandleFunc("POST /api/auth/logout", server.handleLogout)
+	server.mux.HandleFunc("GET /api/users", server.handleUsers)
 	server.mux.HandleFunc("GET /api/metadata", server.handleMetadata)
 	server.mux.HandleFunc("POST /api/permissions/grants", server.handleSaveGrant)
 	server.mux.HandleFunc("POST /api/tables/", server.handleCreateRow)
@@ -231,9 +245,11 @@ func (server *Server) routes() {
 	server.mux.HandleFunc("POST /api/workflows", server.handleSaveWorkflow)
 	server.mux.HandleFunc("POST /api/workflows/", server.handleRunWorkflow)
 	server.mux.HandleFunc("GET /api/workflows/", server.handleGetWorkflow)
+	server.mux.HandleFunc("DELETE /api/workflows/", server.handleDeleteWorkflow)
 	server.mux.HandleFunc("POST /api/forms", server.handleSaveForm)
 	server.mux.HandleFunc("POST /api/forms/", server.handlePostFormAction)
 	server.mux.HandleFunc("GET /api/forms/", server.handleGetForm)
+	server.mux.HandleFunc("DELETE /api/forms/", server.handleDeleteForm)
 	server.mux.HandleFunc("GET /api/published/forms/", server.handleGetPublishedForm)
 	server.mux.HandleFunc("POST /api/published/forms/", server.handleSubmitPublishedForm)
 }
@@ -431,6 +447,22 @@ func (server *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	}
 	clearSessionCookie(w)
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func (server *Server) handleUsers(w http.ResponseWriter, r *http.Request) {
+	if _, ok := server.requireUserID(w, r); !ok {
+		return
+	}
+	users, err := server.system.SearchUsers(r.Context(), r.URL.Query().Get("query"), 20)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	response := make([]userResponse, 0, len(users))
+	for _, user := range users {
+		response = append(response, toUserResponse(user))
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (server *Server) handleMetadata(w http.ResponseWriter, r *http.Request) {
@@ -799,7 +831,12 @@ func (server *Server) handleGetDatabaseResource(w http.ResponseWriter, r *http.R
 			writeError(w, http.StatusInternalServerError, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, roles)
+		responses, err := server.roleResponses(r.Context(), roles)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, responses)
 	default:
 		http.NotFound(w, r)
 	}
@@ -921,7 +958,12 @@ func (server *Server) handlePostDatabaseResource(w http.ResponseWriter, r *http.
 			writeError(w, http.StatusInternalServerError, err)
 			return
 		}
-		writeJSON(w, http.StatusCreated, saved)
+		response, err := server.roleResponse(r.Context(), saved)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		writeJSON(w, http.StatusCreated, response)
 	default:
 		http.NotFound(w, r)
 	}
@@ -964,6 +1006,10 @@ func (server *Server) handlePutDatabaseResource(w http.ResponseWriter, r *http.R
 			writeError(w, http.StatusBadRequest, err)
 			return
 		}
+		if err := server.validateRoleMembers(r.Context(), request.Members); err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
 		role, err = server.system.ReplaceRoleMembers(r.Context(), dbName, roleName, request.Members)
 	default:
 		http.NotFound(w, r)
@@ -973,7 +1019,12 @@ func (server *Server) handlePutDatabaseResource(w http.ResponseWriter, r *http.R
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, role)
+	response, err := server.roleResponse(r.Context(), role)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (server *Server) handleUpdateTableMetadata(w http.ResponseWriter, r *http.Request, dbName, tableName string) {
@@ -1271,6 +1322,9 @@ func (server *Server) processWorkflowEvent(ctx context.Context, event workflowEv
 		return
 	}
 	for _, workflowDefinition := range workflows {
+		if !workflowDefinition.Enabled {
+			continue
+		}
 		definition := workflow.Definition{
 			ID:           workflowDefinition.ID,
 			DatabaseName: workflowDefinition.DatabaseName,
@@ -1387,7 +1441,7 @@ func (server *Server) handleSaveForm(w http.ResponseWriter, r *http.Request) {
 
 func (server *Server) handlePostFormAction(w http.ResponseWriter, r *http.Request) {
 	id, action, ok := parseFormActionPath(r.URL.Path)
-	if !ok || action != "publish" {
+	if !ok || (action != "publish" && action != "unpublish") {
 		http.NotFound(w, r)
 		return
 	}
@@ -1398,7 +1452,13 @@ func (server *Server) handlePostFormAction(w http.ResponseWriter, r *http.Reques
 	if !server.requireResourceWrite(w, r, actorID, permission.ScopeForm, id) {
 		return
 	}
-	form, err := server.system.PublishForm(r.Context(), id)
+	var form systemdb.FormDefinition
+	var err error
+	if action == "publish" {
+		form, err = server.system.PublishForm(r.Context(), id)
+	} else {
+		form, err = server.system.UnpublishForm(r.Context(), id)
+	}
 	if err != nil {
 		writeError(w, http.StatusNotFound, err)
 		return
@@ -1410,6 +1470,46 @@ func (server *Server) handlePostFormAction(w http.ResponseWriter, r *http.Reques
 	}
 	form = server.formWithPermissionLevel(r.Context(), actorID, form)
 	writeJSON(w, http.StatusOK, form)
+}
+
+func (server *Server) handleDeleteWorkflow(w http.ResponseWriter, r *http.Request) {
+	id, ok := parseIDPath(r.URL.Path, "/api/workflows/")
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	actorID, ok := server.requireUserID(w, r)
+	if !ok {
+		return
+	}
+	if !server.requireResourceWrite(w, r, actorID, permission.ScopeWorkflow, id) {
+		return
+	}
+	if err := server.system.DeleteWorkflow(r.Context(), id); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (server *Server) handleDeleteForm(w http.ResponseWriter, r *http.Request) {
+	id, ok := parseIDPath(r.URL.Path, "/api/forms/")
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	actorID, ok := server.requireUserID(w, r)
+	if !ok {
+		return
+	}
+	if !server.requireResourceWrite(w, r, actorID, permission.ScopeForm, id) {
+		return
+	}
+	if err := server.system.DeleteForm(r.Context(), id); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (server *Server) handleGetForm(w http.ResponseWriter, r *http.Request) {
@@ -1965,6 +2065,24 @@ func (server *Server) validateRoleGrants(ctx context.Context, dbName string, gra
 	return nil
 }
 
+func (server *Server) validateRoleMembers(ctx context.Context, members []string) error {
+	seen := map[string]struct{}{}
+	for _, member := range members {
+		member = strings.TrimSpace(member)
+		if member == "" {
+			continue
+		}
+		if _, ok := seen[member]; ok {
+			continue
+		}
+		seen[member] = struct{}{}
+		if _, err := server.system.User(ctx, member); err != nil {
+			return fmt.Errorf("role member %q not found", member)
+		}
+	}
+	return nil
+}
+
 func (server *Server) validateGrantResource(ctx context.Context, dbName string, grant permission.Grant) error {
 	switch grant.Scope {
 	case permission.ScopeDatabase:
@@ -2309,6 +2427,7 @@ func workflowResponseFromDefinition(workflow systemdb.WorkflowDefinition) workfl
 		DatabaseName:    workflow.DatabaseName,
 		Name:            workflow.Name,
 		Script:          workflow.Script,
+		Enabled:         workflow.Enabled,
 		CreatorID:       workflow.CreatorID,
 		Secrets:         secretLengths(workflow.Secrets),
 		Variables:       workflow.Variables,
@@ -2316,6 +2435,40 @@ func workflowResponseFromDefinition(workflow systemdb.WorkflowDefinition) workfl
 		CreatedAt:       workflow.CreatedAt,
 		UpdatedAt:       workflow.UpdatedAt,
 	}
+}
+
+func (server *Server) roleResponses(ctx context.Context, roles []systemdb.RoleDefinition) ([]roleDefinitionResponse, error) {
+	responses := make([]roleDefinitionResponse, 0, len(roles))
+	for _, role := range roles {
+		response, err := server.roleResponse(ctx, role)
+		if err != nil {
+			return nil, err
+		}
+		responses = append(responses, response)
+	}
+	return responses, nil
+}
+
+func (server *Server) roleResponse(ctx context.Context, role systemdb.RoleDefinition) (roleDefinitionResponse, error) {
+	memberUsers := make([]userResponse, 0, len(role.Members))
+	for _, member := range role.Members {
+		user, err := server.system.User(ctx, member)
+		if err != nil {
+			return roleDefinitionResponse{}, err
+		}
+		memberUsers = append(memberUsers, toUserResponse(user))
+	}
+	return roleDefinitionResponse{
+		ID:           role.ID,
+		DatabaseName: role.DatabaseName,
+		Name:         role.Name,
+		SubjectID:    role.SubjectID,
+		Grants:       role.Grants,
+		Members:      role.Members,
+		MemberUsers:  memberUsers,
+		CreatedAt:    role.CreatedAt,
+		UpdatedAt:    role.UpdatedAt,
+	}, nil
 }
 
 func secretLengths(secrets map[string]string) map[string]int {

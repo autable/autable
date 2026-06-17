@@ -24,7 +24,8 @@ vi.mock("@monaco-editor/react", () => ({
       disabled: Boolean(options?.readOnly),
       onChange: (event: React.ChangeEvent<HTMLTextAreaElement>) => onChange?.(event.currentTarget.value),
       value: value ?? ""
-    })
+    }),
+  useMonaco: () => null
 }));
 
 afterEach(() => {

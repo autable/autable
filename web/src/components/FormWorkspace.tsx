@@ -1,7 +1,8 @@
-import type { FormEvent } from "react";
+import { useMemo, type FormEvent } from "react";
 import { Button, Input, Select, Text } from "@fluentui/react-components";
-import { SaveRegular, TabDesktopLinkRegular } from "@fluentui/react-icons";
+import { DismissRegular, SaveRegular, TabDesktopLinkRegular } from "@fluentui/react-icons";
 import type { FormDefinition } from "../api";
+import { formEditorExtraLibs } from "../editorTypes";
 import type { FormElement, FormRenderResult } from "../formRuntime";
 import { JavaScriptEditor } from "./JavaScriptEditor";
 
@@ -13,6 +14,7 @@ type FormWorkspaceProps = {
   onPublish: () => void;
   onSave: () => void;
   onSubmit: (submitElement?: Extract<FormElement, { kind: "submit" }>, event?: FormEvent<HTMLFormElement>) => void | Promise<void>;
+  onUnpublish: () => void;
   onUpdateScript: (script: string) => void;
   renderedForm: FormRenderResult;
 };
@@ -25,11 +27,13 @@ export function FormWorkspace({
   onPublish,
   onSave,
   onSubmit,
+  onUnpublish,
   onUpdateScript,
   renderedForm
 }: FormWorkspaceProps) {
   const canWriteForm = (form?.permission_level ?? 2) >= 2;
   const publishedLink = form?.published_token ? `${window.location.origin}/forms/${form.published_token}` : "";
+  const editorExtraLibs = useMemo(() => formEditorExtraLibs(), []);
 
   return (
     <div className="split-view">
@@ -40,9 +44,15 @@ export function FormWorkspace({
             <Text size={200}>{databaseName} form</Text>
           </div>
           <div className="form-actions">
-            <Button icon={<TabDesktopLinkRegular />} onClick={onPublish} disabled={!canWriteForm || !form?.id}>
-              Publish
-            </Button>
+            {publishedLink ? (
+              <Button icon={<DismissRegular />} onClick={onUnpublish} disabled={!canWriteForm || !form?.id}>
+                Unpublish
+              </Button>
+            ) : (
+              <Button icon={<TabDesktopLinkRegular />} onClick={onPublish} disabled={!canWriteForm || !form?.id}>
+                Publish
+              </Button>
+            )}
             <Button icon={<SaveRegular />} appearance="primary" onClick={onSave} disabled={!canWriteForm}>
               Save
             </Button>
@@ -54,6 +64,7 @@ export function FormWorkspace({
           )}
           <JavaScriptEditor
             canWrite={canWriteForm}
+            extraLibs={editorExtraLibs}
             label="Form JavaScript"
             onChange={onUpdateScript}
             path={`form-${form?.id || "new"}.js`}

@@ -26,10 +26,18 @@
 ### 示例
 
 ```js
+/**
+ * @param {CodeTableWorkflowDefinitionInfo} info
+ * @returns {Record<string, string | CodeTableWorkflowInstanceDeclaration>}
+ */
 function instances(info) {
   return { ding: "dingtalk.robot.send" };
 }
 
+/**
+ * @param {CodeTableWorkflowRunInfo} info
+ * @returns {Record<string, unknown>}
+ */
 function run(info) {
   return info.instance("ding").exec({
     content: "Codetable alert",

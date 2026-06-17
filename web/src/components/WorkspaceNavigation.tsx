@@ -1,7 +1,19 @@
 import {
   AppItemStatic,
   Button,
+  Dialog,
+  DialogActions,
+  DialogBody,
+  DialogContent,
+  DialogSurface,
+  DialogTitle,
+  Field as FluentField,
   Input,
+  Menu,
+  MenuItem,
+  MenuList,
+  MenuPopover,
+  MenuTrigger,
   Nav,
   NavCategory,
   NavCategoryItem,
@@ -13,17 +25,25 @@ import {
   NavSectionHeader,
   NavSubItem,
   NavSubItemGroup,
+  Popover,
+  PopoverSurface,
+  PopoverTrigger,
   Text
 } from "@fluentui/react-components";
 import {
   AddRegular,
+  CircleRegular,
   DatabaseRegular,
+  DeleteRegular,
   DocumentFlowchartRegular,
   DocumentTableRegular,
+  EditRegular,
   FormRegular,
+  MoreHorizontalRegular,
   PeopleRegular,
   PersonRegular
 } from "@fluentui/react-icons";
+import { useState } from "react";
 import type {
   AuthUser,
   Catalog,
@@ -51,6 +71,8 @@ type WorkspaceNavigationProps = {
   onCreateRole: () => void;
   onCreateTable: () => void;
   onCreateWorkflow: () => void;
+  onDeleteForm: (id?: number) => void;
+  onDeleteWorkflow: (id?: number) => void;
   onLogout: () => void;
   onNewDatabaseNameChange: (value: string) => void;
   onNewFormNameChange: (value: string) => void;
@@ -65,6 +87,8 @@ type WorkspaceNavigationProps = {
   onSelectTable: (name: string) => void;
   onSelectTableView: (name: string) => void;
   onSelectWorkflowID: (id: number) => void;
+  onRenameForm: (name: string, id?: number) => void;
+  onRenameWorkflow: (name: string, id?: number) => void;
   roles: RoleDefinition[];
   selectedForm?: FormDefinition;
   selectedRole?: RoleDefinition;
@@ -90,6 +114,8 @@ export function WorkspaceNavigation({
   onCreateRole,
   onCreateTable,
   onCreateWorkflow,
+  onDeleteForm,
+  onDeleteWorkflow,
   onLogout,
   onNewDatabaseNameChange,
   onNewFormNameChange,
@@ -104,6 +130,8 @@ export function WorkspaceNavigation({
   onSelectTable,
   onSelectTableView,
   onSelectWorkflowID,
+  onRenameForm,
+  onRenameWorkflow,
   roles,
   selectedForm,
   selectedRole,
@@ -125,12 +153,15 @@ export function WorkspaceNavigation({
             <Text size={200} weight="semibold">
               Databases
             </Text>
-            <Button
-              size="small"
-              icon={<AddRegular />}
-              aria-label="Create database"
-              onClick={onCreateDatabase}
+            <CreateNamePopover
+              ariaLabel="Create DB"
+              buttonLabel="Create DB"
               disabled={!isAuthenticated}
+              inputLabel="New database name"
+              name={newDatabaseName}
+              onNameChange={onNewDatabaseNameChange}
+              onSave={onCreateDatabase}
+              placeholder="database name"
             />
           </div>
           <Nav
@@ -167,18 +198,6 @@ export function WorkspaceNavigation({
             ))}
           </Nav>
           <NavDivider />
-          <div className="primary-actions">
-            <Input
-              aria-label="New database name"
-              placeholder="new database"
-              value={newDatabaseName}
-              onChange={(_, data) => onNewDatabaseNameChange(data.value)}
-              disabled={!isAuthenticated}
-            />
-            <Button onClick={onCreateDatabase} disabled={!isAuthenticated}>
-              Create DB
-            </Button>
-          </div>
           <div className="account-slot">
             {currentUser ? (
               <Button icon={<PersonRegular />} onClick={onLogout}>
@@ -214,7 +233,7 @@ export function WorkspaceNavigation({
                 onNewTableNameChange={onNewTableNameChange}
                 onSelectTable={onSelectTable}
                 onSelectTableView={onSelectTableView}
-                onOpenTableViewPanel={onOpenTableViewPanel}
+              onOpenTableViewPanel={onOpenTableViewPanel}
                 newTableName={newTableName}
                 selectedTableView={selectedTableView}
                 table={table}
@@ -227,10 +246,12 @@ export function WorkspaceNavigation({
               createLabel="Create Workflow"
               databaseName={database.name}
               icon="workflow"
-              items={workflows.map((item) => ({ id: item.id ?? 0, name: item.name }))}
+              items={workflows.map((item) => ({ id: item.id ?? 0, name: item.name, enabled: item.enabled ?? true }))}
               newName={newWorkflowName}
               onCreate={onCreateWorkflow}
+              onDelete={onDeleteWorkflow}
               onNewNameChange={onNewWorkflowNameChange}
+              onRename={onRenameWorkflow}
               onSelect={onSelectWorkflowID}
               placeholder="new workflow"
               selectedID={selectedWorkflow?.id ?? 0}
@@ -246,7 +267,9 @@ export function WorkspaceNavigation({
               items={forms.map((item) => ({ id: item.id ?? 0, name: item.name }))}
               newName={newFormName}
               onCreate={onCreateForm}
+              onDelete={onDeleteForm}
               onNewNameChange={onNewFormNameChange}
+              onRename={onRenameForm}
               onSelect={onSelectFormID}
               placeholder="new form"
               selectedID={selectedForm?.id ?? 0}
@@ -292,18 +315,36 @@ function ResourceNav(props: {
   createLabel: string;
   databaseName: string;
   icon: "workflow" | "form";
-  items: Array<{ id: number; name: string }>;
+  items: Array<{ id: number; name: string; enabled?: boolean }>;
   newName: string;
   onCreate: () => void;
+  onDelete: (id: number) => void;
   onNewNameChange: (value: string) => void;
+  onRename: (name: string, id: number) => void;
   onSelect: (id: number) => void;
   placeholder: string;
   selectedID: number;
   title: string;
 }) {
   const Icon = props.icon === "workflow" ? DocumentFlowchartRegular : FormRegular;
+  const [renameOpen, setRenameOpen] = useState(false);
+  const [renameDraft, setRenameDraft] = useState("");
+  const [renameID, setRenameID] = useState(0);
   return (
     <>
+      <div className="list-heading">
+        <Text size={200} weight="semibold">{props.title}</Text>
+        <CreateNamePopover
+          ariaLabel={props.createLabel}
+          buttonLabel={props.createLabel}
+          disabled={!props.databaseName}
+          inputLabel={`New ${props.icon} name`}
+          name={props.newName}
+          onNameChange={props.onNewNameChange}
+          onSave={props.onCreate}
+          placeholder={props.placeholder}
+        />
+      </div>
       <Nav
         className="resource-nav"
         aria-label={props.ariaLabel}
@@ -311,23 +352,66 @@ function ResourceNav(props: {
         selectedValue={props.selectedID ? String(props.selectedID) : ""}
         onNavItemSelect={(_, data) => props.onSelect(Number(data.value))}
       >
-        <NavSectionHeader>{props.title}</NavSectionHeader>
         {props.items.map((item) => (
           <NavItem key={item.id || item.name} value={String(item.id)} icon={<Icon />}>
-            {item.name}
+            <span className="resource-nav-row">
+              <span className="resource-nav-name">
+                {props.icon === "workflow" && (
+                  <CircleRegular className={item.enabled ? "enabled-dot" : "disabled-dot"} />
+                )}
+                <span>{item.name}</span>
+              </span>
+              <Menu>
+                <MenuTrigger disableButtonEnhancement>
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    className="resource-nav-menu-button"
+                    aria-label={`${props.icon} actions ${item.id}`}
+                    onClick={(event) => event.stopPropagation()}
+                  >
+                    <MoreHorizontalRegular />
+                  </span>
+                </MenuTrigger>
+                <MenuPopover>
+                  <MenuList>
+                    <MenuItem
+                      icon={<EditRegular />}
+                      onClick={() => {
+                        props.onSelect(item.id);
+                        setRenameDraft(item.name);
+                        setRenameID(item.id);
+                        setRenameOpen(true);
+                      }}
+                    >
+                      Rename
+                    </MenuItem>
+                    <MenuItem
+                      icon={<DeleteRegular />}
+                      onClick={() => {
+                        props.onDelete(item.id);
+                      }}
+                    >
+                      Delete
+                    </MenuItem>
+                  </MenuList>
+                </MenuPopover>
+              </Menu>
+            </span>
           </NavItem>
         ))}
       </Nav>
-      <div className="create-rowline">
-        <Input
-          aria-label={`New ${props.icon} name`}
-          placeholder={props.placeholder}
-          value={props.newName}
-          onChange={(_, data) => props.onNewNameChange(data.value)}
-          disabled={!props.databaseName}
-        />
-        <Button icon={<AddRegular />} aria-label={props.createLabel} onClick={props.onCreate} disabled={!props.databaseName} />
-      </div>
+      <RenameDialog
+        open={renameOpen}
+        title={`Rename ${props.icon}`}
+        value={renameDraft}
+        onOpenChange={setRenameOpen}
+        onValueChange={setRenameDraft}
+        onSave={() => {
+          props.onRename(renameDraft, renameID);
+          setRenameOpen(false);
+        }}
+      />
     </>
   );
 }
@@ -345,6 +429,19 @@ function TableNav(props: {
 }) {
   return (
     <>
+      <div className="list-heading">
+        <Text size={200} weight="semibold">Tables</Text>
+        <CreateNamePopover
+          ariaLabel="Create Table"
+          buttonLabel="Create Table"
+          disabled={!props.database.name}
+          inputLabel="New table name"
+          name={props.newTableName}
+          onNameChange={props.onNewTableNameChange}
+          onSave={props.onCreateTable}
+          placeholder="table name"
+        />
+      </div>
       <Nav
         className="resource-nav"
         aria-label="Table list"
@@ -374,7 +471,6 @@ function TableNav(props: {
           }
         }}
       >
-        <NavSectionHeader>Tables</NavSectionHeader>
         {props.database.tables.map((item) => (
           <NavCategory key={item.name} value={item.name}>
             <NavCategoryItem icon={<DocumentTableRegular />}>{item.display_name || item.name}</NavCategoryItem>
@@ -390,22 +486,94 @@ function TableNav(props: {
           </NavCategory>
         ))}
       </Nav>
-      <div className="create-rowline">
-        <Input
-          aria-label="New table name"
-          placeholder="new table"
-          value={props.newTableName}
-          onChange={(_, data) => props.onNewTableNameChange(data.value)}
-          disabled={!props.database.name}
-        />
-        <Button
-          icon={<AddRegular />}
-          aria-label="Create Table"
-          onClick={props.onCreateTable}
-          disabled={!props.database.name}
-        />
-      </div>
     </>
+  );
+}
+
+function CreateNamePopover({
+  ariaLabel,
+  buttonLabel,
+  disabled,
+  inputLabel,
+  name,
+  onNameChange,
+  onSave,
+  placeholder
+}: {
+  ariaLabel: string;
+  buttonLabel: string;
+  disabled?: boolean;
+  inputLabel: string;
+  name: string;
+  onNameChange: (value: string) => void;
+  onSave: () => void;
+  placeholder: string;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <Popover open={open} onOpenChange={(_, data) => setOpen(data.open)} positioning="below-end" withArrow>
+      <PopoverTrigger disableButtonEnhancement>
+        <Button size="small" icon={<AddRegular />} aria-label={ariaLabel} disabled={disabled} />
+      </PopoverTrigger>
+      <PopoverSurface className="create-name-popover" aria-label={buttonLabel}>
+        <FluentField label={inputLabel}>
+          <Input
+            aria-label={inputLabel}
+            placeholder={placeholder}
+            value={name}
+            onChange={(_, data) => onNameChange(data.value)}
+          />
+        </FluentField>
+        <div className="popover-actions">
+          <Button onClick={() => setOpen(false)}>Cancel</Button>
+          <Button
+            appearance="primary"
+            icon={<AddRegular />}
+            onClick={() => {
+              onSave();
+              setOpen(false);
+            }}
+          >
+            Save
+          </Button>
+        </div>
+      </PopoverSurface>
+    </Popover>
+  );
+}
+
+function RenameDialog({
+  open,
+  title,
+  value,
+  onOpenChange,
+  onValueChange,
+  onSave
+}: {
+  open: boolean;
+  title: string;
+  value: string;
+  onOpenChange: (open: boolean) => void;
+  onValueChange: (value: string) => void;
+  onSave: () => void;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={(_, data) => onOpenChange(data.open)}>
+      <DialogSurface aria-label={title}>
+        <DialogBody>
+          <DialogTitle>{title}</DialogTitle>
+          <DialogContent>
+            <FluentField label="Name">
+              <Input aria-label="Rename resource" value={value} onChange={(_, data) => onValueChange(data.value)} />
+            </FluentField>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => onOpenChange(false)}>Cancel</Button>
+            <Button appearance="primary" onClick={onSave}>Save</Button>
+          </DialogActions>
+        </DialogBody>
+      </DialogSurface>
+    </Dialog>
   );
 }
 

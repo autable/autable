@@ -53,6 +53,38 @@ func TestUserUpsertUsesEmailFallback(t *testing.T) {
 	}
 }
 
+func TestSearchUsersByEmail(t *testing.T) {
+	ctx := context.Background()
+	db := openTestDB(t)
+	for _, email := range []string{"Ada@example.com", "grace@example.com", "linus@example.com"} {
+		user, err := auth.NewPasswordUser(auth.PasswordRegistration{
+			Email:    email,
+			Password: "correct horse",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.UpsertUserByEmail(ctx, user); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	users, err := db.SearchUsers(ctx, "EXAMPLE", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(users) != 2 || users[0].Email != "ada@example.com" || users[1].Email != "grace@example.com" {
+		t.Fatalf("expected first two users sorted by email, got %#v", users)
+	}
+	users, err = db.SearchUsers(ctx, "lin", 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(users) != 1 || users[0].Email != "linus@example.com" {
+		t.Fatalf("expected linus match, got %#v", users)
+	}
+}
+
 func TestOpenCreatesParentDirectory(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "nested", "system.sqlite")

@@ -5,6 +5,8 @@ import {
   listRoles,
   saveRoleGrants,
   saveRoleMembers,
+  searchUsers,
+  type AuthUser,
   type DatabaseMetadata,
   type PermissionGrant,
   type RoleDefinition
@@ -23,7 +25,9 @@ export function usePermissionWorkspace({ currentUserID, database, onStatus }: Us
   const [newRoleName, setNewRoleName] = useState("");
   const [roleDraftGrants, setRoleDraftGrants] = useState<PermissionGrant[]>([]);
   const [roleDraftMembers, setRoleDraftMembers] = useState<string[]>([]);
-  const [newRoleMemberID, setNewRoleMemberID] = useState("");
+  const [roleDraftMemberUsers, setRoleDraftMemberUsers] = useState<AuthUser[]>([]);
+  const [newRoleMemberEmail, setNewRoleMemberEmail] = useState("");
+  const [memberSearchResults, setMemberSearchResults] = useState<AuthUser[]>([]);
 
   const selectedRole = useMemo(
     () => roles.find((item) => item.name === selectedRoleName) ?? roles[0],
@@ -33,8 +37,35 @@ export function usePermissionWorkspace({ currentUserID, database, onStatus }: Us
   useEffect(() => {
     setRoleDraftGrants(selectedRole?.grants ?? []);
     setRoleDraftMembers(selectedRole?.members ?? []);
-    setNewRoleMemberID("");
+    setRoleDraftMemberUsers(selectedRole?.member_users ?? []);
+    setNewRoleMemberEmail("");
+    setMemberSearchResults([]);
   }, [selectedRole?.subject_id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const query = newRoleMemberEmail.trim();
+    if (!currentUserID || query.length < 2) {
+      setMemberSearchResults([]);
+      return () => {
+        cancelled = true;
+      };
+    }
+    void searchUsers(query)
+      .then((users) => {
+        if (!cancelled) {
+          setMemberSearchResults(users);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setMemberSearchResults([]);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUserID, newRoleMemberEmail]);
 
   useEffect(() => {
     let cancelled = false;
@@ -113,6 +144,7 @@ export function usePermissionWorkspace({ currentUserID, database, onStatus }: Us
       setRoles((current) => replaceRole(current, saved));
       setSelectedRoleName(saved.name);
       setRoleDraftMembers(saved.members ?? []);
+      setRoleDraftMemberUsers(saved.member_users ?? []);
       onStatus(`Saved role ${saved.name}`);
     } catch (error) {
       onStatus(error instanceof Error ? error.message : "Role save failed");
@@ -141,24 +173,30 @@ export function usePermissionWorkspace({ currentUserID, database, onStatus }: Us
     });
   }
 
-  function addRoleMember() {
-    const memberID = newRoleMemberID.trim();
-    if (!memberID) {
-      onStatus("Role member user id is required");
+  function addRoleMember(user?: AuthUser) {
+    const member =
+      user ?? memberSearchResults.find((item) => item.email.toLowerCase() === newRoleMemberEmail.trim().toLowerCase());
+    if (!member) {
+      onStatus("Select a user email from the member suggestions");
       return;
     }
-    setRoleDraftMembers((current) => compactMembers([...current, memberID]));
-    setNewRoleMemberID("");
+    setRoleDraftMembers((current) => compactMembers([...current, member.id]));
+    setRoleDraftMemberUsers((current) => compactMemberUsers([...current, member]));
+    setNewRoleMemberEmail("");
+    setMemberSearchResults([]);
   }
 
   function removeRoleMember(memberID: string) {
     setRoleDraftMembers((current) => current.filter((item) => item !== memberID));
+    setRoleDraftMemberUsers((current) => current.filter((item) => item.id !== memberID));
   }
 
   return {
-    newRoleMemberID,
+    memberSearchResults,
+    newRoleMemberEmail,
     newRoleName,
     roleDraftGrants,
+    roleDraftMemberUsers,
     roleDraftMembers,
     roles,
     selectedRole,
@@ -168,9 +206,19 @@ export function usePermissionWorkspace({ currentUserID, database, onStatus }: Us
     persistRoleGrants,
     refreshRoles,
     removeRoleMember,
-    setNewRoleMemberID,
+    setNewRoleMemberEmail,
     setNewRoleName,
     setSelectedRoleName,
     updateRoleGrant
   };
+}
+
+function compactMemberUsers(users: AuthUser[]): AuthUser[] {
+  const byID = new Map<string, AuthUser>();
+  for (const user of users) {
+    if (user.id) {
+      byID.set(user.id, user);
+    }
+  }
+  return [...byID.values()].sort((left, right) => left.email.localeCompare(right.email));
 }

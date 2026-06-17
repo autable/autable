@@ -16,10 +16,18 @@
 ### 示例
 
 ```js
+/**
+ * @param {CodeTableWorkflowDefinitionInfo} info
+ * @returns {Record<string, string | CodeTableWorkflowInstanceDeclaration>}
+ */
 function instances(info) {
   return { update_contact: "table.row.update" };
 }
 
+/**
+ * @param {CodeTableWorkflowRunInfo} info
+ * @returns {Record<string, unknown>}
+ */
 function run(info) {
   return info.instance("update_contact").exec({
     table: "contacts",

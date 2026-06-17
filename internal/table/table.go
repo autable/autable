@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"reflect"
 	"sort"
 	"strconv"
@@ -460,11 +461,15 @@ func calculateFormulaValues(tableMeta metadata.Table, recordID int64, values map
 		}
 		value, err := evaluateFormula(field.Formula, recordID, nextValues)
 		if err != nil {
-			return nil, fmt.Errorf("formula field %q: %w", field.Name, err)
+			logFormulaValueError(tableMeta.Name, field.Name, err)
+			nextValues[field.Name] = nil
+			continue
 		}
 		value, err = normalizeFieldValue(field, value)
 		if err != nil {
-			return nil, fmt.Errorf("formula field %q: %w", field.Name, err)
+			logFormulaValueError(tableMeta.Name, field.Name, err)
+			nextValues[field.Name] = nil
+			continue
 		}
 		nextValues[field.Name] = value
 	}
@@ -480,11 +485,21 @@ func normalizeInputValues(tableMeta metadata.Table, values map[string]any) (map[
 		}
 		normalizedValue, err := normalizeFieldValue(field, value)
 		if err != nil {
-			return nil, fmt.Errorf("field %q: %w", key, err)
+			logFieldValueError(tableMeta.Name, key, err)
+			normalized[key] = nil
+			continue
 		}
 		normalized[key] = normalizedValue
 	}
 	return normalized, nil
+}
+
+func logFormulaValueError(tableName, fieldName string, err error) {
+	slog.Warn("formula field value cleared after calculation error", "table", tableName, "field", fieldName, "error", err)
+}
+
+func logFieldValueError(tableName, fieldName string, err error) {
+	slog.Warn("field value cleared after conversion error", "table", tableName, "field", fieldName, "error", err)
 }
 
 func normalizeFieldValue(field metadata.Field, value any) (any, error) {

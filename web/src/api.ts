@@ -3,6 +3,7 @@ export type Field = {
   type: string;
   value_type?: string;
   formula?: string;
+  relation_table?: string;
   deleted: boolean;
   permission_level?: 0 | 1 | 2;
 };
@@ -61,6 +62,7 @@ export type WorkflowDefinition = {
   database_name: string;
   name: string;
   script: string;
+  enabled?: boolean;
   creator_id?: string;
   secrets: Record<string, number>;
   secret_values?: Record<string, string>;
@@ -144,6 +146,7 @@ export type RoleDefinition = {
   subject_id: string;
   grants: PermissionGrant[];
   members: string[];
+  member_users?: AuthUser[];
   created_at?: number;
   updated_at?: number;
 };
@@ -328,6 +331,15 @@ export async function loadCurrentUser(): Promise<AuthUser | null> {
   return response.json() as Promise<AuthUser>;
 }
 
+export async function searchUsers(query: string): Promise<AuthUser[]> {
+  const response = await fetch(`/api/users?query=${encodeURIComponent(query)}`);
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: response.statusText }));
+    throw new Error(error.error ?? `user search failed: ${response.status}`);
+  }
+  return response.json() as Promise<AuthUser[]>;
+}
+
 export async function listOIDCProviders(): Promise<OIDCProvider[]> {
   const response = await fetch("/api/auth/oidc/providers");
   if (!response.ok) {
@@ -364,6 +376,7 @@ export async function saveWorkflow(
     database_name: workflow.database_name,
     name: workflow.name,
     script: workflow.script,
+    enabled: workflow.enabled ?? true,
     creator_id: workflow.creator_id,
     secrets: workflow.secret_values ?? {},
     variables: workflow.variables,
@@ -380,6 +393,14 @@ export async function saveWorkflow(
     throw new Error(`workflow save failed: ${response.status}`);
   }
   return response.json() as Promise<WorkflowDefinition>;
+}
+
+export async function deleteWorkflow(workflowID: number): Promise<void> {
+  const response = await fetch(`/api/workflows/${workflowID}`, { method: "DELETE" });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: response.statusText }));
+    throw new Error(error.error ?? `workflow delete failed: ${response.status}`);
+  }
 }
 
 export async function loadWorkflowNodes(): Promise<WorkflowNodeInfo[]> {
@@ -442,6 +463,23 @@ export async function publishForm(formID: number): Promise<FormDefinition> {
     throw new Error(error.error ?? `form publish failed: ${response.status}`);
   }
   return response.json() as Promise<FormDefinition>;
+}
+
+export async function unpublishForm(formID: number): Promise<FormDefinition> {
+  const response = await fetch(`/api/forms/${formID}/unpublish`, { method: "POST" });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: response.statusText }));
+    throw new Error(error.error ?? `form unpublish failed: ${response.status}`);
+  }
+  return response.json() as Promise<FormDefinition>;
+}
+
+export async function deleteForm(formID: number): Promise<void> {
+  const response = await fetch(`/api/forms/${formID}`, { method: "DELETE" });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: response.statusText }));
+    throw new Error(error.error ?? `form delete failed: ${response.status}`);
+  }
 }
 
 export async function loadPublishedForm(token: string): Promise<FormDefinition> {

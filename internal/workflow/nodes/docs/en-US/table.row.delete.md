@@ -15,10 +15,18 @@ Deletes one row through the server table API. The workflow creator permissions a
 ### Example
 
 ```js
+/**
+ * @param {CodeTableWorkflowDefinitionInfo} info
+ * @returns {Record<string, string | CodeTableWorkflowInstanceDeclaration>}
+ */
 function instances(info) {
   return { delete_contact: "table.row.delete" };
 }
 
+/**
+ * @param {CodeTableWorkflowRunInfo} info
+ * @returns {Record<string, unknown>}
+ */
 function run(info) {
   return info.instance("delete_contact").exec({
     table: "contacts",

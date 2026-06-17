@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { evaluateWorkflowInstances } from "./workflowInstances";
+import { evaluateWorkflowInstances, evaluateWorkflowTrigger } from "./workflowInstances";
 
 describe("workflowInstances", () => {
   it("evaluates workflow instances locally from script", () => {
@@ -37,5 +37,27 @@ describe("workflowInstances", () => {
     if (!result.ok) {
       expect(result.error).toContain("instances");
     }
+  });
+
+  it("evaluates workflow trigger locally from script", () => {
+    const result = evaluateWorkflowTrigger(
+      `function trigger(info) {
+        return { instance: "row_change", params: { table: info.database_name } };
+      }`,
+      { database_name: "workspace" }
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      throw new Error(result.error);
+    }
+    expect(result.value?.instance).toBe("row_change");
+    expect(result.value?.params?.table).toBe("workspace");
+  });
+
+  it("allows workflows without triggers", () => {
+    const result = evaluateWorkflowTrigger("function run() { return {}; }", { database_name: "workspace" });
+
+    expect(result).toEqual({ ok: true, value: null });
   });
 });

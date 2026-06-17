@@ -1,8 +1,9 @@
 import {
   Button,
-  Input,
+  Combobox,
   List,
   ListItem,
+  Option,
   Select,
   Text
 } from "@fluentui/react-components";
@@ -12,6 +13,7 @@ import {
   type FormDefinition,
   type PermissionGrant,
   type RoleDefinition,
+  type AuthUser,
   type WorkflowDefinition
 } from "../api";
 export { compactRoleGrants } from "../permissionState";
@@ -27,8 +29,10 @@ type PermissionPanelProps = {
   forms: FormDefinition[];
   grants: PermissionGrant[];
   members: string[];
-  newMemberID: string;
-  onAddMember: () => void;
+  memberOptions: AuthUser[];
+  memberUsers: AuthUser[];
+  newMemberEmail: string;
+  onAddMember: (user?: AuthUser) => void;
   onGrantChange: (
     scope: PermissionGrant["scope"],
     resource: string,
@@ -36,7 +40,7 @@ type PermissionPanelProps = {
     level: PermissionGrant["level"]
   ) => void;
   onMemberRemove: (memberID: string) => void;
-  onNewMemberIDChange: (value: string) => void;
+  onNewMemberEmailChange: (value: string) => void;
   onSave: () => void;
   role?: RoleDefinition;
   workflows: WorkflowDefinition[];
@@ -47,11 +51,13 @@ export function PermissionPanel({
   forms,
   grants,
   members,
-  newMemberID,
+  memberOptions,
+  memberUsers,
+  newMemberEmail,
   onAddMember,
   onGrantChange,
   onMemberRemove,
-  onNewMemberIDChange,
+  onNewMemberEmailChange,
   onSave,
   role,
   workflows
@@ -75,11 +81,13 @@ export function PermissionPanel({
           forms={forms}
           grants={grants}
           members={members}
-          newMemberID={newMemberID}
+          memberOptions={memberOptions}
+          memberUsers={memberUsers}
+          newMemberEmail={newMemberEmail}
           onAddMember={onAddMember}
           onGrantChange={onGrantChange}
           onMemberRemove={onMemberRemove}
-          onNewMemberIDChange={onNewMemberIDChange}
+          onNewMemberEmailChange={onNewMemberEmailChange}
           workflows={workflows}
         />
       ) : (
@@ -96,39 +104,59 @@ function PermissionMatrix({
   forms,
   grants,
   members,
-  newMemberID,
+  memberOptions,
+  memberUsers,
+  newMemberEmail,
   onAddMember,
   onGrantChange,
   onMemberRemove,
-  onNewMemberIDChange,
+  onNewMemberEmailChange,
   workflows
 }: Omit<PermissionPanelProps, "onSave" | "role">) {
+  const memberByID = new Map(memberUsers.map((member) => [member.id, member]));
+  const memberItems = members.map((memberID) => ({
+    id: memberID,
+    email: memberByID.get(memberID)?.email ?? memberID
+  }));
   return (
     <div className="permission-grid">
       <div className="permission-card">
         <Text weight="semibold">Members</Text>
         <div className="create-rowline">
-          <Input
-            aria-label="Role member user id"
-            placeholder="user id"
-            value={newMemberID}
-            onChange={(_, data) => onNewMemberIDChange(data.value)}
-          />
-          <Button icon={<AddRegular />} aria-label="Add role member" onClick={onAddMember} />
+          <Combobox
+            aria-label="Role member email"
+            placeholder="Search email"
+            open={newMemberEmail.trim().length >= 2 && memberOptions.length > 0}
+            value={newMemberEmail}
+            onChange={(event) => onNewMemberEmailChange(event.currentTarget.value)}
+            onOptionSelect={(_, data) => {
+              const selected = memberOptions.find((member) => member.id === data.optionValue);
+              if (selected) {
+                onAddMember(selected);
+              }
+            }}
+          >
+            {memberOptions.map((member) => (
+              <Option key={member.id} value={member.id} text={member.email}>
+                {member.email}
+              </Option>
+            ))}
+          </Combobox>
+          <Button icon={<AddRegular />} aria-label="Add role member" onClick={() => onAddMember()} />
         </div>
         {members.length === 0 ? (
           <Text size={200}>No members</Text>
         ) : (
           <List navigationMode="items" aria-label="Role members">
-            {members.map((member) => (
-              <ListItem key={member}>
+            {memberItems.map((member) => (
+              <ListItem key={member.id}>
                 <div className="member-list-item">
-                  <Text truncate>{member}</Text>
+                  <Text truncate>{member.email}</Text>
                   <Button
                     appearance="subtle"
                     icon={<DismissRegular />}
-                    aria-label={`Remove ${member}`}
-                    onClick={() => onMemberRemove(member)}
+                    aria-label={`Remove ${member.email}`}
+                    onClick={() => onMemberRemove(member.id)}
                   />
                 </div>
               </ListItem>

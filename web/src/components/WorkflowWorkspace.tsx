@@ -12,10 +12,10 @@ import {
   Popover,
   PopoverSurface,
   PopoverTrigger,
+  Switch,
   Tab,
   TabList,
   Text,
-  Textarea
 } from "@fluentui/react-components";
 import { EditRegular, InfoRegular, PlayRegular, SaveRegular } from "@fluentui/react-icons";
 import { Background, Controls, ReactFlow, type Edge, type Node } from "@xyflow/react";
@@ -26,6 +26,8 @@ import type {
   WorkflowPort,
   WorkflowRunResponse
 } from "../api";
+import { workflowEditorExtraLibs } from "../editorTypes";
+import type { WorkflowTriggerDeclaration } from "../workflowInstances";
 import { JavaScriptEditor } from "./JavaScriptEditor";
 
 type WorkflowWorkspaceProps = {
@@ -38,15 +40,15 @@ type WorkflowWorkspaceProps = {
     variables: Record<string, string>,
     secrets: Record<string, string>
   ) => void | Promise<void>;
-  onUpdateInputsJSON: (text: string) => void;
   onSelectRunKey: (historyKey: string) => void;
+  onToggleEnabled: (enabled: boolean) => void;
   onUpdateScript: (script: string) => void;
   selectedRun: WorkflowRunResponse | null;
-  inputsText: string;
   workflow?: WorkflowDefinition;
   workflowInstances:
     | { ok: true; value: Record<string, WorkflowInstanceDeclaration> }
     | { ok: false; error: string };
+  workflowTrigger?: WorkflowTriggerDeclaration;
   workflowNodes: WorkflowNodeInfo[];
   workflowRuns: WorkflowRunResponse[];
 };
@@ -70,19 +72,28 @@ export function WorkflowWorkspace({
   onExecute,
   onSave,
   onSaveInstanceConfig,
-  onUpdateInputsJSON,
   onSelectRunKey,
+  onToggleEnabled,
   onUpdateScript,
   selectedRun,
-  inputsText,
   workflow,
   workflowInstances,
+  workflowTrigger,
   workflowNodes,
   workflowRuns
 }: WorkflowWorkspaceProps) {
   const canWriteWorkflow = (workflow?.permission_level ?? 2) >= 2;
   const workflowNodesByType = new Map(workflowNodes.map((node) => [node.type, node]));
   const [activeTab, setActiveTab] = useState<WorkflowTab>("editor");
+  const editorExtraLibs = useMemo(
+    () =>
+      workflowEditorExtraLibs({
+        workflowNodes,
+        workflowInstances: workflowInstances.ok ? workflowInstances.value : undefined,
+        workflowTrigger
+      }),
+    [workflowInstances, workflowNodes, workflowTrigger]
+  );
 
   return (
     <div className="workflow-workspace">
@@ -93,6 +104,12 @@ export function WorkflowWorkspace({
         </div>
         <div className="workflow-header-actions">
           <NodeCatalogDialog language={language} workflowNodes={workflowNodes} />
+          <Switch
+            checked={workflow?.enabled ?? true}
+            label="Enabled"
+            onChange={(_, data) => onToggleEnabled(Boolean(data.checked))}
+            disabled={!workflow?.id || !canWriteWorkflow}
+          />
           <Button icon={<PlayRegular />} onClick={onExecute} disabled={!workflow?.id || !canWriteWorkflow}>
             Run
           </Button>
@@ -116,24 +133,13 @@ export function WorkflowWorkspace({
           <div className="editor-pane">
             <JavaScriptEditor
               canWrite={canWriteWorkflow}
+              extraLibs={editorExtraLibs}
               label="Workflow JavaScript"
               onChange={onUpdateScript}
               path={`workflow-${workflow?.id || "new"}.js`}
               testID="workflow-js-editor"
               value={workflow?.script ?? ""}
             />
-            <div className="workflow-config-grid">
-              <label className="field-stack">
-                <span>Inputs JSON</span>
-                <Textarea
-                  className="json-editor"
-                  value={inputsText}
-                  onChange={(_, data) => onUpdateInputsJSON(data.value)}
-                  resize="none"
-                  aria-label="Workflow Inputs JSON"
-                />
-              </label>
-            </div>
           </div>
           <div className="history-pane">
             <Text weight="semibold">Instances</Text>

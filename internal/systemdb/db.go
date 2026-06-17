@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"codetable/internal/auth"
@@ -26,6 +27,7 @@ type WorkflowDefinition struct {
 	DatabaseName    string            `json:"database_name"`
 	Name            string            `json:"name"`
 	Script          string            `json:"script"`
+	Enabled         bool              `json:"enabled"`
 	CreatorID       string            `json:"creator_id,omitempty"`
 	Secrets         map[string]string `json:"secrets"`
 	Variables       map[string]string `json:"variables"`
@@ -89,6 +91,7 @@ type workflowModel struct {
 	DatabaseName  string `gorm:"uniqueIndex:idx_workflow_database_name;not null"`
 	Name          string `gorm:"uniqueIndex:idx_workflow_database_name;not null"`
 	Script        string `gorm:"not null"`
+	Enabled       bool   `gorm:"not null;default:true"`
 	CreatorID     string `gorm:"index;not null;default:''"`
 	SecretsJSON   string `gorm:"not null"`
 	VariablesJSON string `gorm:"not null"`
@@ -210,6 +213,28 @@ func (db *DB) User(ctx context.Context, id string) (auth.User, error) {
 	return modelToUser(model), nil
 }
 
+func (db *DB) SearchUsers(ctx context.Context, query string, limit int) ([]auth.User, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	normalized := strings.ToLower(strings.TrimSpace(query))
+	var models []userModel
+	request := db.orm.WithContext(ctx).
+		Order(clause.OrderByColumn{Column: clause.Column{Name: "email"}}).
+		Limit(limit)
+	if normalized != "" {
+		request = request.Where(clause.Like{Column: clause.Column{Name: "email"}, Value: "%" + normalized + "%"})
+	}
+	if err := request.Find(&models).Error; err != nil {
+		return nil, err
+	}
+	users := make([]auth.User, 0, len(models))
+	for _, model := range models {
+		users = append(users, modelToUser(model))
+	}
+	return users, nil
+}
+
 func (db *DB) CreateSession(ctx context.Context, userID string, ttl time.Duration) (auth.Session, error) {
 	token, err := auth.NewSessionToken()
 	if err != nil {
@@ -318,6 +343,9 @@ func (db *DB) SaveWorkflow(ctx context.Context, workflow WorkflowDefinition) (Wo
 	if workflow.DatabaseName == "" {
 		return WorkflowDefinition{}, errors.New("database_name is required")
 	}
+	if workflow.ID == 0 {
+		workflow.Enabled = true
+	}
 	if workflow.ID != 0 {
 		existing, err := db.Workflow(ctx, workflow.ID)
 		if err != nil {
@@ -340,6 +368,10 @@ func (db *DB) SaveWorkflow(ctx context.Context, workflow WorkflowDefinition) (Wo
 		return WorkflowDefinition{}, err
 	}
 	return modelToWorkflow(model)
+}
+
+func (db *DB) DeleteWorkflow(ctx context.Context, id int64) error {
+	return db.orm.WithContext(ctx).Delete(&workflowModel{}, id).Error
 }
 
 func (db *DB) Workflow(ctx context.Context, id int64) (WorkflowDefinition, error) {
@@ -423,6 +455,22 @@ func (db *DB) PublishForm(ctx context.Context, id int64) (FormDefinition, error)
 		form.PublishedToken = uuid.NewString()
 	}
 	return db.SaveForm(ctx, form)
+}
+
+func (db *DB) UnpublishForm(ctx context.Context, id int64) (FormDefinition, error) {
+	var model formModel
+	if err := db.orm.WithContext(ctx).First(&model, id).Error; err != nil {
+		return FormDefinition{}, err
+	}
+	model.PublishedToken = ""
+	if err := db.orm.WithContext(ctx).Save(&model).Error; err != nil {
+		return FormDefinition{}, err
+	}
+	return modelToForm(model), nil
+}
+
+func (db *DB) DeleteForm(ctx context.Context, id int64) error {
+	return db.orm.WithContext(ctx).Delete(&formModel{}, id).Error
 }
 
 func (db *DB) Forms(ctx context.Context, databaseName string) ([]FormDefinition, error) {
@@ -538,6 +586,7 @@ func (db *DB) ReplaceRoleMembers(ctx context.Context, databaseName, roleName str
 		}
 		seen := map[string]struct{}{}
 		for _, member := range members {
+			member = strings.TrimSpace(member)
 			if member == "" {
 				continue
 			}
@@ -640,6 +689,7 @@ func workflowToModel(workflow WorkflowDefinition) (workflowModel, error) {
 		DatabaseName:  workflow.DatabaseName,
 		Name:          workflow.Name,
 		Script:        workflow.Script,
+		Enabled:       workflow.Enabled,
 		CreatorID:     workflow.CreatorID,
 		SecretsJSON:   string(secrets),
 		VariablesJSON: string(variables),
@@ -654,6 +704,7 @@ func modelToWorkflow(model workflowModel) (WorkflowDefinition, error) {
 		DatabaseName: model.DatabaseName,
 		Name:         model.Name,
 		Script:       model.Script,
+		Enabled:      model.Enabled,
 		CreatorID:    model.CreatorID,
 		CreatedAt:    model.CreatedAt,
 		UpdatedAt:    model.UpdatedAt,

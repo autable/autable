@@ -100,6 +100,34 @@ func TestLoginRejectsInvalidPassword(t *testing.T) {
 	}
 }
 
+func TestUserSearchAPIRequiresAuthenticationAndMatchesEmail(t *testing.T) {
+	server, system := newTestServer(t)
+	_ = testSessionCookie(t, system, "ada")
+	ownerCookie := testSessionCookie(t, system, "owner")
+
+	anonymous := httptest.NewRequest(http.MethodGet, "/api/users?query=ada", nil)
+	recorder := httptest.NewRecorder()
+	server.ServeHTTP(recorder, anonymous)
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("expected anonymous user search 401, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/api/users?query=ADA", nil)
+	request.AddCookie(ownerCookie)
+	recorder = httptest.NewRecorder()
+	server.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected user search 200, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+	var users []userResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &users); err != nil {
+		t.Fatal(err)
+	}
+	if len(users) != 1 || users[0].ID != "ada" || users[0].Email != "ada@example.com" {
+		t.Fatalf("unexpected user search response: %#v", users)
+	}
+}
+
 func TestOIDCProvidersExposePublicConfig(t *testing.T) {
 	server, _ := newTestServerWithOIDC(t, []config.OIDCProvider{
 		{
@@ -843,6 +871,8 @@ func TestDatabaseOwnerCanManageRoles(t *testing.T) {
 		t.Fatalf("expected role grants update 200, got %d: %s", recorder.Code, recorder.Body.String())
 	}
 
+	_ = testSessionCookie(t, system, "u1")
+	_ = testSessionCookie(t, system, "u2")
 	updateMembers := httptest.NewRequest(http.MethodPut, "/api/databases/workspace/roles/editor/members", bytes.NewBufferString(`{
 		"members":["u1","u2","u1"]
 	}`))
@@ -860,12 +890,15 @@ func TestDatabaseOwnerCanManageRoles(t *testing.T) {
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("expected role list 200, got %d: %s", recorder.Code, recorder.Body.String())
 	}
-	var roles []systemdb.RoleDefinition
+	var roles []roleDefinitionResponse
 	if err := json.Unmarshal(recorder.Body.Bytes(), &roles); err != nil {
 		t.Fatal(err)
 	}
 	if len(roles) != 1 || roles[0].SubjectID != "role:workspace:editor" || len(roles[0].Grants) != 2 || len(roles[0].Members) != 2 {
 		t.Fatalf("unexpected roles response: %#v", roles)
+	}
+	if len(roles[0].MemberUsers) != 2 || roles[0].MemberUsers[0].Email != "u1@example.com" || roles[0].MemberUsers[1].Email != "u2@example.com" {
+		t.Fatalf("expected member users in role response, got %#v", roles[0].MemberUsers)
 	}
 }
 

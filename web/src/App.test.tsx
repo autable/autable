@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { FluentProvider, webLightTheme } from "@fluentui/react-components";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -176,6 +176,7 @@ async function defaultFetch(input: RequestInfo | URL, init?: RequestInit): Promi
 }
 
 beforeEach(() => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
   vi.spyOn(globalThis, "fetch").mockImplementation(defaultFetch);
 });
@@ -302,8 +303,9 @@ describe("App", () => {
     renderApp();
     await screen.findByRole("button", { name: authUserFixture.email });
     await waitFor(() => expect(screen.getByRole("button", { name: "Create DB" })).toBeEnabled());
-    await userEvent.type(screen.getByRole("textbox", { name: "New database name" }), "sales");
     await userEvent.click(screen.getByRole("button", { name: "Create DB" }));
+    await userEvent.type(screen.getByRole("textbox", { name: "New database name" }), "sales");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "sales" })).toHaveAttribute("aria-expanded", "true"));
     expect(screen.getByText("Created database sales")).toBeInTheDocument();
   });
@@ -360,8 +362,9 @@ describe("App", () => {
 
     renderApp();
     await screen.findByRole("button", { name: authUserFixture.email });
-    await userEvent.type(screen.getByRole("textbox", { name: "New table name" }), "projects");
     await userEvent.click(screen.getByRole("button", { name: "Create Table" }));
+    await userEvent.type(screen.getByRole("textbox", { name: "New table name" }), "projects");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(screen.getByRole("button", { name: /projects/ })).toBeInTheDocument());
   });
 
@@ -442,12 +445,17 @@ describe("App", () => {
     await userEvent.click(screen.getByRole("tab", { name: "History" }));
     expect(screen.getAllByText("No runs yet").length).toBeGreaterThan(0);
     await userEvent.click(screen.getByRole("tab", { name: "Editor" }));
+    vi.useFakeTimers();
     fireEvent.change(screen.getByLabelText("Workflow JavaScript"), {
       target: {
         value:
           "function instances(info) { return { ding: { node: 'dingtalk.robot.send' } }; }\nfunction run(info) { return info.instance('ding').exec({ content: 'hello' }); }"
       }
     });
+    await act(async () => {
+      vi.advanceTimersByTime(5000);
+    });
+    vi.useRealTimers();
     await userEvent.click(screen.getByRole("button", { name: "Edit config ding" }));
     expect(screen.getByLabelText("Secret ding.access_token")).toBeInTheDocument();
   });
@@ -514,7 +522,6 @@ describe("App", () => {
     expect(screen.getByRole("button", { name: "Run" })).toBeDisabled();
     expect(screen.getByLabelText("Workflow JavaScript")).toBeDisabled();
     expect(screen.getByRole("button", { name: "Edit config review_echo" })).toBeDisabled();
-    expect(screen.getByLabelText("Workflow Inputs JSON")).not.toBeDisabled();
 
     await userEvent.click(screen.getByRole("button", { name: /^Form$/ }));
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();

@@ -15,14 +15,26 @@
 ### 示例
 
 ```js
+/**
+ * @param {CodeTableWorkflowDefinitionInfo} info
+ * @returns {Record<string, string | CodeTableWorkflowInstanceDeclaration>}
+ */
 function instances(info) {
   return { every_minute: "time.schedule" };
 }
 
+/**
+ * @param {CodeTableWorkflowDefinitionInfo} info
+ * @returns {CodeTableWorkflowTriggerDeclaration}
+ */
 function trigger(info) {
   return { instance: "every_minute", params: { interval_ms: 60000 } };
 }
 
+/**
+ * @param {CodeTableWorkflowRunInfo} info
+ * @returns {Record<string, unknown>}
+ */
 function run(info) {
   return { scheduled_at: info.inputs.scheduled_at };
 }

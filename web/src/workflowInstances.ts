@@ -5,8 +5,17 @@ export type WorkflowInstanceInfo = {
   database_name: string;
 };
 
-type WorkflowInstanceResult =
+export type WorkflowInstanceResult =
   | { ok: true; value: Record<string, WorkflowInstanceDeclaration> }
+  | { ok: false; error: string };
+
+export type WorkflowTriggerDeclaration = {
+  instance: string;
+  params?: Record<string, unknown>;
+};
+
+export type WorkflowTriggerResult =
+  | { ok: true; value: WorkflowTriggerDeclaration | null }
   | { ok: false; error: string };
 
 export function evaluateWorkflowInstances(script: string, info: WorkflowInstanceInfo): WorkflowInstanceResult {
@@ -18,6 +27,18 @@ export function evaluateWorkflowInstances(script: string, info: WorkflowInstance
     return { ok: true, value: normalizeWorkflowInstances(instances) };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : "workflow instances evaluation failed" };
+  }
+}
+
+export function evaluateWorkflowTrigger(script: string, info: WorkflowInstanceInfo): WorkflowTriggerResult {
+  try {
+    const trigger = Function(
+      "info",
+      `"use strict";\n${script}\nif (typeof trigger !== "function") { return null; }\nreturn trigger(Object.freeze({ ...info }));`
+    )(info);
+    return { ok: true, value: trigger === null ? null : normalizeWorkflowTrigger(trigger) };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "workflow trigger evaluation failed" };
   }
 }
 
@@ -52,6 +73,20 @@ function normalizeWorkflowInstances(value: unknown): Record<string, WorkflowInst
     throw new Error("workflow instances must declare at least one node instance");
   }
   return instances;
+}
+
+function normalizeWorkflowTrigger(value: unknown): WorkflowTriggerDeclaration {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("workflow trigger must return an object");
+  }
+  const raw = value as Record<string, unknown>;
+  if (typeof raw.instance !== "string" || !raw.instance) {
+    throw new Error("workflow trigger instance is required");
+  }
+  return {
+    instance: raw.instance,
+    params: isRecord(raw.params) ? raw.params : undefined
+  };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

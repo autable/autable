@@ -9,6 +9,7 @@ import {
   updateRow,
   updateTableMetadata,
   type Catalog,
+  type Field,
   type RowChange,
   type TableMetadata,
   type TableView,
@@ -24,6 +25,7 @@ type UseTableWorkspaceOptions = {
   databaseName: string;
   selectedTableView: string;
   table: TableMetadata;
+  tables: TableMetadata[];
   onCatalogChanged: (catalog: Catalog, tableName: string, viewName: string) => void;
   onStatus: (message: string) => void;
 };
@@ -33,6 +35,7 @@ export function useTableWorkspace({
   databaseName,
   selectedTableView,
   table,
+  tables,
   onCatalogChanged,
   onStatus
 }: UseTableWorkspaceOptions) {
@@ -45,12 +48,19 @@ export function useTableWorkspace({
   const [newFieldType, setNewFieldType] = useState("string");
   const [newFormulaValueType, setNewFormulaValueType] = useState("string");
   const [newFieldFormula, setNewFieldFormula] = useState("");
+  const [newRelationTable, setNewRelationTable] = useState("");
   const [newViewBase, setNewViewBase] = useState("all");
   const [newViewFilterField, setNewViewFilterField] = useState("");
   const [newViewFilterOp, setNewViewFilterOp] = useState<TableViewFilter["op"]>("eq");
   const [newViewFilterValue, setNewViewFilterValue] = useState("");
   const [newViewSortField, setNewViewSortField] = useState("");
   const [newViewSortDirection, setNewViewSortDirection] = useState<TableViewSort["direction"]>("asc");
+  const [relationRows, setRelationRows] = useState<Record<string, TableGridRow[]>>({});
+  const [relationDetail, setRelationDetail] = useState<{
+    field: Field;
+    table: TableMetadata;
+    row: TableGridRow;
+  } | null>(null);
 
   const activeFields = table.fields.filter((field) => !field.deleted);
   const activeFieldNames = useMemo(() => activeFields.map((field) => field.name), [table.fields]);
@@ -66,7 +76,32 @@ export function useTableWorkspace({
     () => displayedRows.find((row) => Number(row.record_id) === selectedRecordID) ?? null,
     [displayedRows, selectedRecordID]
   );
-  const columns = useMemo(() => buildTableColumns(activeFields), [activeFields]);
+  const relationLabels = useMemo(() => {
+    const labels: Record<string, Record<number, string>> = {};
+    for (const field of activeFields) {
+      if (field.type !== "relation" || !field.relation_table) {
+        continue;
+      }
+      const targetTable = tables.find((item) => item.name === field.relation_table);
+      const labelField = targetTable?.fields.find((item) => !item.deleted && item.name !== "record_id")?.name;
+      labels[field.name] = {};
+      for (const row of relationRows[field.relation_table] ?? []) {
+        labels[field.name][Number(row.record_id)] = String((labelField ? row[labelField] : row.record_id) ?? "");
+      }
+    }
+    return labels;
+  }, [activeFields, relationRows, tables]);
+  const columns = useMemo(
+    () =>
+      buildTableColumns(activeFields, relationLabels, (field, recordID) => {
+        const targetTable = tables.find((item) => item.name === field.relation_table);
+        const row = relationRows[field.relation_table ?? ""]?.find((item) => Number(item.record_id) === recordID);
+        if (targetTable && row) {
+          setRelationDetail({ field, table: targetTable, row });
+        }
+      }),
+    [activeFields, relationLabels, relationRows, tables]
+  );
 
   useEffect(() => {
     setSelectedRowDraft(rowDraftFromRecord(selectedRow, activeFieldNames));
@@ -115,6 +150,38 @@ export function useTableWorkspace({
       cancelled = true;
     };
   }, [currentUserID, databaseName, table.name, selectedTableView]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const targetTables = Array.from(
+      new Set(activeFields.filter((field) => field.type === "relation" && field.relation_table).map((field) => field.relation_table as string))
+    );
+    if (!currentUserID || !databaseName || targetTables.length === 0) {
+      setRelationRows({});
+      return () => {
+        cancelled = true;
+      };
+    }
+    void Promise.all(
+      targetTables.map(async (targetTable) => {
+        const targetRows = await listRows(databaseName, targetTable, "all");
+        return [targetTable, targetRows.map(rowRecordToValues)] as const;
+      })
+    )
+      .then((entries) => {
+        if (!cancelled) {
+          setRelationRows(Object.fromEntries(entries));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setRelationRows({});
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [table.fields, currentUserID, databaseName]);
 
   function resetRows(nextViewName = "all") {
     setRows([]);
@@ -212,6 +279,10 @@ export function useTableWorkspace({
       onStatus("Formula is required");
       return;
     }
+    if (newFieldType === "relation" && !newRelationTable) {
+      onStatus("Relation target table is required");
+      return;
+    }
     const nextTable = {
       ...table,
       fields: [
@@ -221,6 +292,7 @@ export function useTableWorkspace({
           type: newFieldType,
           value_type: newFieldType === "formula" ? newFormulaValueType : undefined,
           formula: newFieldType === "formula" ? formula : undefined,
+          relation_table: newFieldType === "relation" ? newRelationTable : undefined,
           deleted: false
         }
       ]
@@ -230,6 +302,7 @@ export function useTableWorkspace({
     setNewFieldType("string");
     setNewFormulaValueType("string");
     setNewFieldFormula("");
+    setNewRelationTable("");
   }
 
   async function deleteFieldFromCanvas(fieldName: string) {
@@ -357,7 +430,7 @@ export function useTableWorkspace({
       );
       const saved = await updateRow(databaseName, table.name, selectedRecordID, values);
       setRows((current) =>
-        current.map((item) => (Number(item.record_id) === saved.record_id ? rowRecordToValues(saved) : item))
+      current.map((item) => (Number(item.record_id) === saved.record_id ? rowRecordToValues(saved) : item))
       );
       setRowsViewName("local");
       setSelectedRecordID(saved.record_id);
@@ -407,6 +480,7 @@ export function useTableWorkspace({
     newFieldName,
     newFieldFormula,
     newFieldType,
+    newRelationTable,
     newFormulaValueType,
     newViewBase,
     newViewFilterField,
@@ -415,6 +489,7 @@ export function useTableWorkspace({
     newViewSortDirection,
     newViewSortField,
     rowHistory,
+    relationDetail,
     rows,
     selectedRecordID,
     selectedRowDraft,
@@ -430,7 +505,9 @@ export function useTableWorkspace({
     setNewFieldName,
     setNewFieldFormula,
     setNewFieldType,
+    setNewRelationTable,
     setNewFormulaValueType,
+    setRelationDetail,
     setNewViewBase,
     setNewViewFilterField,
     setNewViewFilterOp,

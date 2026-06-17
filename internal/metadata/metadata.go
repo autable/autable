@@ -34,6 +34,7 @@ type Field struct {
 	Type            string `yaml:"type" json:"type"`
 	ValueType       string `yaml:"value_type,omitempty" json:"value_type,omitempty"`
 	Formula         string `yaml:"formula,omitempty" json:"formula,omitempty"`
+	RelationTable   string `yaml:"relation_table,omitempty" json:"relation_table,omitempty"`
 	Deleted         bool   `yaml:"deleted" json:"deleted"`
 	PermissionLevel int    `yaml:"-" json:"permission_level,omitempty"`
 }
@@ -116,6 +117,15 @@ func (catalog Catalog) Validate() error {
 				return fmt.Errorf("database %q table %q is duplicated", db.Name, table.Name)
 			}
 			seenTables[table.Name] = struct{}{}
+		}
+		for _, table := range db.Tables {
+			for _, field := range table.Fields {
+				if field.Type == "relation" {
+					if _, ok := seenTables[field.RelationTable]; !ok {
+						return fmt.Errorf("database %q table %q relation field %q target table %q is unknown", db.Name, table.Name, field.Name, field.RelationTable)
+					}
+				}
+			}
 		}
 	}
 	return nil
@@ -244,8 +254,14 @@ func (table Table) validate(dbName string, tableIndex int) error {
 		if field.Type == "" {
 			return fmt.Errorf("database %q table %q field %q type is required", dbName, table.Name, field.Name)
 		}
-		if field.Type != "int" && field.Type != "float" && field.Type != "string" && field.Type != "formula" {
+		if field.Type != "int" && field.Type != "float" && field.Type != "string" && field.Type != "formula" && field.Type != "relation" {
 			return fmt.Errorf("database %q table %q field %q type %q is unsupported", dbName, table.Name, field.Name, field.Type)
+		}
+		if field.Type == "relation" && strings.TrimSpace(field.RelationTable) == "" {
+			return fmt.Errorf("database %q table %q relation field %q relation_table is required", dbName, table.Name, field.Name)
+		}
+		if field.Type != "relation" && strings.TrimSpace(field.RelationTable) != "" {
+			return fmt.Errorf("database %q table %q field %q relation_table is only allowed on relation fields", dbName, table.Name, field.Name)
 		}
 		if field.Type == "formula" && strings.TrimSpace(field.Formula) == "" {
 			return fmt.Errorf("database %q table %q formula field %q formula is required", dbName, table.Name, field.Name)
@@ -339,6 +355,9 @@ func (table Table) Field(name string) (Field, bool) {
 func (field Field) StorageType() string {
 	if field.Type == "formula" {
 		return field.ValueType
+	}
+	if field.Type == "relation" {
+		return "int"
 	}
 	return field.Type
 }

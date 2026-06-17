@@ -1,7 +1,10 @@
-import MonacoEditor from "@monaco-editor/react";
+import { useCallback, useEffect, useMemo } from "react";
+import MonacoEditor, { useMonaco, type Monaco } from "@monaco-editor/react";
+import type { EditorExtraLib } from "../editorTypes";
 
 type JavaScriptEditorProps = {
   canWrite: boolean;
+  extraLibs?: EditorExtraLib[];
   label: string;
   onChange: (script: string) => void;
   path: string;
@@ -9,10 +12,37 @@ type JavaScriptEditorProps = {
   value: string;
 };
 
-export function JavaScriptEditor({ canWrite, label, onChange, path, testID, value }: JavaScriptEditorProps) {
+type Disposable = {
+  dispose: () => void;
+};
+
+const configuredMonacos = new WeakSet<object>();
+const extraLibDisposables = new Map<string, { content: string; disposable: Disposable }>();
+
+export function JavaScriptEditor({ canWrite, extraLibs = [], label, onChange, path, testID, value }: JavaScriptEditorProps) {
+  const monaco = useMonaco();
+  const normalizedExtraLibs = useMemo(
+    () => [...extraLibs].sort((left, right) => left.filePath.localeCompare(right.filePath)),
+    [extraLibs]
+  );
+
+  useEffect(() => {
+    if (!monaco) {
+      return;
+    }
+    configureJavaScriptLanguage(monaco);
+    installExtraLibs(monaco, normalizedExtraLibs);
+  }, [monaco, normalizedExtraLibs]);
+
+  const beforeMount = useCallback((nextMonaco: Monaco) => {
+    configureJavaScriptLanguage(nextMonaco);
+    installExtraLibs(nextMonaco, normalizedExtraLibs);
+  }, [normalizedExtraLibs]);
+
   return (
     <div className="javascript-editor-shell">
       <MonacoEditor
+        beforeMount={beforeMount}
         className="javascript-editor"
         defaultLanguage="javascript"
         height="100%"
@@ -44,4 +74,39 @@ export function JavaScriptEditor({ canWrite, label, onChange, path, testID, valu
       />
     </div>
   );
+}
+
+function configureJavaScriptLanguage(monaco: Monaco) {
+  if (configuredMonacos.has(monaco)) {
+    return;
+  }
+  configuredMonacos.add(monaco);
+  const defaults = monaco.languages.typescript.javascriptDefaults;
+  defaults.setCompilerOptions({
+    ...defaults.getCompilerOptions(),
+    allowJs: true,
+    allowNonTsExtensions: true,
+    checkJs: true,
+    noEmit: true,
+    target: monaco.languages.typescript.ScriptTarget.ES2020
+  });
+  defaults.setDiagnosticsOptions({
+    noSemanticValidation: false,
+    noSyntaxValidation: false,
+    noSuggestionDiagnostics: false
+  });
+}
+
+function installExtraLibs(monaco: Monaco, extraLibs: EditorExtraLib[]) {
+  for (const extraLib of extraLibs) {
+    const existing = extraLibDisposables.get(extraLib.filePath);
+    if (existing?.content === extraLib.content) {
+      continue;
+    }
+    existing?.disposable.dispose();
+    extraLibDisposables.set(extraLib.filePath, {
+      content: extraLib.content,
+      disposable: monaco.languages.typescript.javascriptDefaults.addExtraLib(extraLib.content, extraLib.filePath)
+    });
+  }
 }

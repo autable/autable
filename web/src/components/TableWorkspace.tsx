@@ -48,6 +48,7 @@ type TableWorkspaceProps = {
   onNewFieldNameChange: (value: string) => void;
   onNewFieldTypeChange: (value: string) => void;
   onNewFormulaValueTypeChange: (value: string) => void;
+  onNewRelationTableChange: (value: string) => void;
   onNewViewBaseChange: (value: string) => void;
   onNewViewFilterFieldChange: (value: string) => void;
   onNewViewFilterOpChange: (value: TableViewFilter["op"]) => void;
@@ -64,6 +65,7 @@ type TableWorkspaceProps = {
   newFieldName: string;
   newFieldType: string;
   newFormulaValueType: string;
+  newRelationTable: string;
   newViewBase: string;
   newViewFilterField: string;
   newViewFilterOp: TableViewFilter["op"];
@@ -71,11 +73,14 @@ type TableWorkspaceProps = {
   newViewSortDirection: TableViewSort["direction"];
   newViewSortField: string;
   rowHistory: RowChange[];
+  relationDetail: { field: Field; table: TableMetadata; row: TableGridRow } | null;
+  onCloseRelationDetail: () => void;
   rows: TableGridRow[];
   selectedRecordID: number;
   selectedRowDraft: Record<string, string>;
   selectedTableView: string;
   table: TableMetadata;
+  tables: TableMetadata[];
 };
 
 export function TableWorkspace({
@@ -92,6 +97,7 @@ export function TableWorkspace({
   onNewFieldNameChange,
   onNewFieldTypeChange,
   onNewFormulaValueTypeChange,
+  onNewRelationTableChange,
   onNewViewBaseChange,
   onNewViewFilterFieldChange,
   onNewViewFilterOpChange,
@@ -108,6 +114,7 @@ export function TableWorkspace({
   newFieldName,
   newFieldType,
   newFormulaValueType,
+  newRelationTable,
   newViewBase,
   newViewFilterField,
   newViewFilterOp,
@@ -115,11 +122,14 @@ export function TableWorkspace({
   newViewSortDirection,
   newViewSortField,
   rowHistory,
+  relationDetail,
+  onCloseRelationDetail,
   rows,
   selectedRecordID,
   selectedRowDraft,
   selectedTableView,
-  table
+  table,
+  tables
 }: TableWorkspaceProps) {
   const activeFields = table.fields.filter((field) => !field.deleted);
   const hasTable = Boolean(table.name);
@@ -209,6 +219,7 @@ export function TableWorkspace({
               onNewFieldNameChange("");
               onNewFieldTypeChange("string");
               onNewFormulaValueTypeChange("string");
+              onNewRelationTableChange("");
               setFieldCreator({ x: rect.left, y: rect.bottom });
             }}
           >
@@ -226,7 +237,9 @@ export function TableWorkspace({
       onDeleteField,
       onNewFieldFormulaChange,
       onNewFieldNameChange,
-      onNewFieldTypeChange
+      onNewFieldTypeChange,
+      onNewFormulaValueTypeChange,
+      onNewRelationTableChange
     ]
   );
 
@@ -404,14 +417,35 @@ export function TableWorkspace({
                 <Select
                   aria-label="New field type"
                   value={newFieldType}
-                  onChange={(_, data) => onNewFieldTypeChange(data.value)}
+                  onChange={(_, data) => {
+                    onNewFieldTypeChange(data.value);
+                    if (data.value === "relation" && !newRelationTable) {
+                      onNewRelationTableChange(tables.find((item) => item.name !== table.name)?.name ?? tables[0]?.name ?? "");
+                    }
+                  }}
                 >
                   <option value="string">string</option>
                   <option value="int">int</option>
                   <option value="float">float</option>
+                  <option value="relation">relation</option>
                   <option value="formula">formula</option>
                 </Select>
               </FluentField>
+              {newFieldType === "relation" && (
+                <FluentField label="Target table">
+                  <Select
+                    aria-label="Relation target table"
+                    value={newRelationTable}
+                    onChange={(_, data) => onNewRelationTableChange(data.value)}
+                  >
+                    {tables.map((item) => (
+                      <option key={item.name} value={item.name}>
+                        {item.display_name || item.name}
+                      </option>
+                    ))}
+                  </Select>
+                </FluentField>
+              )}
               {newFieldType === "formula" && (
                 <>
                   <FluentField label="Formula value type">
@@ -514,6 +548,9 @@ export function TableWorkspace({
             values={selectedRowDraft}
           />
         )}
+        {relationDetail && (
+          <RelationDrawer relation={relationDetail} onClose={onCloseRelationDetail} />
+        )}
       </div>
     </div>
   );
@@ -521,6 +558,41 @@ export function TableWorkspace({
 
 function canWriteField(field: Field): boolean {
   return field.type !== "formula" && (field.permission_level ?? 2) >= 2;
+}
+
+function RelationDrawer({
+  relation,
+  onClose
+}: {
+  relation: { field: Field; table: TableMetadata; row: TableGridRow };
+  onClose: () => void;
+}) {
+  const fields = relation.table.fields.filter((field) => !field.deleted);
+  return (
+    <aside className="record-drawer relation-drawer" aria-label="Relation record detail">
+      <div className="record-drawer-header">
+        <div>
+          <Text weight="semibold">{relation.table.display_name || relation.table.name}</Text>
+          <Text size={200}>
+            {relation.field.name} {"->"} record {relation.row.record_id}
+          </Text>
+        </div>
+        <Button icon={<DismissRegular />} appearance="subtle" aria-label="Close relation detail" onClick={onClose} />
+      </div>
+      <div className="record-detail-list">
+        <label className="field-stack">
+          <span>record_id</span>
+          <Input aria-label="record_id value" readOnly value={String(relation.row.record_id)} />
+        </label>
+        {fields.map((field) => (
+          <label key={field.name} className="field-stack">
+            <span>{field.name}</span>
+            <Input aria-label={`${field.name} value`} readOnly value={String(relation.row[field.name] ?? "")} />
+          </label>
+        ))}
+      </div>
+    </aside>
+  );
 }
 
 function FieldHeader({

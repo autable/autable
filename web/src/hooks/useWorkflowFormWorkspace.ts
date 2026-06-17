@@ -2,6 +2,8 @@ import { type FormEvent, useEffect, useMemo, useState } from "react";
 import { replaceResource } from "../appState";
 import {
   createRow,
+  deleteForm,
+  deleteWorkflow,
   listForms,
   listWorkflowRuns,
   listWorkflows,
@@ -10,6 +12,7 @@ import {
   runWorkflow,
   saveForm,
   saveWorkflow,
+  unpublishForm,
   type FormDefinition,
   type WorkflowDefinition,
   type WorkflowNodeInfo,
@@ -17,8 +20,12 @@ import {
 } from "../api";
 import { renderFormScript, type FormElement } from "../formRuntime";
 import { rowRecordToValues } from "../tableGrid";
-import { parseAnyMap } from "../workflowConfig";
-import { evaluateWorkflowInstances } from "../workflowInstances";
+import {
+  evaluateWorkflowInstances,
+  evaluateWorkflowTrigger,
+  type WorkflowInstanceResult,
+  type WorkflowTriggerDeclaration
+} from "../workflowInstances";
 
 type UseWorkflowFormWorkspaceOptions = {
   currentUserID?: string;
@@ -27,6 +34,9 @@ type UseWorkflowFormWorkspaceOptions = {
   onStatus: (message: string) => void;
   onSubmittedRow: (targetTableName: string, row: ReturnType<typeof rowRecordToValues>) => void;
 };
+
+const workflowEvaluationDelayMs = 5000;
+const emptyWorkflowInstances: WorkflowInstanceResult = { ok: false, error: "No workflow selected" };
 
 export function useWorkflowFormWorkspace({
   currentUserID,
@@ -43,31 +53,52 @@ export function useWorkflowFormWorkspace({
   const [workflowRuns, setWorkflowRuns] = useState<WorkflowRunResponse[]>([]);
   const [selectedWorkflowRunKey, setSelectedWorkflowRunKey] = useState("");
   const [formValues, setFormValues] = useState<Record<string, string>>({});
-  const [workflowInputsText, setWorkflowInputsText] = useState("{}");
   const [newWorkflowName, setNewWorkflowName] = useState("");
   const [newFormName, setNewFormName] = useState("");
+  const [workflowInstances, setWorkflowInstances] = useState<WorkflowInstanceResult>(emptyWorkflowInstances);
+  const [workflowTrigger, setWorkflowTrigger] = useState<WorkflowTriggerDeclaration | undefined>(undefined);
 
   const selectedWorkflow = workflows.find((item) => item.id === selectedWorkflowID) ?? workflows[0];
   const selectedForm = forms.find((item) => item.id === selectedFormID) ?? forms[0];
   const selectedWorkflowRun =
     workflowRuns.find((run) => run.history_key === selectedWorkflowRunKey) ?? workflowRuns[0] ?? null;
   const renderedForm = useMemo(() => renderFormScript(selectedForm?.script ?? ""), [selectedForm?.script]);
-  const workflowInstances = useMemo(
-    () =>
-      evaluateWorkflowInstances(selectedWorkflow?.script ?? "", {
-        workflow_id: selectedWorkflow?.id,
-        database_name: databaseName
-      }),
-    [databaseName, selectedWorkflow?.id, selectedWorkflow?.script]
-  );
+
+  useEffect(() => {
+    evaluateSelectedWorkflowScript();
+  }, [databaseName, selectedWorkflow?.id]);
+
+  useEffect(() => {
+    if (!selectedWorkflow) {
+      setWorkflowInstances(emptyWorkflowInstances);
+      setWorkflowTrigger(undefined);
+      return;
+    }
+    const timeoutID = window.setTimeout(evaluateSelectedWorkflowScript, workflowEvaluationDelayMs);
+    return () => window.clearTimeout(timeoutID);
+  }, [databaseName, selectedWorkflow?.id, selectedWorkflow?.script]);
+
+  function evaluateSelectedWorkflowScript() {
+    if (!selectedWorkflow) {
+      setWorkflowInstances(emptyWorkflowInstances);
+      setWorkflowTrigger(undefined);
+      return;
+    }
+    const info = {
+      workflow_id: selectedWorkflow.id,
+      database_name: databaseName
+    };
+    const nextInstances = evaluateWorkflowInstances(selectedWorkflow.script, info);
+    setWorkflowInstances((current) => (nextInstances.ok || !current.ok ? nextInstances : current));
+    const nextTrigger = evaluateWorkflowTrigger(selectedWorkflow.script, info);
+    if (nextTrigger.ok) {
+      setWorkflowTrigger(nextTrigger.value ?? undefined);
+    }
+  }
 
   useEffect(() => {
     setFormValues({});
   }, [selectedForm?.id, selectedForm?.script]);
-
-  useEffect(() => {
-    setWorkflowInputsText("{}");
-  }, [selectedWorkflow?.id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -180,10 +211,12 @@ export function useWorkflowFormWorkspace({
       return;
     }
     try {
+      const targetTable = tableName ? JSON.stringify(tableName) : '""';
       const saved = await saveWorkflow(databaseName, {
         database_name: databaseName,
         name,
-        script: "function instances(info) {\n  return {\n    row_change: 'table.record.changed'\n  };\n}\n\nfunction trigger(info) {\n  return {\n    instance: 'row_change',\n    params: {\n      operations: ['create', 'update', 'delete']\n    }\n  };\n}\n\nfunction run(info) {\n  return {\n    database: info.inputs.database,\n    table: info.inputs.table,\n    record_id: info.inputs.record_id,\n    operation: info.inputs.operation,\n    diff: info.inputs.diff\n  };\n}",
+        script: defaultWorkflowScript(targetTable),
+        enabled: true,
         secrets: {},
         variables: {}
       });
@@ -203,13 +236,8 @@ export function useWorkflowFormWorkspace({
       onStatus("Save workflow before running");
       return;
     }
-    const parsedInputs = parseAnyMap(workflowInputsText);
-    if (!parsedInputs.ok) {
-      onStatus(parsedInputs.error);
-      return;
-    }
     try {
-      const response = await runWorkflow(selectedWorkflow.id, parsedInputs.value);
+      const response = await runWorkflow(selectedWorkflow.id, {});
       setWorkflowRuns((current) => [response, ...current.filter((run) => run.history_key !== response.history_key)]);
       setSelectedWorkflowRunKey(response.history_key);
       if (response.run.error) {
@@ -219,6 +247,54 @@ export function useWorkflowFormWorkspace({
       onStatus(`Workflow run saved: ${response.history_key}`);
     } catch (error) {
       onStatus(error instanceof Error ? error.message : "Workflow run failed");
+    }
+  }
+
+  async function toggleSelectedWorkflowEnabled(enabled: boolean) {
+    if (!selectedWorkflow) {
+      return;
+    }
+    try {
+      const saved = await saveWorkflow(databaseName, { ...selectedWorkflow, enabled });
+      setWorkflows((current) => replaceResource(current, saved));
+      setSelectedWorkflowID(saved.id ?? 0);
+      onStatus(`${saved.name} ${enabled ? "enabled" : "disabled"}`);
+    } catch (error) {
+      onStatus(error instanceof Error ? error.message : "Workflow status update failed");
+    }
+  }
+
+  async function renameSelectedWorkflow(name: string, workflowID = selectedWorkflow?.id ?? 0) {
+    const trimmed = name.trim();
+    const workflow = workflows.find((item) => item.id === workflowID) ?? selectedWorkflow;
+    if (!workflow || !trimmed) {
+      onStatus("Workflow name is required");
+      return;
+    }
+    try {
+      const saved = await saveWorkflow(databaseName, { ...workflow, name: trimmed });
+      setWorkflows((current) => replaceResource(current, saved));
+      setSelectedWorkflowID(saved.id ?? 0);
+      onStatus(`Renamed workflow ${saved.name}`);
+    } catch (error) {
+      onStatus(error instanceof Error ? error.message : "Workflow rename failed");
+    }
+  }
+
+  async function deleteSelectedWorkflow(workflowID = selectedWorkflow?.id ?? 0) {
+    const workflow = workflows.find((item) => item.id === workflowID) ?? selectedWorkflow;
+    if (!workflow?.id) {
+      return;
+    }
+    try {
+      await deleteWorkflow(workflow.id);
+      setWorkflows((current) => current.filter((item) => item.id !== workflow.id));
+      setSelectedWorkflowID(workflows.find((item) => item.id !== workflow.id)?.id ?? 0);
+      setWorkflowRuns([]);
+      setSelectedWorkflowRunKey("");
+      onStatus(`Deleted workflow ${workflow.name}`);
+    } catch (error) {
+      onStatus(error instanceof Error ? error.message : "Workflow delete failed");
     }
   }
 
@@ -251,6 +327,54 @@ export function useWorkflowFormWorkspace({
     }
   }
 
+  async function unpublishSelectedForm() {
+    if (!selectedForm?.id) {
+      onStatus("Save form before unpublishing");
+      return;
+    }
+    try {
+      const saved = await unpublishForm(selectedForm.id);
+      setForms((current) => replaceResource(current, saved));
+      setSelectedFormID(saved.id ?? 0);
+      onStatus(`Unpublished form ${saved.name}`);
+    } catch (error) {
+      onStatus(error instanceof Error ? error.message : "Form unpublish failed");
+    }
+  }
+
+  async function renameSelectedForm(name: string, formID = selectedForm?.id ?? 0) {
+    const trimmed = name.trim();
+    const form = forms.find((item) => item.id === formID) ?? selectedForm;
+    if (!form || !trimmed) {
+      onStatus("Form name is required");
+      return;
+    }
+    try {
+      const saved = await saveForm(databaseName, { ...form, name: trimmed });
+      setForms((current) => replaceResource(current, saved));
+      setSelectedFormID(saved.id ?? 0);
+      onStatus(`Renamed form ${saved.name}`);
+    } catch (error) {
+      onStatus(error instanceof Error ? error.message : "Form rename failed");
+    }
+  }
+
+  async function deleteSelectedForm(formID = selectedForm?.id ?? 0) {
+    const form = forms.find((item) => item.id === formID) ?? selectedForm;
+    if (!form?.id) {
+      return;
+    }
+    try {
+      await deleteForm(form.id);
+      setForms((current) => current.filter((item) => item.id !== form.id));
+      setSelectedFormID(forms.find((item) => item.id !== form.id)?.id ?? 0);
+      setFormValues({});
+      onStatus(`Deleted form ${form.name}`);
+    } catch (error) {
+      onStatus(error instanceof Error ? error.message : "Form delete failed");
+    }
+  }
+
   async function createForm() {
     const name = newFormName.trim();
     if (!databaseName) {
@@ -266,7 +390,7 @@ export function useWorkflowFormWorkspace({
       const saved = await saveForm(databaseName, {
         database_name: databaseName,
         name,
-        script: `function render(api, root) {\n  root.append(api.input({ name: 'name', label: 'Name' }), api.submit('Submit'));\n  return { table: ${targetTable}, fields: { name: 'name' } };\n}`
+        script: defaultFormScript(targetTable)
       });
       setForms((current) => replaceResource(current, saved));
       setSelectedFormID(saved.id ?? 0);
@@ -349,16 +473,6 @@ export function useWorkflowFormWorkspace({
     }
   }
 
-  function updateWorkflowInputsJSON(text: string) {
-    setWorkflowInputsText(text);
-    const parsed = parseAnyMap(text);
-    if (!parsed.ok) {
-      onStatus(parsed.error);
-      return;
-    }
-    onStatus("Workflow inputs updated");
-  }
-
   function updateSelectedFormScript(script: string) {
     setForms((current) => current.map((item) => (item.id === selectedForm?.id ? { ...item, script } : item)));
   }
@@ -376,18 +490,22 @@ export function useWorkflowFormWorkspace({
     selectedForm,
     selectedWorkflow,
     selectedWorkflowRun,
-    workflowInputsText,
     workflowInstances,
+    workflowTrigger,
     workflowNodes,
     workflowRuns,
     workflows,
     clearResources,
     createForm,
     createWorkflow,
+    deleteSelectedForm,
+    deleteSelectedWorkflow,
     executeWorkflow,
     persistForm,
     publishSelectedForm,
     persistWorkflow,
+    renameSelectedForm,
+    renameSelectedWorkflow,
     refreshResources,
     setNewFormName,
     setNewWorkflowName,
@@ -395,10 +513,63 @@ export function useWorkflowFormWorkspace({
     setSelectedWorkflowID,
     setSelectedWorkflowRunKey,
     submitRenderedForm,
+    toggleSelectedWorkflowEnabled,
+    unpublishSelectedForm,
     updateFormValue,
     updateSelectedFormScript,
     saveSelectedWorkflowInstanceConfig,
-    updateSelectedWorkflowScript,
-    updateWorkflowInputsJSON
+    updateSelectedWorkflowScript
   };
+}
+
+function defaultWorkflowScript(targetTable: string) {
+  return `/**
+ * @param {CodeTableWorkflowDefinitionInfo} info
+ * @returns {Record<string, string | CodeTableWorkflowInstanceDeclaration>}
+ */
+function instances(info) {
+  return {
+    row_change: 'table.record.changed'
+  };
+}
+
+/**
+ * @param {CodeTableWorkflowDefinitionInfo} info
+ * @returns {CodeTableWorkflowTriggerDeclaration}
+ */
+function trigger(info) {
+  return {
+    instance: 'row_change',
+    params: {
+      table: ${targetTable},
+      operations: ['create', 'update', 'delete']
+    }
+  };
+}
+
+/**
+ * @param {CodeTableWorkflowRunInfo} info
+ * @returns {Record<string, unknown>}
+ */
+function run(info) {
+  return {
+    database: info.inputs.database,
+    table: info.inputs.table,
+    record_id: info.inputs.record_id,
+    operation: info.inputs.operation,
+    diff: info.inputs.diff
+  };
+}`;
+}
+
+function defaultFormScript(targetTable: string) {
+  return `/**
+ * @param {CodeTableFormAPI} api
+ * @param {CodeTableFormRoot} root
+ * @returns {CodeTableFormDefinition}
+ */
+function render(api, root) {
+  root.append(api.input({ name: 'name', label: 'Name' }), api.submit('Submit'));
+  return { table: ${targetTable}, fields: { name: 'name' } };
+}`;
 }

@@ -16,10 +16,12 @@
     "@xyflow/react": "^12.11.0",
     "react": "^18.3.1",
     "react-data-grid": "^7.0.0-beta.45",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "scheduler": "^0.27.0"
   },
   "devDependencies": {
     "@playwright/test": "^1.61.0",
+    "@testing-library/dom": "^10.4.1",
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.3.0",
     "@testing-library/user-event": "^14.6.1",

@@ -720,6 +720,112 @@ func TestSyncTableRecomputesFormulaFieldsWithoutHistory(t *testing.T) {
 	}
 }
 
+func TestFormulaErrorsClearValueInsteadOfFailingWrite(t *testing.T) {
+	ctx := context.Background()
+	store := history.NewMemoryStore()
+	service := NewService(store)
+	catalog := metadata.Catalog{Databases: []metadata.Database{{
+		Name:       "db",
+		SQLitePath: "./db.sqlite",
+		Tables: []metadata.Table{{
+			Name: "contacts",
+			Fields: []metadata.Field{
+				{Name: "score", Type: "int"},
+				{Name: "aaa", Type: "formula", ValueType: "int", Formula: "field_score / 2"},
+			},
+		}},
+	}}}
+	perms := permission.New(permission.Grant{
+		SubjectID: "u1",
+		Scope:     permission.ScopeTable,
+		Resource:  "db.contacts",
+		Level:     permission.Write,
+	})
+
+	row, err := service.CreateRow(ctx, catalog, perms, "u1", "db", "contacts", map[string]any{"score": 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row.Values["aaa"] != nil {
+		t.Fatalf("expected invalid int formula to be cleared, got %#v", row.Values)
+	}
+
+	row, err = service.UpdateRow(ctx, catalog, perms, "u1", "db", "contacts", row.RecordID, map[string]any{"score": 4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row.Values["aaa"] != int64(2) {
+		t.Fatalf("expected valid formula update, got %#v", row.Values)
+	}
+
+	updatedCatalog := metadata.Catalog{Databases: []metadata.Database{{
+		Name:       "db",
+		SQLitePath: "./db.sqlite",
+		Tables: []metadata.Table{{
+			Name: "contacts",
+			Fields: []metadata.Field{
+				{Name: "score", Type: "int"},
+				{Name: "aaa", Type: "formula", ValueType: "int", Formula: "field_score / 8"},
+			},
+		}},
+	}}}
+	if err := service.SyncTable(ctx, updatedCatalog, "db", "contacts"); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := service.Rows(ctx, updatedCatalog, perms, "u1", "db", "contacts", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].Values["aaa"] != nil {
+		t.Fatalf("expected formula recompute error to clear value, got %#v", rows)
+	}
+}
+
+func TestInvalidTypedFieldInputClearsValueInsteadOfKeepingOldValue(t *testing.T) {
+	ctx := context.Background()
+	store := history.NewMemoryStore()
+	service := NewService(store)
+	catalog := metadata.Catalog{Databases: []metadata.Database{{
+		Name:       "db",
+		SQLitePath: "./db.sqlite",
+		Tables: []metadata.Table{{
+			Name: "contacts",
+			Fields: []metadata.Field{
+				{Name: "12", Type: "int"},
+			},
+		}},
+	}}}
+	perms := permission.New(permission.Grant{
+		SubjectID: "u1",
+		Scope:     permission.ScopeTable,
+		Resource:  "db.contacts",
+		Level:     permission.Write,
+	})
+
+	row, err := service.CreateRow(ctx, catalog, perms, "u1", "db", "contacts", map[string]any{"12": "5"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated, err := service.UpdateRow(ctx, catalog, perms, "u1", "db", "contacts", row.RecordID, map[string]any{"12": "0.5"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Values["12"] != nil {
+		t.Fatalf("expected invalid int input to clear value, got %#v", updated.Values)
+	}
+	entries, err := store.GetPrefix(ctx, history.RowPrefix("db", "contacts", row.RecordID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	change, err := history.DecodeRowChange(entries[len(entries)-1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fmt.Sprint(change.Diff["12"].Old) != "5" || change.Diff["12"].New != nil {
+		t.Fatalf("expected history to record value cleared, got %#v", change.Diff)
+	}
+}
+
 type failingHistoryStore struct{}
 
 func (failingHistoryStore) Put(context.Context, string, []byte) error {
