@@ -126,6 +126,7 @@ select {
 .content-band {
   min-width: 0;
   min-height: 0;
+  overflow: hidden;
   padding: 18px;
   background: var(--colorNeutralBackground2);
 }
@@ -141,6 +142,7 @@ select {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   gap: 12px;
+  overflow: hidden;
 }
 
 .section-header {
@@ -178,6 +180,7 @@ select {
   display: grid;
   min-width: 0;
   min-height: 0;
+  height: 100%;
   overflow: hidden;
   border: 1px solid var(--colorNeutralStroke2);
   border-radius: 6px;
@@ -188,6 +191,7 @@ select {
   min-width: 0;
   min-height: 0;
   height: 100%;
+  overflow: auto;
 }
 
 .field-header {
@@ -421,6 +425,10 @@ select {
   background: var(--colorNeutralBackground1);
 }
 
+.history-pane {
+  overflow: hidden;
+}
+
 .published-form-shell {
   display: grid;
   grid-template-rows: minmax(0, 1fr) 32px;
@@ -447,6 +455,9 @@ select {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
 }
 
 .run-history-list {
@@ -535,7 +546,9 @@ select {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  flex: 0 1 min(280px, 35%);
   min-height: 0;
+  max-height: min(280px, 35%);
   overflow: auto;
 }
 

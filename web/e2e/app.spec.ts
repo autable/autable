@@ -365,6 +365,21 @@ test("covers table views, row creation, and row history through the real backend
   await expect(page.getByRole("toolbar", { name: "Workspace actions" }).getByRole("button", { name: "Create row" })).toHaveCount(0);
 
   const recordsGrid = tableCanvas.getByRole("grid", { name: "Table records" });
+  const gridLayout = await tableCanvas.locator(".grid-host").evaluate((element) => {
+    const host = element as HTMLElement;
+    const grid = host.querySelector(".codetable-grid") as HTMLElement | null;
+    const hostStyle = window.getComputedStyle(host);
+    const gridStyle = grid ? window.getComputedStyle(grid) : null;
+    return {
+      hostOverflow: hostStyle.overflow,
+      gridOverflow: gridStyle?.overflow,
+      hostHeight: host.getBoundingClientRect().height,
+      viewportHeight: window.innerHeight
+    };
+  });
+  expect(gridLayout.hostOverflow).toBe("hidden");
+  expect(gridLayout.gridOverflow).toBe("auto");
+  expect(gridLayout.hostHeight).toBeLessThan(gridLayout.viewportHeight);
   await recordsGrid.getByRole("button", { name: "Add field" }).click();
   const addFieldEditor = page.getByLabel("Add field");
   await addFieldEditor.getByLabel("Field name").fill("priority");
@@ -463,6 +478,16 @@ test("covers workflow editor, node list, and run history through the real backen
   await expect(page.getByLabel("Workflow JavaScript")).toHaveValue(/function trigger\(info\)/);
   await expect(page.getByLabel("Workflow JavaScript")).toHaveValue(/table\.record\.changed/);
   await expect(page.getByText("echo").first()).toBeVisible();
+  const nodeListLayout = await page.locator(".node-list").evaluate((element) => {
+    const list = element as HTMLElement;
+    return {
+      overflowY: window.getComputedStyle(list).overflowY,
+      clientHeight: list.clientHeight,
+      scrollHeight: list.scrollHeight
+    };
+  });
+  expect(nodeListLayout.overflowY).toBe("auto");
+  expect(nodeListLayout.scrollHeight).toBeGreaterThan(nodeListLayout.clientHeight);
   const rowHistory = (await api(
     page,
     "GET",
@@ -495,7 +520,7 @@ test("runs table row workflow nodes through the real backend", async ({ page }) 
   await expect(page.getByText(`Created workflow ${workflowName}`)).toBeVisible();
   await expect(page.getByRole("button", { name: workflowName })).toBeVisible();
   await page.getByLabel("Workflow JavaScript").fill(
-    "function run(info) {\n  const created = info.node('table.row.create', {\n    table: 'contacts',\n    values: { name: info.inputs.name, email: info.inputs.email, status: 'Review' }\n  });\n  return { record_id: created.record.record_id, name: created.record.values.name };\n}"
+    "function run(info) {\n  const created = info.node('table.row.create', {\n    table: 'contacts',\n    values: { name: info.inputs.name, email: info.inputs.email, status: 'Review' }\n  });\n  const beforeUpdate = info.node('table.row.list', { table: 'contacts' });\n  const updated = info.node('table.row.update', {\n    table: 'contacts',\n    record_id: created.record.record_id,\n    values: { status: 'Active' }\n  });\n  const deleted = info.node('table.row.delete', {\n    table: 'contacts',\n    record_id: created.record.record_id\n  });\n  return {\n    created_id: created.record.record_id,\n    before_count: beforeUpdate.rows.length,\n    updated_status: updated.record.values.status,\n    deleted_name: deleted.record.values.name\n  };\n}"
   );
   await page.getByRole("button", { name: "Save" }).click();
   await expect(page.getByText(/Workflow saved as #/)).toBeVisible();
@@ -510,16 +535,14 @@ test("runs table row workflow nodes through the real backend", async ({ page }) 
     "GET",
     `/api/tables/${workspace.databaseName}/${workspace.tableName}/rows`
   )) as Array<{ record_id: number; values: Record<string, unknown> }>;
-  expect(rows).toEqual(
-    expect.arrayContaining([
-      expect.objectContaining({
-        values: expect.objectContaining({ name: "Grace Hopper", email: "grace@example.com", status: "Review" })
-      })
-    ])
-  );
+  expect(rows.some((row) => row.values.name === "Grace Hopper")).toBe(false);
   const runFlow = page.getByLabel("Workflow run flow");
   await expect(runFlow.getByText("table.row.create")).toBeVisible();
+  await expect(runFlow.getByText("table.row.list")).toBeVisible();
+  await expect(runFlow.getByText("table.row.update")).toBeVisible();
+  await expect(runFlow.getByText("table.row.delete")).toBeVisible();
   await expect(runFlow.getByText(/Grace Hopper/).first()).toBeVisible();
+  await expect(runFlow.getByText(/"updated_status": "Active"/).first()).toBeVisible();
 });
 
 test("persists workflow and form JavaScript into the repository path", async ({ page }) => {
