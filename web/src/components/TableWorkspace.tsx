@@ -23,7 +23,6 @@ type TableWorkspaceProps = {
   onAddRow: () => void;
   onAddField: () => void;
   onRowsChange: (rows: TableGridRow[], data: RowsChangeData<TableGridRow>) => void | Promise<void>;
-  onCreateView: () => void;
   onDeleteField: (fieldName: string) => void;
   onDeleteSelectedRow: (recordID?: number) => void;
   onLoadHistory: () => void;
@@ -34,7 +33,6 @@ type TableWorkspaceProps = {
   onNewViewFilterFieldChange: (value: string) => void;
   onNewViewFilterOpChange: (value: TableViewFilter["op"]) => void;
   onNewViewFilterValueChange: (value: string) => void;
-  onNewViewNameChange: (value: string) => void;
   onNewViewSortDirectionChange: (value: TableViewSort["direction"]) => void;
   onNewViewSortFieldChange: (value: string) => void;
   onSelectGridCell: (args: CellSelectArgs<TableGridRow>) => void;
@@ -42,6 +40,7 @@ type TableWorkspaceProps = {
   onSelectTableView: (name: string) => void;
   onSelectedRowValueChange: (fieldName: string, value: string) => void;
   onUpdateSelectedRow: () => void;
+  onUpdateSelectedView: () => void;
   newFieldName: string;
   newFieldRequired: boolean;
   newFieldType: string;
@@ -49,7 +48,6 @@ type TableWorkspaceProps = {
   newViewFilterField: string;
   newViewFilterOp: TableViewFilter["op"];
   newViewFilterValue: string;
-  newViewName: string;
   newViewSortDirection: TableViewSort["direction"];
   newViewSortField: string;
   rowHistory: RowChange[];
@@ -68,7 +66,6 @@ export function TableWorkspace({
   onAddRow,
   onAddField,
   onRowsChange,
-  onCreateView,
   onDeleteField,
   onDeleteSelectedRow,
   onLoadHistory,
@@ -79,7 +76,6 @@ export function TableWorkspace({
   onNewViewFilterFieldChange,
   onNewViewFilterOpChange,
   onNewViewFilterValueChange,
-  onNewViewNameChange,
   onNewViewSortDirectionChange,
   onNewViewSortFieldChange,
   onSelectGridCell,
@@ -87,6 +83,7 @@ export function TableWorkspace({
   onSelectTableView,
   onSelectedRowValueChange,
   onUpdateSelectedRow,
+  onUpdateSelectedView,
   newFieldName,
   newFieldRequired,
   newFieldType,
@@ -94,7 +91,6 @@ export function TableWorkspace({
   newViewFilterField,
   newViewFilterOp,
   newViewFilterValue,
-  newViewName,
   newViewSortDirection,
   newViewSortField,
   rowHistory,
@@ -262,11 +258,9 @@ export function TableWorkspace({
           newViewFilterField={newViewFilterField}
           newViewFilterOp={newViewFilterOp}
           newViewFilterValue={newViewFilterValue}
-          newViewName={newViewName}
           newViewSortDirection={newViewSortDirection}
           newViewSortField={newViewSortField}
           onAddField={onAddField}
-          onCreateView={onCreateView}
           onDeleteField={onDeleteField}
           onLoadHistory={onLoadHistory}
           onNewFieldNameChange={onNewFieldNameChange}
@@ -276,7 +270,6 @@ export function TableWorkspace({
           onNewViewFilterFieldChange={onNewViewFilterFieldChange}
           onNewViewFilterOpChange={onNewViewFilterOpChange}
           onNewViewFilterValueChange={onNewViewFilterValueChange}
-          onNewViewNameChange={onNewViewNameChange}
           onNewViewSortDirectionChange={onNewViewSortDirectionChange}
           onNewViewSortFieldChange={onNewViewSortFieldChange}
           onOpenFields={() => openFieldPanel()}
@@ -284,6 +277,7 @@ export function TableWorkspace({
           onOpenRecord={() => openRecordPanel()}
           onOpenView={() => setCanvasPanel("view")}
           onSaveRecord={onUpdateSelectedRow}
+          onSaveView={onUpdateSelectedView}
           onSelectField={setSelectedFieldName}
           onSelectRecordID={onSelectRecordID}
           onSelectTableView={onSelectTableView}

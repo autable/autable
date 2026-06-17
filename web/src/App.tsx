@@ -322,11 +322,16 @@ export function App() {
     }
   }
 
-  function openTableViewPanelFromSidebar(tableName: string) {
+  async function openTableViewPanelFromSidebar(tableName: string) {
     setView("table");
     setSelectedTable(tableName);
-    setSelectedTableView("all");
     setOpenViewPanelRequest((current) => current + 1);
+    if (tableName !== table.name) {
+      setSelectedTableView("all");
+      setStatus("Select the table before adding a view");
+      return;
+    }
+    await tableWorkspace.createDefaultViewFromSidebar();
   }
 
   return (
@@ -412,12 +417,10 @@ export function App() {
               newViewFilterField={tableWorkspace.newViewFilterField}
               newViewFilterOp={tableWorkspace.newViewFilterOp}
               newViewFilterValue={tableWorkspace.newViewFilterValue}
-              newViewName={tableWorkspace.newViewName}
               newViewSortDirection={tableWorkspace.newViewSortDirection}
               newViewSortField={tableWorkspace.newViewSortField}
               onAddRow={tableWorkspace.addDraftRow}
               onAddField={tableWorkspace.addFieldFromCanvas}
-              onCreateView={tableWorkspace.createViewFromCanvas}
               onDeleteField={tableWorkspace.deleteFieldFromCanvas}
               onDeleteSelectedRow={tableWorkspace.deleteSelectedRow}
               onLoadHistory={tableWorkspace.loadSelectedRowHistory}
@@ -428,7 +431,6 @@ export function App() {
               onNewViewFilterFieldChange={tableWorkspace.setNewViewFilterField}
               onNewViewFilterOpChange={tableWorkspace.setNewViewFilterOp}
               onNewViewFilterValueChange={tableWorkspace.setNewViewFilterValue}
-              onNewViewNameChange={tableWorkspace.setNewViewName}
               onNewViewSortDirectionChange={tableWorkspace.setNewViewSortDirection}
               onNewViewSortFieldChange={tableWorkspace.setNewViewSortField}
               onRowsChange={tableWorkspace.editGridRows}
@@ -437,6 +439,7 @@ export function App() {
               onSelectTableView={setSelectedTableView}
               onSelectedRowValueChange={tableWorkspace.updateSelectedRowDraft}
               onUpdateSelectedRow={tableWorkspace.updateSelectedRowFromEditor}
+              onUpdateSelectedView={tableWorkspace.updateSelectedViewFromCanvas}
               rowHistory={tableWorkspace.rowHistory}
               rows={tableWorkspace.rows}
               selectedRecordID={tableWorkspace.selectedRecordID}

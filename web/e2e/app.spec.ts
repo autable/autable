@@ -388,17 +388,18 @@ test("covers table views, row creation, and row history through the real backend
 
   await page.getByRole("button", { name: workspace.tableName }).click();
   await page.getByRole("button", { name: "+ View" }).click();
-  await canvasPanel.getByLabel("New view name").fill("active-desc");
-  await canvasPanel.getByLabel("Base view").selectOption("active");
+  await expect(page.getByText("Created view View 2")).toBeVisible();
+  await canvasPanel.getByLabel("View filter field").selectOption("status");
+  await canvasPanel.getByLabel("View filter value").fill("Active");
   await canvasPanel.getByLabel("View sort field").selectOption("name");
   await canvasPanel.getByLabel("View sort direction").selectOption("desc");
-  await canvasPanel.getByRole("button", { name: "Create View" }).click();
-  await expect(page.getByText("Created view active-desc")).toBeVisible();
+  await canvasPanel.getByRole("button", { name: "Save View" }).click();
+  await expect(page.getByText("Updated view View 2")).toBeVisible();
 
   const viewRows = (await api(
     page,
     "GET",
-    `/api/tables/${workspace.databaseName}/${workspace.tableName}/rows?view=active-desc`
+    `/api/tables/${workspace.databaseName}/${workspace.tableName}/rows?view=view_2`
   )) as Array<{ values: { name?: string } }>;
   expect(viewRows.map((row) => row.values.name)).toEqual(["Grace Hopper", "Ada Lovelace"]);
 
@@ -411,7 +412,7 @@ test("covers table views, row creation, and row history through the real backend
   await expect(page.getByText(/Deleted record \d+/)).toBeVisible();
 
   const metadata = (await api(page, "GET", "/api/metadata")) as {
-    databases: Array<{ name: string; tables: Array<{ name: string; fields: Array<{ name: string; deleted: boolean }>; views: Array<{ name: string; base_view?: string }> }> }>;
+    databases: Array<{ name: string; tables: Array<{ name: string; fields: Array<{ name: string; deleted: boolean }>; views: Array<{ name: string; filters: Array<{ field: string; value?: string }>; sorts: Array<{ field: string; direction: string }> }> }> }>;
   };
   const table = metadata.databases
     .find((database) => database.name === workspace.databaseName)
@@ -422,7 +423,15 @@ test("covers table views, row creation, and row history through the real backend
       expect.objectContaining({ name: "email", deleted: true })
     ])
   );
-  expect(table?.views).toEqual(expect.arrayContaining([expect.objectContaining({ name: "active-desc", base_view: "active" })]));
+  expect(table?.views).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        name: "view_2",
+        filters: [expect.objectContaining({ field: "status", value: "Active" })],
+        sorts: [expect.objectContaining({ field: "name", direction: "desc" })]
+      })
+    ])
+  );
 });
 
 test("covers workflow editor, node list, and run history through the real backend", async ({ page }) => {

@@ -28,11 +28,9 @@ type TableCanvasPanelProps = {
   newViewFilterField: string;
   newViewFilterOp: TableViewFilter["op"];
   newViewFilterValue: string;
-  newViewName: string;
   newViewSortDirection: TableViewSort["direction"];
   newViewSortField: string;
   onAddField: () => void;
-  onCreateView: () => void;
   onDeleteField: (fieldName: string) => void;
   onLoadHistory: () => void;
   onNewFieldNameChange: (value: string) => void;
@@ -42,7 +40,6 @@ type TableCanvasPanelProps = {
   onNewViewFilterFieldChange: (value: string) => void;
   onNewViewFilterOpChange: (value: TableViewFilter["op"]) => void;
   onNewViewFilterValueChange: (value: string) => void;
-  onNewViewNameChange: (value: string) => void;
   onNewViewSortDirectionChange: (value: TableViewSort["direction"]) => void;
   onNewViewSortFieldChange: (value: string) => void;
   onOpenFields: () => void;
@@ -50,6 +47,7 @@ type TableCanvasPanelProps = {
   onOpenRecord: () => void;
   onOpenView: () => void;
   onSaveRecord: () => void;
+  onSaveView: () => void;
   onSelectField: (fieldName: string) => void;
   onSelectRecordID: (recordID: number) => void;
   onSelectTableView: (name: string) => void;
@@ -75,11 +73,9 @@ export function TableCanvasPanel({
   newViewFilterField,
   newViewFilterOp,
   newViewFilterValue,
-  newViewName,
   newViewSortDirection,
   newViewSortField,
   onAddField,
-  onCreateView,
   onDeleteField,
   onLoadHistory,
   onNewFieldNameChange,
@@ -89,7 +85,6 @@ export function TableCanvasPanel({
   onNewViewFilterFieldChange,
   onNewViewFilterOpChange,
   onNewViewFilterValueChange,
-  onNewViewNameChange,
   onNewViewSortDirectionChange,
   onNewViewSortFieldChange,
   onOpenFields,
@@ -97,6 +92,7 @@ export function TableCanvasPanel({
   onOpenRecord,
   onOpenView,
   onSaveRecord,
+  onSaveView,
   onSelectField,
   onSelectRecordID,
   onSelectTableView,
@@ -155,17 +151,15 @@ export function TableCanvasPanel({
           newViewFilterField={newViewFilterField}
           newViewFilterOp={newViewFilterOp}
           newViewFilterValue={newViewFilterValue}
-          newViewName={newViewName}
           newViewSortDirection={newViewSortDirection}
           newViewSortField={newViewSortField}
-          onCreateView={onCreateView}
           onNewViewBaseChange={onNewViewBaseChange}
           onNewViewFilterFieldChange={onNewViewFilterFieldChange}
           onNewViewFilterOpChange={onNewViewFilterOpChange}
           onNewViewFilterValueChange={onNewViewFilterValueChange}
-          onNewViewNameChange={onNewViewNameChange}
           onNewViewSortDirectionChange={onNewViewSortDirectionChange}
           onNewViewSortFieldChange={onNewViewSortFieldChange}
+          onSaveView={onSaveView}
           onSelectTableView={onSelectTableView}
           selectedView={selectedView}
           views={views}
@@ -356,17 +350,15 @@ function ViewPanel({
   newViewFilterField,
   newViewFilterOp,
   newViewFilterValue,
-  newViewName,
   newViewSortDirection,
   newViewSortField,
-  onCreateView,
   onNewViewBaseChange,
   onNewViewFilterFieldChange,
   onNewViewFilterOpChange,
   onNewViewFilterValueChange,
-  onNewViewNameChange,
   onNewViewSortDirectionChange,
   onNewViewSortFieldChange,
+  onSaveView,
   onSelectTableView,
   selectedView,
   views
@@ -377,21 +369,20 @@ function ViewPanel({
   newViewFilterField: string;
   newViewFilterOp: TableViewFilter["op"];
   newViewFilterValue: string;
-  newViewName: string;
   newViewSortDirection: TableViewSort["direction"];
   newViewSortField: string;
-  onCreateView: () => void;
   onNewViewBaseChange: (value: string) => void;
   onNewViewFilterFieldChange: (value: string) => void;
   onNewViewFilterOpChange: (value: TableViewFilter["op"]) => void;
   onNewViewFilterValueChange: (value: string) => void;
-  onNewViewNameChange: (value: string) => void;
   onNewViewSortDirectionChange: (value: TableViewSort["direction"]) => void;
   onNewViewSortFieldChange: (value: string) => void;
+  onSaveView: () => void;
   onSelectTableView: (name: string) => void;
   selectedView?: NonNullable<TableMetadata["views"]>[number];
   views: NonNullable<TableMetadata["views"]>;
 }) {
+  const canEditView = canWriteTable && Boolean(selectedView);
   return (
     <div className="canvas-panel-grid view-canvas">
       <List
@@ -427,23 +418,15 @@ function ViewPanel({
           </div>
         </div>
         <div className="canvas-form-row">
-          <FluentField label="View name">
-            <Input
-              aria-label="New view name"
-              value={newViewName}
-              onChange={(_, data) => onNewViewNameChange(data.value)}
-              disabled={!canWriteTable}
-            />
-          </FluentField>
           <FluentField label="Base view">
             <Select
               aria-label="Base view"
               value={newViewBase}
               onChange={(_, data) => onNewViewBaseChange(data.value)}
-              disabled={!canWriteTable}
+              disabled={!canEditView}
             >
               <option value="all">All records</option>
-              {views.map((item) => (
+              {views.filter((item) => item.name !== selectedView?.name).map((item) => (
                 <option key={item.name} value={item.name}>
                   {item.display_name || item.name}
                 </option>
@@ -455,7 +438,7 @@ function ViewPanel({
               aria-label="View filter field"
               value={newViewFilterField}
               onChange={(_, data) => onNewViewFilterFieldChange(data.value)}
-              disabled={!canWriteTable}
+              disabled={!canEditView}
             >
               <option value="">No filter</option>
               {activeFields.map((field) => (
@@ -470,7 +453,7 @@ function ViewPanel({
               aria-label="View filter operator"
               value={newViewFilterOp}
               onChange={(_, data) => onNewViewFilterOpChange(data.value as TableViewFilter["op"])}
-              disabled={!canWriteTable || !newViewFilterField}
+              disabled={!canEditView || !newViewFilterField}
             >
               <option value="eq">equals</option>
               <option value="contains">contains</option>
@@ -482,7 +465,7 @@ function ViewPanel({
               aria-label="View filter value"
               value={newViewFilterValue}
               onChange={(_, data) => onNewViewFilterValueChange(data.value)}
-              disabled={!canWriteTable || !newViewFilterField || newViewFilterOp === "not_empty"}
+              disabled={!canEditView || !newViewFilterField || newViewFilterOp === "not_empty"}
             />
           </FluentField>
           <FluentField label="Sort field">
@@ -490,7 +473,7 @@ function ViewPanel({
               aria-label="View sort field"
               value={newViewSortField}
               onChange={(_, data) => onNewViewSortFieldChange(data.value)}
-              disabled={!canWriteTable}
+              disabled={!canEditView}
             >
               <option value="">No sort</option>
               <option value="record_id">record_id</option>
@@ -506,14 +489,14 @@ function ViewPanel({
               aria-label="View sort direction"
               value={newViewSortDirection}
               onChange={(_, data) => onNewViewSortDirectionChange(data.value as TableViewSort["direction"])}
-              disabled={!canWriteTable || !newViewSortField}
+              disabled={!canEditView || !newViewSortField}
             >
               <option value="asc">ascending</option>
               <option value="desc">descending</option>
             </Select>
           </FluentField>
-          <Button appearance="primary" icon={<AddRegular />} onClick={onCreateView} disabled={!canWriteTable}>
-            Create View
+          <Button appearance="primary" icon={<SaveRegular />} onClick={onSaveView} disabled={!canEditView}>
+            Save View
           </Button>
         </div>
       </div>

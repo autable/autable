@@ -44,7 +44,6 @@ export function useTableWorkspace({
   const [newFieldName, setNewFieldName] = useState("");
   const [newFieldType, setNewFieldType] = useState("text");
   const [newFieldRequired, setNewFieldRequired] = useState(false);
-  const [newViewName, setNewViewName] = useState("");
   const [newViewBase, setNewViewBase] = useState("all");
   const [newViewFilterField, setNewViewFilterField] = useState("");
   const [newViewFilterOp, setNewViewFilterOp] = useState<TableViewFilter["op"]>("eq");
@@ -71,6 +70,16 @@ export function useTableWorkspace({
   useEffect(() => {
     setSelectedRowDraft(rowDraftFromRecord(selectedRow, activeFieldNames));
   }, [activeFieldNames, selectedRow]);
+
+  useEffect(() => {
+    const viewDef = table.views.find((item) => item.name === selectedTableView);
+    setNewViewBase(viewDef?.base_view ?? "all");
+    setNewViewFilterField(viewDef?.filters[0]?.field ?? "");
+    setNewViewFilterOp(viewDef?.filters[0]?.op ?? "eq");
+    setNewViewFilterValue(String(viewDef?.filters[0]?.value ?? ""));
+    setNewViewSortField(viewDef?.sorts[0]?.field ?? "");
+    setNewViewSortDirection(viewDef?.sorts[0]?.direction ?? "asc");
+  }, [selectedTableView, table.views]);
 
   useEffect(() => {
     if (displayedRecordIDs.length === 0) {
@@ -206,17 +215,8 @@ export function useTableWorkspace({
     await persistTableMetadata(nextTable, `Deleted field ${fieldName}`);
   }
 
-  async function createViewFromCanvas() {
-    const name = newViewName.trim();
-    if (!name) {
-      onStatus("View name is required");
-      return;
-    }
-    if (name === "all" || table.views.some((viewDef) => viewDef.name === name)) {
-      onStatus(`View ${name} already exists`);
-      return;
-    }
-    const filters: TableViewFilter[] = newViewFilterField
+  function viewFiltersFromDraft(): TableViewFilter[] {
+    return newViewFilterField
       ? [
           {
             field: newViewFilterField,
@@ -225,25 +225,57 @@ export function useTableWorkspace({
           }
         ]
       : [];
-    const sorts: TableViewSort[] = newViewSortField
-      ? [{ field: newViewSortField, direction: newViewSortDirection }]
-      : [];
+  }
+
+  function viewSortsFromDraft(): TableViewSort[] {
+    return newViewSortField ? [{ field: newViewSortField, direction: newViewSortDirection }] : [];
+  }
+
+  async function createDefaultViewFromSidebar() {
+    if (!databaseName || !table.name) {
+      onStatus("Select a table before adding a view");
+      return;
+    }
+    const existingNames = new Set(["all", ...(table.views ?? []).map((viewDef) => viewDef.name)]);
+    let index = (table.views ?? []).length + 1;
+    while (existingNames.has(`view_${index}`)) {
+      index += 1;
+    }
+    const name = `view_${index}`;
+    const displayName = `View ${index}`;
     const nextView: TableView = {
       name,
-      display_name: name,
-      base_view: newViewBase === "all" ? undefined : newViewBase,
-      filters,
-      sorts
+      display_name: displayName,
+      filters: [],
+      sorts: []
     };
     const nextTable = { ...table, views: [...(table.views ?? []), nextView] };
-    await persistTableMetadata(nextTable, `Created view ${name}`, name);
-    setNewViewName("");
+    await persistTableMetadata(nextTable, `Created view ${displayName}`, name);
     setNewViewBase("all");
     setNewViewFilterField("");
     setNewViewFilterOp("eq");
     setNewViewFilterValue("");
     setNewViewSortField("");
     setNewViewSortDirection("asc");
+  }
+
+  async function updateSelectedViewFromCanvas() {
+    const selectedView = table.views.find((viewDef) => viewDef.name === selectedTableView);
+    if (!selectedView) {
+      onStatus("All records is the base view");
+      return;
+    }
+    const nextView: TableView = {
+      ...selectedView,
+      base_view: newViewBase === "all" ? undefined : newViewBase,
+      filters: viewFiltersFromDraft(),
+      sorts: viewSortsFromDraft()
+    };
+    const nextTable = {
+      ...table,
+      views: table.views.map((viewDef) => (viewDef.name === selectedView.name ? nextView : viewDef))
+    };
+    await persistTableMetadata(nextTable, `Updated view ${selectedView.display_name || selectedView.name}`, selectedView.name);
   }
 
   async function addDraftRow() {
@@ -331,7 +363,6 @@ export function useTableWorkspace({
     newViewFilterField,
     newViewFilterOp,
     newViewFilterValue,
-    newViewName,
     newViewSortDirection,
     newViewSortField,
     rowHistory,
@@ -341,7 +372,7 @@ export function useTableWorkspace({
     addDraftRow,
     addFieldFromCanvas,
     addSubmittedRow,
-    createViewFromCanvas,
+    createDefaultViewFromSidebar,
     deleteFieldFromCanvas,
     deleteSelectedRow,
     editGridRows,
@@ -354,11 +385,11 @@ export function useTableWorkspace({
     setNewViewFilterField,
     setNewViewFilterOp,
     setNewViewFilterValue,
-    setNewViewName,
     setNewViewSortDirection,
     setNewViewSortField,
     setSelectedRecordID,
     selectGridCell,
+    updateSelectedViewFromCanvas,
     updateSelectedRowDraft,
     updateSelectedRowFromEditor
   };
