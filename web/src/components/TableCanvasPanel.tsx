@@ -10,7 +10,7 @@ import {
   Toolbar,
   ToolbarButton
 } from "@fluentui/react-components";
-import { AddRegular, DeleteRegular, SaveRegular } from "@fluentui/react-icons";
+import { AddRegular, SaveRegular } from "@fluentui/react-icons";
 import type { Field, RowChange, TableMetadata, TableViewFilter, TableViewSort } from "../api";
 
 export type CanvasPanel = "fields" | "record" | "view" | "history";
@@ -31,7 +31,6 @@ type TableCanvasPanelProps = {
   newViewSortDirection: TableViewSort["direction"];
   newViewSortField: string;
   onAddField: () => void;
-  onDeleteField: (fieldName: string) => void;
   onLoadHistory: () => void;
   onNewFieldNameChange: (value: string) => void;
   onNewFieldRequiredChange: (value: boolean) => void;
@@ -42,7 +41,6 @@ type TableCanvasPanelProps = {
   onNewViewFilterValueChange: (value: string) => void;
   onNewViewSortDirectionChange: (value: TableViewSort["direction"]) => void;
   onNewViewSortFieldChange: (value: string) => void;
-  onOpenFields: () => void;
   onOpenHistory: () => void;
   onOpenRecord: () => void;
   onOpenView: () => void;
@@ -76,7 +74,6 @@ export function TableCanvasPanel({
   newViewSortDirection,
   newViewSortField,
   onAddField,
-  onDeleteField,
   onLoadHistory,
   onNewFieldNameChange,
   onNewFieldRequiredChange,
@@ -87,7 +84,6 @@ export function TableCanvasPanel({
   onNewViewFilterValueChange,
   onNewViewSortDirectionChange,
   onNewViewSortFieldChange,
-  onOpenFields,
   onOpenHistory,
   onOpenRecord,
   onOpenView,
@@ -111,7 +107,6 @@ export function TableCanvasPanel({
         canWriteTable={canWriteTable}
         hasWritableFields={hasWritableFields}
         selectedRecordID={selectedRecordID}
-        onOpenFields={onOpenFields}
         onOpenHistory={onOpenHistory}
         onOpenRecord={onOpenRecord}
         onOpenView={onOpenView}
@@ -124,7 +119,6 @@ export function TableCanvasPanel({
           newFieldRequired={newFieldRequired}
           newFieldType={newFieldType}
           onAddField={onAddField}
-          onDeleteField={onDeleteField}
           onNewFieldNameChange={onNewFieldNameChange}
           onNewFieldRequiredChange={onNewFieldRequiredChange}
           onNewFieldTypeChange={onNewFieldTypeChange}
@@ -183,7 +177,6 @@ function CanvasPanelHeader({
   canWriteTable,
   hasWritableFields,
   selectedRecordID,
-  onOpenFields,
   onOpenHistory,
   onOpenRecord,
   onOpenView
@@ -192,7 +185,6 @@ function CanvasPanelHeader({
   canWriteTable: boolean;
   hasWritableFields: boolean;
   selectedRecordID: number;
-  onOpenFields: () => void;
   onOpenHistory: () => void;
   onOpenRecord: () => void;
   onOpenView: () => void;
@@ -206,14 +198,6 @@ function CanvasPanelHeader({
         disabled={!selectedRecordID || !hasWritableFields}
       >
         Record
-      </ToolbarButton>
-      <ToolbarButton
-        aria-label="Fields panel"
-        appearance={activePanel === "fields" ? "primary" : "subtle"}
-        onClick={onOpenFields}
-        disabled={!canWriteTable}
-      >
-        Fields
       </ToolbarButton>
       <ToolbarButton
         aria-label="View panel"
@@ -242,7 +226,6 @@ function FieldsPanel({
   newFieldRequired,
   newFieldType,
   onAddField,
-  onDeleteField,
   onNewFieldNameChange,
   onNewFieldRequiredChange,
   onNewFieldTypeChange,
@@ -255,7 +238,6 @@ function FieldsPanel({
   newFieldRequired: boolean;
   newFieldType: string;
   onAddField: () => void;
-  onDeleteField: (fieldName: string) => void;
   onNewFieldNameChange: (value: string) => void;
   onNewFieldRequiredChange: (value: boolean) => void;
   onNewFieldTypeChange: (value: string) => void;
@@ -297,14 +279,6 @@ function FieldsPanel({
               </Text>
             )}
           </div>
-          <Button
-            icon={<DeleteRegular />}
-            aria-label={selectedField ? `Delete field ${selectedField.name}` : "Delete field"}
-            onClick={() => selectedField && onDeleteField(selectedField.name)}
-            disabled={!canWriteTable || !selectedField}
-          >
-            Delete Field
-          </Button>
         </div>
         <div className="canvas-form-row">
           <FluentField label="New field name">

@@ -190,6 +190,81 @@ select {
   height: 100%;
 }
 
+.field-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  min-width: 0;
+  width: 100%;
+}
+
+.field-header-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.field-header-menu-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  color: var(--colorNeutralForeground2);
+  background: transparent;
+  cursor: pointer;
+}
+
+.field-header-menu-button:hover {
+  background: var(--colorNeutralBackground1Hover);
+}
+
+.field-header-menu-button:disabled {
+  color: var(--colorNeutralForegroundDisabled);
+  cursor: default;
+}
+
+.add-field-header-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  color: var(--colorBrandForeground1);
+  background: transparent;
+  cursor: pointer;
+}
+
+.add-field-header-button:hover {
+  background: var(--colorNeutralBackground1Hover);
+}
+
+.add-field-header-button:disabled {
+  color: var(--colorNeutralForegroundDisabled);
+  cursor: default;
+}
+
+.field-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 220px;
+}
+
+.field-editor-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .table-canvas-panel {
   position: absolute;
   right: 12px;

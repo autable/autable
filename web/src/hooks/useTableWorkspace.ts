@@ -9,6 +9,7 @@ import {
   updateRow,
   updateTableMetadata,
   type Catalog,
+  type Field,
   type RowChange,
   type TableMetadata,
   type TableView,
@@ -215,6 +216,19 @@ export function useTableWorkspace({
     await persistTableMetadata(nextTable, `Deleted field ${fieldName}`);
   }
 
+  async function updateFieldFromHeader(fieldName: string, nextField: Pick<Field, "type" | "required">) {
+    const existing = table.fields.find((field) => field.name === fieldName && !field.deleted);
+    if (!existing) {
+      onStatus(`Field ${fieldName} does not exist`);
+      return;
+    }
+    const nextTable = {
+      ...table,
+      fields: table.fields.map((field) => (field.name === fieldName ? { ...field, ...nextField } : field))
+    };
+    await persistTableMetadata(nextTable, `Updated field ${fieldName}`);
+  }
+
   function viewFiltersFromDraft(): TableViewFilter[] {
     return newViewFilterField
       ? [
@@ -389,6 +403,7 @@ export function useTableWorkspace({
     setNewViewSortField,
     setSelectedRecordID,
     selectGridCell,
+    updateFieldFromHeader,
     updateSelectedViewFromCanvas,
     updateSelectedRowDraft,
     updateSelectedRowFromEditor

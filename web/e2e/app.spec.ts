@@ -251,7 +251,7 @@ test("hides workflow and form resources without resource permission", async ({ p
   await expect(page.getByRole("button", { name: /Contacts/ })).toBeVisible();
   const tableCanvas = page.locator(".table-view");
   const tableActions = tableCanvas.getByRole("toolbar", { name: "Table canvas actions" });
-  await expect(tableActions.getByRole("button", { name: "Fields" })).toBeDisabled();
+  await expect(tableCanvas.getByRole("grid", { name: "Table records" }).getByRole("button", { name: "Add field" })).toBeDisabled();
   await expect(tableActions.getByRole("button", { name: "Edit Row" })).toBeDisabled();
   await expect(tableActions.getByRole("button", { name: "Row", exact: true })).toBeDisabled();
   await page.getByRole("button", { name: "Workflow", exact: true }).click();
@@ -359,23 +359,31 @@ test("covers table views, row creation, and row history through the real backend
   const tableCanvas = page.locator(".table-view");
   const tableActions = tableCanvas.getByRole("toolbar", { name: "Table canvas actions" });
   const canvasPanel = tableCanvas.getByLabel("Table canvas panel");
-  await expect(tableActions.getByRole("button", { name: "Fields" })).toBeVisible();
   await expect(tableActions.getByRole("button", { name: "Row", exact: true })).toBeVisible();
   await expect(page.getByRole("toolbar", { name: "Workspace actions" }).getByRole("button", { name: "Create row" })).toHaveCount(0);
 
-  await tableActions.getByRole("button", { name: "Fields" }).click();
-  await canvasPanel.getByLabel("New field name").fill("priority");
-  await canvasPanel.getByLabel("New field type").selectOption("text");
-  await canvasPanel.getByRole("button", { name: "Add Field" }).click();
+  const recordsGrid = tableCanvas.getByRole("grid", { name: "Table records" });
+  await recordsGrid.getByRole("button", { name: "Add field" }).click();
+  const addFieldEditor = page.getByLabel("Add field");
+  await addFieldEditor.getByLabel("Field name").fill("priority");
+  await addFieldEditor.getByLabel("New field type").selectOption("text");
+  await addFieldEditor.getByRole("button", { name: "Add" }).click();
   await expect(page.getByText("Added field priority")).toBeVisible();
-  await canvasPanel.getByRole("listbox", { name: "Table fields" }).getByRole("option", { name: /email/ }).click();
-  await canvasPanel.getByRole("button", { name: "Delete field email" }).click();
+
+  await recordsGrid.getByRole("button", { name: "Field actions priority" }).click();
+  await page.getByRole("menuitem", { name: "Edit field" }).click();
+  const fieldEditor = page.getByLabel("Edit field");
+  await fieldEditor.getByLabel("Field type").selectOption("number");
+  await fieldEditor.getByLabel("Required").check();
+  await fieldEditor.getByRole("button", { name: "Save" }).click();
+  await expect(page.getByText("Updated field priority")).toBeVisible();
+
+  await recordsGrid.getByRole("button", { name: "Field actions email" }).click();
+  await page.getByRole("menuitem", { name: "Delete field" }).click();
   await expect(page.getByText("Deleted field email")).toBeVisible();
 
   await tableActions.getByRole("button", { name: "Row", exact: true }).click();
   await expect(page.getByText(/Created record \d+/)).toBeVisible();
-
-  const recordsGrid = tableCanvas.getByRole("grid", { name: "Table records" });
   await recordsGrid.getByRole("gridcell", { name: /New record/ }).dblclick();
   await recordsGrid.locator(".rdg-text-editor").fill("Grace Hopper");
   await page.keyboard.press("Enter");
@@ -412,14 +420,14 @@ test("covers table views, row creation, and row history through the real backend
   await expect(page.getByText(/Deleted record \d+/)).toBeVisible();
 
   const metadata = (await api(page, "GET", "/api/metadata")) as {
-    databases: Array<{ name: string; tables: Array<{ name: string; fields: Array<{ name: string; deleted: boolean }>; views: Array<{ name: string; filters: Array<{ field: string; value?: string }>; sorts: Array<{ field: string; direction: string }> }> }> }>;
+    databases: Array<{ name: string; tables: Array<{ name: string; fields: Array<{ name: string; type?: string; required?: boolean; deleted: boolean }>; views: Array<{ name: string; filters: Array<{ field: string; value?: string }>; sorts: Array<{ field: string; direction: string }> }> }> }>;
   };
   const table = metadata.databases
     .find((database) => database.name === workspace.databaseName)
     ?.tables.find((item) => item.name === workspace.tableName);
   expect(table?.fields).toEqual(
     expect.arrayContaining([
-      expect.objectContaining({ name: "priority", deleted: false }),
+      expect.objectContaining({ name: "priority", type: "number", required: true, deleted: false }),
       expect.objectContaining({ name: "email", deleted: true })
     ])
   );

@@ -438,6 +438,7 @@ export function App() {
               onSelectRecordID={tableWorkspace.setSelectedRecordID}
               onSelectTableView={setSelectedTableView}
               onSelectedRowValueChange={tableWorkspace.updateSelectedRowDraft}
+              onUpdateField={tableWorkspace.updateFieldFromHeader}
               onUpdateSelectedRow={tableWorkspace.updateSelectedRowFromEditor}
               onUpdateSelectedView={tableWorkspace.updateSelectedViewFromCanvas}
               rowHistory={tableWorkspace.rowHistory}
