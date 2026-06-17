@@ -100,6 +100,19 @@ type workflowRunResponse struct {
 	Run        history.WorkflowRun `json:"run"`
 }
 
+type workflowDefinitionResponse struct {
+	ID              int64             `json:"id"`
+	DatabaseName    string            `json:"database_name"`
+	Name            string            `json:"name"`
+	Script          string            `json:"script"`
+	CreatorID       string            `json:"creator_id,omitempty"`
+	Secrets         map[string]int    `json:"secrets"`
+	Variables       map[string]string `json:"variables"`
+	PermissionLevel permission.Level  `json:"permission_level,omitempty"`
+	CreatedAt       int64             `json:"created_at"`
+	UpdatedAt       int64             `json:"updated_at"`
+}
+
 type workflowEventKind string
 
 const (
@@ -724,7 +737,7 @@ func (server *Server) handleSaveWorkflow(w http.ResponseWriter, r *http.Request)
 		}
 	}
 	saved = server.workflowWithPermissionLevel(r.Context(), actorID, saved)
-	writeJSON(w, http.StatusCreated, saved)
+	writeJSON(w, http.StatusCreated, workflowResponseFromDefinition(saved))
 }
 
 func (server *Server) handleWorkflowNodes(w http.ResponseWriter, _ *http.Request) {
@@ -758,7 +771,7 @@ func (server *Server) handleGetDatabaseResource(w http.ResponseWriter, r *http.R
 			writeError(w, http.StatusInternalServerError, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, filtered)
+		writeJSON(w, http.StatusOK, workflowResponsesFromDefinitions(filtered))
 	case "forms":
 		forms, err := server.system.Forms(r.Context(), dbName)
 		if err != nil {
@@ -859,7 +872,7 @@ func (server *Server) handlePostDatabaseResource(w http.ResponseWriter, r *http.
 			}
 		}
 		saved = server.workflowWithPermissionLevel(r.Context(), actorID, saved)
-		writeJSON(w, http.StatusCreated, saved)
+		writeJSON(w, http.StatusCreated, workflowResponseFromDefinition(saved))
 	case "forms":
 		var form systemdb.FormDefinition
 		if err := readJSON(r, &form); err != nil {
@@ -1013,7 +1026,7 @@ func (server *Server) handleGetWorkflow(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	workflow = server.workflowWithPermissionLevel(r.Context(), actorID, workflow)
-	writeJSON(w, http.StatusOK, workflow)
+	writeJSON(w, http.StatusOK, workflowResponseFromDefinition(workflow))
 }
 
 func (server *Server) handleRunWorkflow(w http.ResponseWriter, r *http.Request) {
@@ -2324,6 +2337,37 @@ func (server *Server) workflowDefinitionWithFileScript(ctx context.Context, work
 		workflow.Script = script
 	}
 	return workflow, nil
+}
+
+func workflowResponsesFromDefinitions(workflows []systemdb.WorkflowDefinition) []workflowDefinitionResponse {
+	responses := make([]workflowDefinitionResponse, 0, len(workflows))
+	for _, workflow := range workflows {
+		responses = append(responses, workflowResponseFromDefinition(workflow))
+	}
+	return responses
+}
+
+func workflowResponseFromDefinition(workflow systemdb.WorkflowDefinition) workflowDefinitionResponse {
+	return workflowDefinitionResponse{
+		ID:              workflow.ID,
+		DatabaseName:    workflow.DatabaseName,
+		Name:            workflow.Name,
+		Script:          workflow.Script,
+		CreatorID:       workflow.CreatorID,
+		Secrets:         secretLengths(workflow.Secrets),
+		Variables:       workflow.Variables,
+		PermissionLevel: workflow.PermissionLevel,
+		CreatedAt:       workflow.CreatedAt,
+		UpdatedAt:       workflow.UpdatedAt,
+	}
+}
+
+func secretLengths(secrets map[string]string) map[string]int {
+	lengths := map[string]int{}
+	for key, value := range secrets {
+		lengths[key] = len(value)
+	}
+	return lengths
 }
 
 func (server *Server) formDefinitionsWithFileScripts(ctx context.Context, forms []systemdb.FormDefinition) ([]systemdb.FormDefinition, error) {

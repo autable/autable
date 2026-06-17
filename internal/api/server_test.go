@@ -1263,12 +1263,19 @@ func TestWorkflowAndFormAPI(t *testing.T) {
 		t.Fatalf("expected workflow 201, got %d: %s", workflowRecorder.Code, workflowRecorder.Body.String())
 	}
 
-	var workflow systemdb.WorkflowDefinition
-	if err := json.NewDecoder(workflowRecorder.Body).Decode(&workflow); err != nil {
+	workflowResponseBody := workflowRecorder.Body.String()
+	var workflow workflowDefinitionResponse
+	if err := json.Unmarshal([]byte(workflowResponseBody), &workflow); err != nil {
 		t.Fatal(err)
 	}
 	if workflow.DatabaseName != "db" {
 		t.Fatalf("expected db-level workflow, got %#v", workflow)
+	}
+	if workflow.Secrets["TOKEN"] != len("secret") {
+		t.Fatalf("expected workflow response to expose secret length only, got %#v", workflow.Secrets)
+	}
+	if strings.Contains(workflowResponseBody, `"TOKEN":"secret"`) || strings.Contains(workflowResponseBody, "hidden-token") {
+		t.Fatalf("workflow response leaked secret value: %s", workflowResponseBody)
 	}
 	getWorkflow := httptest.NewRequest(http.MethodGet, "/api/workflows/1", nil)
 	getWorkflow.AddCookie(testSessionCookie(t, system, "u1"))
@@ -1284,12 +1291,16 @@ func TestWorkflowAndFormAPI(t *testing.T) {
 	if listWorkflowsRecorder.Code != http.StatusOK {
 		t.Fatalf("expected workflow list 200, got %d: %s", listWorkflowsRecorder.Code, listWorkflowsRecorder.Body.String())
 	}
-	var workflows []systemdb.WorkflowDefinition
-	if err := json.NewDecoder(listWorkflowsRecorder.Body).Decode(&workflows); err != nil {
+	listWorkflowsResponseBody := listWorkflowsRecorder.Body.String()
+	var workflows []workflowDefinitionResponse
+	if err := json.Unmarshal([]byte(listWorkflowsResponseBody), &workflows); err != nil {
 		t.Fatal(err)
 	}
 	if len(workflows) != 1 || workflows[0].ID != workflow.ID {
 		t.Fatalf("unexpected workflow list: %#v", workflows)
+	}
+	if workflows[0].Secrets["TOKEN"] != len("secret") || strings.Contains(listWorkflowsResponseBody, `"TOKEN":"secret"`) || strings.Contains(listWorkflowsResponseBody, "hidden-token") {
+		t.Fatalf("workflow list leaked secret value: %s", listWorkflowsResponseBody)
 	}
 
 	formRequest := httptest.NewRequest(http.MethodPost, "/api/databases/db/forms", bytes.NewBufferString(`{
@@ -1352,7 +1363,7 @@ func TestWorkflowAndFormAPI(t *testing.T) {
 	if getWorkflowRecorder.Code != http.StatusOK {
 		t.Fatalf("expected workflow reload 200, got %d: %s", getWorkflowRecorder.Code, getWorkflowRecorder.Body.String())
 	}
-	var reloadedWorkflow systemdb.WorkflowDefinition
+	var reloadedWorkflow workflowDefinitionResponse
 	if err := json.NewDecoder(getWorkflowRecorder.Body).Decode(&reloadedWorkflow); err != nil {
 		t.Fatal(err)
 	}
@@ -1478,7 +1489,7 @@ func TestDatabaseWriteCanManageDatabaseWorkflowsAndForms(t *testing.T) {
 	if workflowRecorder.Code != http.StatusCreated {
 		t.Fatalf("expected table owner workflow create 201, got %d: %s", workflowRecorder.Code, workflowRecorder.Body.String())
 	}
-	var workflow systemdb.WorkflowDefinition
+	var workflow workflowDefinitionResponse
 	if err := json.NewDecoder(workflowRecorder.Body).Decode(&workflow); err != nil {
 		t.Fatal(err)
 	}
@@ -1505,7 +1516,7 @@ func TestDatabaseWriteCanManageDatabaseWorkflowsAndForms(t *testing.T) {
 	if listWorkflowsRecorder.Code != http.StatusOK {
 		t.Fatalf("expected db owner workflow list 200, got %d: %s", listWorkflowsRecorder.Code, listWorkflowsRecorder.Body.String())
 	}
-	var workflows []systemdb.WorkflowDefinition
+	var workflows []workflowDefinitionResponse
 	if err := json.NewDecoder(listWorkflowsRecorder.Body).Decode(&workflows); err != nil {
 		t.Fatal(err)
 	}
@@ -1595,7 +1606,7 @@ func TestWorkflowAndFormUpdatesCannotMoveAcrossDatabases(t *testing.T) {
 	if workflowRecorder.Code != http.StatusCreated {
 		t.Fatalf("expected workflow create 201, got %d: %s", workflowRecorder.Code, workflowRecorder.Body.String())
 	}
-	var savedWorkflow systemdb.WorkflowDefinition
+	var savedWorkflow workflowDefinitionResponse
 	if err := json.NewDecoder(workflowRecorder.Body).Decode(&savedWorkflow); err != nil {
 		t.Fatal(err)
 	}
@@ -2166,7 +2177,7 @@ func TestWorkflowAndFormPermissions(t *testing.T) {
 	if workflowRecorder.Code != http.StatusCreated {
 		t.Fatalf("expected workflow 201, got %d: %s", workflowRecorder.Code, workflowRecorder.Body.String())
 	}
-	var createdWorkflow systemdb.WorkflowDefinition
+	var createdWorkflow workflowDefinitionResponse
 	if err := json.NewDecoder(workflowRecorder.Body).Decode(&createdWorkflow); err != nil {
 		t.Fatal(err)
 	}
@@ -2230,7 +2241,7 @@ func TestWorkflowAndFormPermissions(t *testing.T) {
 	if readWorkflowRecorder.Code != http.StatusOK {
 		t.Fatalf("expected workflow 200, got %d: %s", readWorkflowRecorder.Code, readWorkflowRecorder.Body.String())
 	}
-	var readableWorkflow systemdb.WorkflowDefinition
+	var readableWorkflow workflowDefinitionResponse
 	if err := json.NewDecoder(readWorkflowRecorder.Body).Decode(&readableWorkflow); err != nil {
 		t.Fatal(err)
 	}

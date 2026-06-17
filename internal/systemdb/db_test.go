@@ -275,6 +275,9 @@ func TestWorkflowDefinitionStoresSecretsAndVariablesAsJSON(t *testing.T) {
 	if updated.CreatorID != "creator" {
 		t.Fatalf("expected workflow creator to be immutable, got %#v", updated)
 	}
+	if updated.Secrets["TOKEN"] != "secret" {
+		t.Fatalf("expected omitted workflow secret to be preserved, got %#v", updated.Secrets)
+	}
 	list, err := db.Workflows(ctx, "workspace")
 	if err != nil {
 		t.Fatal(err)

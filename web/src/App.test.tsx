@@ -41,7 +41,7 @@ const workflowFixture = [
     name: "record-review",
     script:
       'function instances(info) { return { review_echo: { node: "echo", variables: [{ name: "CHANNEL", type: "string" }], secrets: [{ name: "TOKEN", type: "string" }] } }; }\nfunction run(info) { return info.instance("review_echo").exec({ value: info.inputs.name }); }',
-    secrets: { "review_echo.TOKEN": "" },
+    secrets: { "review_echo.TOKEN": 12 },
     variables: { "review_echo.CHANNEL": "ops" },
     permission_level: 2
   },
@@ -132,6 +132,20 @@ async function defaultFetch(input: RequestInfo | URL, init?: RequestInit): Promi
     return jsonResponse(rowFixture);
   }
   if (url === "/api/databases/workspace/workflows") {
+    if (init?.method === "POST") {
+      const body = JSON.parse(String(init.body)) as typeof workflowFixture[number] & { secrets: Record<string, string> };
+      return jsonResponse(
+        {
+          ...workflowFixture[0],
+          ...body,
+          id: body.id ?? workflowFixture[0].id,
+          secrets: Object.fromEntries(
+            Object.entries(body.secrets ?? {}).map(([key, value]) => [key, String(value).length])
+          )
+        },
+        201
+      );
+    }
     return jsonResponse(workflowFixture);
   }
   if (url === "/api/databases/workspace/forms") {
@@ -391,11 +405,14 @@ describe("App", () => {
     );
     expect(screen.getByText("dingtalk.robot.send")).toBeInTheDocument();
     expect(screen.getByText("secrets access_token:string")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Edit config review_echo" }));
     expect(screen.getByLabelText("Variable review_echo.CHANNEL")).toHaveValue("ops");
     expect(screen.getByLabelText("Secret review_echo.TOKEN")).toHaveValue("");
+    expect(screen.getByText("Saved secret length: 12")).toBeInTheDocument();
     await userEvent.clear(screen.getByLabelText("Variable review_echo.CHANNEL"));
     fireEvent.change(screen.getByLabelText("Variable review_echo.CHANNEL"), { target: { value: "support" } });
     expect(screen.getByLabelText("Variable review_echo.CHANNEL")).toHaveValue("support");
+    await userEvent.click(screen.getByRole("button", { name: "Save config" }));
     expect(screen.getAllByText("echo").length).toBeGreaterThan(0);
     expect(screen.getAllByText("review_echo").length).toBeGreaterThan(0);
     expect(screen.getByText("table.record.changed")).toBeInTheDocument();
@@ -407,6 +424,7 @@ describe("App", () => {
           "function instances(info) { return { ding: { node: 'dingtalk.robot.send' } }; }\nfunction run(info) { return info.instance('ding').exec({ content: 'hello' }); }"
       }
     });
+    await userEvent.click(screen.getByRole("button", { name: "Edit config ding" }));
     expect(screen.getByLabelText("Secret ding.access_token")).toBeInTheDocument();
   });
 
@@ -469,8 +487,7 @@ describe("App", () => {
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Run" })).toBeDisabled();
     expect(screen.getByLabelText("Workflow JavaScript")).toBeDisabled();
-    expect(screen.getByLabelText("Variable review_echo.CHANNEL")).toBeDisabled();
-    expect(screen.getByLabelText("Secret review_echo.TOKEN")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Edit config review_echo" })).toBeDisabled();
     expect(screen.getByLabelText("Workflow Inputs JSON")).not.toBeDisabled();
 
     await userEvent.click(screen.getByRole("button", { name: /^Form$/ }));

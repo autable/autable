@@ -625,6 +625,32 @@ select {
   color: var(--colorNeutralForeground3);
 }
 
+.instance-config-popover {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(360px, calc(100vw - 32px));
+}
+
+.instance-config-popover-header {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.instance-config-popover-header > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.instance-config-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
 .field-stack {
   display: flex;
   flex-direction: column;

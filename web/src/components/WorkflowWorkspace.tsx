@@ -1,5 +1,15 @@
-import { Button, Field as FluentField, Input, Text, Textarea } from "@fluentui/react-components";
-import { PlayRegular, SaveRegular } from "@fluentui/react-icons";
+import { useState } from "react";
+import {
+  Button,
+  Field as FluentField,
+  Input,
+  Popover,
+  PopoverSurface,
+  PopoverTrigger,
+  Text,
+  Textarea
+} from "@fluentui/react-components";
+import { EditRegular, PlayRegular, SaveRegular } from "@fluentui/react-icons";
 import type {
   WorkflowDefinition,
   WorkflowInstanceDeclaration,
@@ -12,14 +22,13 @@ type WorkflowWorkspaceProps = {
   databaseName: string;
   onExecute: () => void;
   onSave: () => void;
+  onSaveInstanceConfig: (
+    instanceID: string,
+    variables: Record<string, string>,
+    secrets: Record<string, string>
+  ) => void | Promise<void>;
   onUpdateInputsJSON: (text: string) => void;
   onSelectRunKey: (historyKey: string) => void;
-  onUpdateInstanceConfig: (
-    kind: "secrets" | "variables",
-    instanceID: string,
-    name: string,
-    value: string
-  ) => void;
   onUpdateScript: (script: string) => void;
   selectedRun: WorkflowRunResponse | null;
   inputsText: string;
@@ -35,9 +44,9 @@ export function WorkflowWorkspace({
   databaseName,
   onExecute,
   onSave,
+  onSaveInstanceConfig,
   onUpdateInputsJSON,
   onSelectRunKey,
-  onUpdateInstanceConfig,
   onUpdateScript,
   selectedRun,
   inputsText,
@@ -80,13 +89,6 @@ export function WorkflowWorkspace({
               aria-label="Workflow Inputs JSON"
             />
           </label>
-          <InstanceConfigEditor
-            canWriteWorkflow={canWriteWorkflow}
-            onUpdateInstanceConfig={onUpdateInstanceConfig}
-            workflow={workflow}
-            workflowInstances={workflowInstances}
-            workflowNodesByType={workflowNodesByType}
-          />
         </div>
       </div>
       <div className="history-pane">
@@ -123,6 +125,16 @@ export function WorkflowWorkspace({
                     <span>vars {formatPorts(ports.variables)}</span>
                     <span>secrets {formatPorts(ports.secrets)}</span>
                   </div>
+                  {(ports.variables.length > 0 || ports.secrets.length > 0) && (
+                    <InstanceConfigPopover
+                      canWriteWorkflow={canWriteWorkflow}
+                      instanceID={instanceID}
+                      instanceNode={instance.node}
+                      onSaveInstanceConfig={onSaveInstanceConfig}
+                      ports={ports}
+                      workflow={workflow}
+                    />
+                  )}
                 </div>
               );
             })
@@ -178,82 +190,99 @@ export function WorkflowWorkspace({
   );
 }
 
-function InstanceConfigEditor({
+function InstanceConfigPopover({
   canWriteWorkflow,
-  onUpdateInstanceConfig,
-  workflow,
-  workflowInstances,
-  workflowNodesByType
+  instanceID,
+  instanceNode,
+  onSaveInstanceConfig,
+  ports,
+  workflow
 }: {
   canWriteWorkflow: boolean;
-  onUpdateInstanceConfig: (
-    kind: "secrets" | "variables",
+  instanceID: string;
+  instanceNode: string;
+  onSaveInstanceConfig: (
     instanceID: string,
-    name: string,
-    value: string
-  ) => void;
+    variables: Record<string, string>,
+    secrets: Record<string, string>
+  ) => void | Promise<void>;
+  ports: { variables: WorkflowPort[]; secrets: WorkflowPort[] };
   workflow?: WorkflowDefinition;
-  workflowInstances:
-    | { ok: true; value: Record<string, WorkflowInstanceDeclaration> }
-    | { ok: false; error: string };
-  workflowNodesByType: Map<string, WorkflowNodeInfo>;
 }) {
-  if (!workflowInstances.ok) {
-    return (
-      <div className="instance-config-panel">
-        <Text weight="semibold">Instance config</Text>
-        <Text size={200}>{workflowInstances.error}</Text>
-      </div>
+  const [open, setOpen] = useState(false);
+  const [variableDrafts, setVariableDrafts] = useState<Record<string, string>>({});
+  const [secretDrafts, setSecretDrafts] = useState<Record<string, string>>({});
+
+  function resetDrafts() {
+    setVariableDrafts(
+      Object.fromEntries(
+        ports.variables.map((port) => [port.name, workflow?.variables?.[instanceConfigKey(instanceID, port.name)] ?? ""])
+      )
     );
+    setSecretDrafts(Object.fromEntries(ports.secrets.map((port) => [port.name, ""])));
   }
-  const entries = Object.entries(workflowInstances.value)
-    .map(([instanceID, instance]) => ({
-      instanceID,
-      instance,
-      ports: effectiveInstancePorts(instance, workflowNodesByType)
-    }))
-    .filter(({ ports }) => ports.variables.length > 0 || ports.secrets.length > 0);
-  if (entries.length === 0) {
-    return (
-      <div className="instance-config-panel">
-        <Text weight="semibold">Instance config</Text>
-        <Text size={200}>No variables or secrets declared</Text>
-      </div>
-    );
+
+  async function saveDrafts() {
+    await onSaveInstanceConfig(instanceID, variableDrafts, secretDrafts);
+    setOpen(false);
   }
+
   return (
-    <div className="instance-config-panel" aria-label="Workflow instance config">
-      <Text weight="semibold">Instance config</Text>
-      {entries.map(({ instanceID, instance, ports }) => (
-        <div className="instance-config-group" key={instanceID}>
-          <div className="node-title">
+    <Popover
+      open={open}
+      onOpenChange={(_, data) => {
+        if (data.open) {
+          resetDrafts();
+        }
+        setOpen(data.open);
+      }}
+    >
+      <PopoverTrigger disableButtonEnhancement>
+        <Button icon={<EditRegular />} aria-label={`Edit config ${instanceID}`} disabled={!canWriteWorkflow} />
+      </PopoverTrigger>
+      <PopoverSurface className="instance-config-popover" aria-label={`Instance config ${instanceID}`}>
+        <div className="instance-config-popover-header">
+          <div>
             <span>{instanceID}</span>
-            <span>{instance.node}</span>
+            <span>{instanceNode}</span>
           </div>
-          {ports.variables.map((port) => (
-            <FluentField key={`variable-${instanceID}-${port.name}`} label={port.name}>
-              <Input
-                aria-label={`Variable ${instanceID}.${port.name}`}
-                value={workflow?.variables?.[instanceConfigKey(instanceID, port.name)] ?? ""}
-                onChange={(_, data) => onUpdateInstanceConfig("variables", instanceID, port.name, data.value)}
-                disabled={!canWriteWorkflow}
-              />
-            </FluentField>
-          ))}
-          {ports.secrets.map((port) => (
-            <FluentField key={`secret-${instanceID}-${port.name}`} label={port.name}>
+        </div>
+        {ports.variables.map((port) => (
+          <FluentField key={`variable-${instanceID}-${port.name}`} label={port.name}>
+            <Input
+              aria-label={`Variable ${instanceID}.${port.name}`}
+              value={variableDrafts[port.name] ?? ""}
+              onChange={(_, data) => setVariableDrafts((current) => ({ ...current, [port.name]: data.value }))}
+              disabled={!canWriteWorkflow}
+            />
+          </FluentField>
+        ))}
+        {ports.secrets.map((port) => {
+          const length = workflow?.secrets?.[instanceConfigKey(instanceID, port.name)] ?? 0;
+          return (
+            <FluentField
+              key={`secret-${instanceID}-${port.name}`}
+              label={port.name}
+              hint={length > 0 ? `Saved secret length: ${length}` : "No saved secret"}
+            >
               <Input
                 aria-label={`Secret ${instanceID}.${port.name}`}
                 type="password"
-                value={workflow?.secrets?.[instanceConfigKey(instanceID, port.name)] ?? ""}
-                onChange={(_, data) => onUpdateInstanceConfig("secrets", instanceID, port.name, data.value)}
+                placeholder={length > 0 ? "Leave blank to keep saved value" : "Enter secret value"}
+                value={secretDrafts[port.name] ?? ""}
+                onChange={(_, data) => setSecretDrafts((current) => ({ ...current, [port.name]: data.value }))}
                 disabled={!canWriteWorkflow}
               />
             </FluentField>
-          ))}
+          );
+        })}
+        <div className="instance-config-actions">
+          <Button appearance="primary" icon={<SaveRegular />} onClick={saveDrafts} disabled={!canWriteWorkflow}>
+            Save config
+          </Button>
         </div>
-      ))}
-    </div>
+      </PopoverSurface>
+    </Popover>
   );
 }
 

@@ -443,6 +443,7 @@ func (db *DB) SaveWorkflow(ctx context.Context, workflow WorkflowDefinition) (Wo
 			return WorkflowDefinition{}, err
 		}
 		workflow.CreatorID = existing.CreatorID
+		workflow.Secrets = mergeStringMaps(existing.Secrets, workflow.Secrets)
 	}
 	model, err := workflowToModel(workflow)
 	if err != nil {
@@ -863,4 +864,15 @@ func emptyStringMap(values map[string]string) map[string]string {
 		return map[string]string{}
 	}
 	return values
+}
+
+func mergeStringMaps(base map[string]string, updates map[string]string) map[string]string {
+	merged := map[string]string{}
+	for key, value := range base {
+		merged[key] = value
+	}
+	for key, value := range updates {
+		merged[key] = value
+	}
+	return merged
 }

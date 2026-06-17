@@ -323,8 +323,7 @@ test("renders read-only workflow and form resources as non-editable", async ({ p
   await page.getByRole("button", { name: "Workflow", exact: true }).click();
   await expect(page.getByRole("button", { name: workflowName })).toBeVisible();
   await expect(page.getByLabel("Workflow JavaScript")).toBeDisabled();
-  await expect(page.getByLabel("Variable notifier.channel")).toBeDisabled();
-  await expect(page.getByLabel("Secret notifier.token")).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Edit config notifier" })).toBeDisabled();
   await expect(page.getByLabel("Workflow Inputs JSON")).toBeEnabled();
   await expect(page.getByRole("button", { name: "Save" })).toBeDisabled();
   await expect(page.getByRole("button", { name: "Run" })).toBeDisabled();
@@ -572,7 +571,9 @@ test("covers workflow editor, node list, and run history through the real backen
   await page.getByLabel("Workflow JavaScript").fill(
     "function instances(info) {\n  return { ding: { node: 'dingtalk.robot.send' } };\n}\n\nfunction run(info) {\n  return info.instance('ding').exec({ content: 'hello' });\n}"
   );
+  await page.getByRole("button", { name: "Edit config ding" }).click();
   await expect(page.getByLabel("Secret ding.access_token")).toBeVisible();
+  await page.keyboard.press("Escape");
   const rowHistory = (await api(
     page,
     "GET",
@@ -581,10 +582,11 @@ test("covers workflow editor, node list, and run history through the real backen
   await page.getByLabel("Workflow JavaScript").fill(
     "function instances(info) {\n  return { row_change: { node: 'table.record.changed', variables: [{ name: 'label', type: 'string' }], secrets: [{ name: 'token', type: 'string' }] } };\n}\n\nfunction run(info) {\n  const triggered = info.instance('row_change').exec({ history_key: info.inputs.history_key });\n  return { record_id: triggered.record.record_id, name: triggered.values.name };\n}"
   );
+  await page.getByRole("button", { name: "Edit config row_change" }).click();
   await page.getByLabel("Variable row_change.label").fill("review");
   await page.getByLabel("Secret row_change.token").fill("hidden-token");
-  await page.getByRole("button", { name: "Save" }).click();
-  await expect(page.getByText(/Workflow saved as #/)).toBeVisible();
+  await page.getByRole("button", { name: "Save config" }).click();
+  await expect(page.getByText("Saved instance config row_change")).toBeVisible();
   const savedWorkflows = (await api(
     page,
     "GET",
@@ -593,13 +595,13 @@ test("covers workflow editor, node list, and run history through the real backen
     id: number;
     name: string;
     variables: Record<string, string>;
-    secrets: Record<string, string>;
+    secrets: Record<string, number>;
     created_at: number;
     updated_at: number;
   }>;
   const savedWorkflow = savedWorkflows.find((item) => item.name === workflowName);
   expect(savedWorkflow?.variables["row_change.label"]).toBe("review");
-  expect(savedWorkflow?.secrets["row_change.token"]).toBe("hidden-token");
+  expect(savedWorkflow?.secrets["row_change.token"]).toBe("hidden-token".length);
   expect(typeof savedWorkflow?.created_at).toBe("number");
   expect(typeof savedWorkflow?.updated_at).toBe("number");
   await page.getByLabel("Workflow Inputs JSON").fill(JSON.stringify({ history_key: rowHistory[0].history_key }, null, 2));

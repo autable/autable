@@ -61,7 +61,8 @@ export type WorkflowDefinition = {
   name: string;
   script: string;
   creator_id?: string;
-  secrets: Record<string, string>;
+  secrets: Record<string, number>;
+  secret_values?: Record<string, string>;
   variables: Record<string, string>;
   permission_level?: 0 | 1 | 2;
   created_at?: number;
@@ -356,10 +357,22 @@ export async function saveWorkflow(
   dbName: string,
   workflow: WorkflowDefinition
 ): Promise<WorkflowDefinition> {
+  const payload = {
+    id: workflow.id,
+    database_name: workflow.database_name,
+    name: workflow.name,
+    script: workflow.script,
+    creator_id: workflow.creator_id,
+    secrets: workflow.secret_values ?? {},
+    variables: workflow.variables,
+    permission_level: workflow.permission_level,
+    created_at: workflow.created_at,
+    updated_at: workflow.updated_at
+  };
   const response = await fetch(`/api/databases/${dbName}/workflows`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(workflow)
+    body: JSON.stringify(payload)
   });
   if (!response.ok) {
     throw new Error(`workflow save failed: ${response.status}`);

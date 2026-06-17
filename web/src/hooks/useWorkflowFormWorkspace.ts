@@ -316,28 +316,37 @@ export function useWorkflowFormWorkspace({
     );
   }
 
-  function updateSelectedWorkflowInstanceConfig(
-    kind: "secrets" | "variables",
+  async function saveSelectedWorkflowInstanceConfig(
     instanceID: string,
-    name: string,
-    value: string
+    variables: Record<string, string>,
+    secrets: Record<string, string>
   ) {
-    const key = `${instanceID}.${name}`;
-    setWorkflows((current) =>
-      current.map((item) => {
-        if (item.id !== selectedWorkflow?.id) {
-          return item;
-        }
-        return {
-          ...item,
-          [kind]: {
-            ...(item[kind] ?? {}),
-            [key]: value
-          }
-        };
-      })
-    );
-    onStatus("Workflow config updated");
+    if (!selectedWorkflow) {
+      return;
+    }
+    const prefix = `${instanceID}.`;
+    const nextVariables = { ...(selectedWorkflow.variables ?? {}) };
+    for (const [name, value] of Object.entries(variables)) {
+      nextVariables[prefix + name] = value;
+    }
+    const nextSecretValues: Record<string, string> = {};
+    for (const [name, value] of Object.entries(secrets)) {
+      if (value !== "") {
+        nextSecretValues[prefix + name] = value;
+      }
+    }
+    try {
+      const saved = await saveWorkflow(databaseName, {
+        ...selectedWorkflow,
+        variables: nextVariables,
+        secret_values: nextSecretValues
+      });
+      setWorkflows((current) => replaceResource(current, saved));
+      setSelectedWorkflowID(saved.id ?? 0);
+      onStatus(`Saved instance config ${instanceID}`);
+    } catch (error) {
+      onStatus(error instanceof Error ? error.message : "Workflow config save failed");
+    }
   }
 
   function updateWorkflowInputsJSON(text: string) {
@@ -388,7 +397,7 @@ export function useWorkflowFormWorkspace({
     submitRenderedForm,
     updateFormValue,
     updateSelectedFormScript,
-    updateSelectedWorkflowInstanceConfig,
+    saveSelectedWorkflowInstanceConfig,
     updateSelectedWorkflowScript,
     updateWorkflowInputsJSON
   };

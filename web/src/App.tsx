@@ -459,8 +459,8 @@ function WorkspaceApp() {
               databaseName={database.name}
               onExecute={workflowFormWorkspace.executeWorkflow}
               onSave={workflowFormWorkspace.persistWorkflow}
+              onSaveInstanceConfig={workflowFormWorkspace.saveSelectedWorkflowInstanceConfig}
               onSelectRunKey={workflowFormWorkspace.setSelectedWorkflowRunKey}
-              onUpdateInstanceConfig={workflowFormWorkspace.updateSelectedWorkflowInstanceConfig}
               onUpdateInputsJSON={workflowFormWorkspace.updateWorkflowInputsJSON}
               onUpdateScript={workflowFormWorkspace.updateSelectedWorkflowScript}
               inputsText={workflowInputsText}
