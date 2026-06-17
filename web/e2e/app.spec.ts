@@ -365,21 +365,44 @@ test("covers table views, row creation, and row history through the real backend
   await expect(page.getByRole("toolbar", { name: "Workspace actions" }).getByRole("button", { name: "Create row" })).toHaveCount(0);
 
   const recordsGrid = tableCanvas.getByRole("grid", { name: "Table records" });
+  for (let index = 0; index < 80; index += 1) {
+    await api(page, "POST", `/api/tables/${workspace.databaseName}/${workspace.tableName}/rows`, {
+      values: {
+        name: `Bulk contact ${index}`,
+        email: `bulk-${index}@example.com`,
+        status: "Backlog"
+      }
+    });
+  }
+  await page.reload();
+  await expect(page.getByRole("button", { name: workspace.databaseName })).toBeVisible();
+  await expect(recordsGrid).toBeVisible();
+  await expect
+    .poll(async () =>
+      tableCanvas.locator(".codetable-grid").evaluate((element) => {
+        const grid = element as HTMLElement;
+        return grid.scrollHeight > grid.clientHeight;
+      })
+    )
+    .toBe(true);
   const gridLayout = await tableCanvas.locator(".grid-host").evaluate((element) => {
     const host = element as HTMLElement;
     const grid = host.querySelector(".codetable-grid") as HTMLElement | null;
     const hostStyle = window.getComputedStyle(host);
     const gridStyle = grid ? window.getComputedStyle(grid) : null;
+    const documentElement = document.documentElement;
     return {
       hostOverflow: hostStyle.overflow,
       gridOverflow: gridStyle?.overflow,
       hostHeight: host.getBoundingClientRect().height,
+      documentHeight: documentElement.scrollHeight,
       viewportHeight: window.innerHeight
     };
   });
   expect(gridLayout.hostOverflow).toBe("hidden");
   expect(gridLayout.gridOverflow).toBe("auto");
   expect(gridLayout.hostHeight).toBeLessThan(gridLayout.viewportHeight);
+  expect(gridLayout.documentHeight).toBeLessThanOrEqual(gridLayout.viewportHeight + 1);
   await recordsGrid.getByRole("button", { name: "Add field" }).click();
   const addFieldEditor = page.getByLabel("Add field");
   await addFieldEditor.getByLabel("Field name").fill("priority");
