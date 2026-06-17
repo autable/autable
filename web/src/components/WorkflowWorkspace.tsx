@@ -208,7 +208,6 @@ function NodeCatalogDialog({ language, workflowNodes }: { language: string; work
                   onClick={() => setSelectedType(node.type)}
                 >
                   <span>{node.type}</span>
-                  <span>{node.display_name}</span>
                 </Button>
               ))}
             </div>

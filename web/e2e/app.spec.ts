@@ -577,6 +577,7 @@ test("covers workflow editor, node list, and run history through the real backen
   await page.keyboard.press("Escape");
   await page.getByRole("button", { name: "Switch language" }).click();
   await page.getByRole("button", { name: "Workflow nodes" }).click();
+  await page.getByRole("button", { name: "dingtalk.robot.send" }).click();
   await expect(page.getByText("DingTalk robot").first()).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(page.getByLabel("Workflow instances").getByText("row_change")).toBeVisible();

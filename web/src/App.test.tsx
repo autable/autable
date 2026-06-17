@@ -426,6 +426,7 @@ describe("App", () => {
     await userEvent.keyboard("{Escape}");
     await userEvent.click(screen.getByRole("button", { name: "Switch language" }));
     await userEvent.click(screen.getByRole("button", { name: "Workflow nodes" }));
+    await userEvent.click(screen.getByRole("button", { name: "dingtalk.robot.send" }));
     expect(screen.getAllByText("DingTalk robot").length).toBeGreaterThan(0);
     await userEvent.keyboard("{Escape}");
     await userEvent.click(screen.getByRole("button", { name: "Edit config review_echo" }));
