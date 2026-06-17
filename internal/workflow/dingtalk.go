@@ -3,9 +3,6 @@ package workflow
 import (
 	"bytes"
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,7 +10,6 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"time"
 )
 
 const dingtalkRobotEndpoint = "https://oapi.dingtalk.com/robot/send"
@@ -21,27 +17,22 @@ const dingtalkRobotEndpoint = "https://oapi.dingtalk.com/robot/send"
 type DingTalkRobotNode struct {
 	client   *http.Client
 	endpoint string
-	now      func() time.Time
 }
 
 func NewDingTalkRobotNode() DingTalkRobotNode {
 	return DingTalkRobotNode{
 		client:   http.DefaultClient,
 		endpoint: dingtalkRobotEndpoint,
-		now:      func() time.Time { return time.Now().UTC() },
 	}
 }
 
-func NewDingTalkRobotNodeForTest(client *http.Client, endpoint string, now func() time.Time) DingTalkRobotNode {
+func NewDingTalkRobotNodeForTest(client *http.Client, endpoint string) DingTalkRobotNode {
 	node := NewDingTalkRobotNode()
 	if client != nil {
 		node.client = client
 	}
 	if endpoint != "" {
 		node.endpoint = endpoint
-	}
-	if now != nil {
-		node.now = now
 	}
 	return node
 }
@@ -50,7 +41,7 @@ func (node DingTalkRobotNode) Info() NodeInfo {
 	return NodeInfo{
 		Type:        "dingtalk.robot.send",
 		DisplayName: "DingTalk robot",
-		Description: "Sends a signed text message through a DingTalk custom robot webhook.",
+		Description: "Sends a text message through a DingTalk custom robot webhook.",
 		Inputs: []Port{
 			{Name: "content", Type: "string", Description: "Text content to send."},
 			{Name: "at_user_ids", Type: "string[]", Description: "Optional DingTalk user IDs to mention."},
@@ -64,7 +55,6 @@ func (node DingTalkRobotNode) Info() NodeInfo {
 		},
 		Secrets: []Port{
 			{Name: "access_token", Type: "string", Description: "DingTalk custom robot access_token."},
-			{Name: "secret", Type: "string", Description: "DingTalk custom robot signing secret."},
 		},
 		Stateless: true,
 	}
@@ -72,12 +62,8 @@ func (node DingTalkRobotNode) Info() NodeInfo {
 
 func (node DingTalkRobotNode) Run(ctx context.Context, input map[string]any, info RuntimeInfo) (map[string]any, error) {
 	accessToken := strings.TrimSpace(info.Secrets["access_token"])
-	secret := strings.TrimSpace(info.Secrets["secret"])
 	if accessToken == "" {
 		return nil, errors.New("dingtalk access_token secret is required")
-	}
-	if secret == "" {
-		return nil, errors.New("dingtalk secret secret is required")
 	}
 	content := strings.TrimSpace(stringInput(input, "content"))
 	if content == "" {
@@ -99,7 +85,7 @@ func (node DingTalkRobotNode) Run(ctx context.Context, input map[string]any, inf
 		return nil, err
 	}
 
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, node.signedURL(accessToken, secret), bytes.NewReader(bodyBytes))
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, node.webhookURL(accessToken), bytes.NewReader(bodyBytes))
 	if err != nil {
 		return nil, err
 	}
@@ -138,21 +124,13 @@ func (node DingTalkRobotNode) Run(ctx context.Context, input map[string]any, inf
 	return output, nil
 }
 
-func (node DingTalkRobotNode) signedURL(accessToken, secret string) string {
-	timestamp := node.now().UTC().UnixMilli()
-	signPayload := fmt.Sprintf("%d\n%s", timestamp, secret)
-	mac := hmac.New(sha256.New, []byte(secret))
-	_, _ = mac.Write([]byte(signPayload))
-	sign := base64.StdEncoding.EncodeToString(mac.Sum(nil))
-
+func (node DingTalkRobotNode) webhookURL(accessToken string) string {
 	parsed, err := url.Parse(node.endpoint)
 	if err != nil {
 		return node.endpoint
 	}
 	values := parsed.Query()
 	values.Set("access_token", accessToken)
-	values.Set("timestamp", fmt.Sprintf("%d", timestamp))
-	values.Set("sign", sign)
 	parsed.RawQuery = values.Encode()
 	return parsed.String()
 }

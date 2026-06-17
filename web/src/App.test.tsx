@@ -82,10 +82,7 @@ const workflowNodeFixture = [
     display_name: "DingTalk robot",
     inputs: [{ name: "content", type: "string" }],
     outputs: [{ name: "status_code", type: "int" }],
-    secrets: [
-      { name: "access_token", type: "string" },
-      { name: "secret", type: "string" }
-    ],
+    secrets: [{ name: "access_token", type: "string" }],
     stateless: true,
     trigger: false
   },
@@ -393,7 +390,7 @@ describe("App", () => {
       'info.instance("review_echo").exec'
     );
     expect(screen.getByText("dingtalk.robot.send")).toBeInTheDocument();
-    expect(screen.getByText("secrets access_token:string, secret:string")).toBeInTheDocument();
+    expect(screen.getByText("secrets access_token:string")).toBeInTheDocument();
     expect(screen.getByLabelText("Variable review_echo.CHANNEL")).toHaveValue("ops");
     expect(screen.getByLabelText("Secret review_echo.TOKEN")).toHaveValue("");
     await userEvent.clear(screen.getByLabelText("Variable review_echo.CHANNEL"));
@@ -411,7 +408,6 @@ describe("App", () => {
       }
     });
     expect(screen.getByLabelText("Secret ding.access_token")).toBeInTheDocument();
-    expect(screen.getByLabelText("Secret ding.secret")).toBeInTheDocument();
   });
 
   it("loads persisted workflow runs and renders their flow", async () => {
