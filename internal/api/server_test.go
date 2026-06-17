@@ -1854,6 +1854,7 @@ func TestWorkflowNodesAPI(t *testing.T) {
 		t.Fatal(err)
 	}
 	expectedTypes := []string{
+		"dingtalk.robot.send",
 		"echo",
 		"table.record.changed",
 		"table.row.create",
@@ -1865,13 +1866,21 @@ func TestWorkflowNodesAPI(t *testing.T) {
 	if len(nodes) != len(expectedTypes) {
 		t.Fatalf("unexpected nodes: %#v", nodes)
 	}
-	for i, expectedType := range expectedTypes {
-		if nodes[i].Type != expectedType {
-			t.Fatalf("unexpected nodes: %#v", nodes)
+	byType := map[string]workflow.NodeInfo{}
+	for _, node := range nodes {
+		byType[node.Type] = node
+	}
+	for _, expectedType := range expectedTypes {
+		if _, ok := byType[expectedType]; !ok {
+			t.Fatalf("expected node %q in %#v", expectedType, nodes)
 		}
 	}
-	if !nodes[1].Trigger || len(nodes[1].Inputs) == 0 || len(nodes[1].Outputs) == 0 || !nodes[6].Trigger {
-		t.Fatalf("expected trigger node ports: %#v", nodes[1])
+	dingtalk := byType["dingtalk.robot.send"]
+	if len(dingtalk.Inputs) != 3 || dingtalk.Inputs[0].Name != "content" {
+		t.Fatalf("expected dingtalk node inputs: %#v", dingtalk)
+	}
+	if !byType["table.record.changed"].Trigger || len(byType["table.record.changed"].Inputs) == 0 || len(byType["table.record.changed"].Outputs) == 0 || !byType["time.schedule"].Trigger {
+		t.Fatalf("expected trigger node ports: %#v", nodes)
 	}
 }
 

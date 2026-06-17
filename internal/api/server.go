@@ -145,7 +145,7 @@ func NewServer(catalog metadata.Catalog, system *systemdb.DB, tables *table.Serv
 		system,
 		tables,
 		historyStore,
-		workflow.NewRunner(historyStore, workflow.EchoNode{}, workflow.NewRecordChangedTriggerNode(historyStore), workflow.ScheduleTriggerNode{}),
+		workflow.NewRunner(historyStore, workflow.EchoNode{}, workflow.NewRecordChangedTriggerNode(historyStore), workflow.ScheduleTriggerNode{}, workflow.NewDingTalkRobotNode()),
 	)
 }
 
@@ -159,7 +159,7 @@ func NewServerWithOIDCProviders(catalog metadata.Catalog, system *systemdb.DB, t
 		system,
 		tables,
 		historyStore,
-		workflow.NewRunner(historyStore, workflow.EchoNode{}, workflow.NewRecordChangedTriggerNode(historyStore), workflow.ScheduleTriggerNode{}),
+		workflow.NewRunner(historyStore, workflow.EchoNode{}, workflow.NewRecordChangedTriggerNode(historyStore), workflow.ScheduleTriggerNode{}, workflow.NewDingTalkRobotNode()),
 		providers,
 	)
 }

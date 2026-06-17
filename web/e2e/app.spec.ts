@@ -544,6 +544,14 @@ test("covers workflow editor, node list, and run history through the real backen
   await expect(page.getByLabel("Workflow JavaScript")).toHaveValue(/function trigger\(info\)/);
   await expect(page.getByLabel("Workflow JavaScript")).toHaveValue(/table\.record\.changed/);
   await expect(page.getByText("echo").first()).toBeVisible();
+  const workflowNodes = (await api(page, "GET", "/api/workflow/nodes")) as Array<{
+    type: string;
+    inputs: Array<{ name: string; type: string }>;
+  }>;
+  const dingTalkNode = workflowNodes.find((node) => node.type === "dingtalk.robot.send");
+  expect(dingTalkNode?.inputs).toEqual(
+    expect.arrayContaining([expect.objectContaining({ name: "content", type: "string" })])
+  );
   const nodeListLayout = await page.getByLabel("Workflow nodes").evaluate((element) => {
     const list = element as HTMLElement;
     return {
