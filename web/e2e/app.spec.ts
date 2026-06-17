@@ -409,6 +409,8 @@ test("covers table views, row creation, and row history through the real backend
   await addFieldEditor.getByLabel("New field type").selectOption("text");
   await addFieldEditor.getByRole("button", { name: "Add" }).click();
   await expect(page.getByText("Added field priority")).toBeVisible();
+  await expect(recordsGrid.getByRole("gridcell", { name: "Ada Lovelace", exact: true })).toBeVisible();
+  await expect(page.getByText(/\d+ of \d+ records/).first()).not.toHaveText("0 of 0 records");
 
   await recordsGrid.getByRole("button", { name: "Add field" }).click();
   const formulaFieldEditor = page.getByLabel("Add field");
@@ -444,6 +446,10 @@ test("covers table views, row creation, and row history through the real backend
 
   await tableActions.getByRole("button", { name: "Row", exact: true }).click();
   await expect(page.getByText(/Created record \d+/)).toBeVisible();
+  await recordsGrid.evaluate((grid) => {
+    grid.scrollTop = grid.scrollHeight;
+    grid.dispatchEvent(new Event("scroll", { bubbles: true }));
+  });
   await recordsGrid.getByRole("gridcell", { name: /^New record \d+$/ }).dblclick();
   await recordsGrid.locator(".rdg-text-editor").fill("Grace Hopper");
   await page.keyboard.press("Enter");

@@ -185,8 +185,11 @@ export function useTableWorkspace({
     try {
       await updateTableMetadata(databaseName, table.name, nextTable);
       const nextCatalog = await loadMetadata();
+      const nextRows = await listRows(databaseName, nextTable.name, nextViewName);
       onCatalogChanged(nextCatalog, nextTable.name, nextViewName);
-      resetRows(nextViewName);
+      setRows(nextRows.map(rowRecordToValues));
+      setRowsViewName(nextViewName);
+      setRowHistory([]);
       onStatus(successMessage);
     } catch (error) {
       onStatus(error instanceof Error ? error.message : "Table metadata update failed");
