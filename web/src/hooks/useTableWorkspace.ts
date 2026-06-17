@@ -43,6 +43,7 @@ export function useTableWorkspace({
   const [selectedRowDraft, setSelectedRowDraft] = useState<Record<string, string>>({});
   const [newFieldName, setNewFieldName] = useState("");
   const [newFieldType, setNewFieldType] = useState("text");
+  const [newFieldFormula, setNewFieldFormula] = useState("");
   const [newViewBase, setNewViewBase] = useState("all");
   const [newViewFilterField, setNewViewFilterField] = useState("");
   const [newViewFilterOp, setNewViewFilterOp] = useState<TableViewFilter["op"]>("eq");
@@ -145,7 +146,13 @@ export function useTableWorkspace({
     const previousRow = displayedRows[rowIndex];
     const field = data.column.key;
     const fieldMeta = activeFields.find((item) => item.name === field);
-    if (!nextRow || !previousRow || field === "record_id" || (fieldMeta?.permission_level ?? 2) < 2) {
+    if (
+      !nextRow ||
+      !previousRow ||
+      field === "record_id" ||
+      fieldMeta?.type === "formula" ||
+      (fieldMeta?.permission_level ?? 2) < 2
+    ) {
       return;
     }
     const recordID = Number(nextRow.record_id);
@@ -196,13 +203,27 @@ export function useTableWorkspace({
       onStatus(`Field ${name} already exists`);
       return;
     }
+    const formula = newFieldFormula.trim();
+    if (newFieldType === "formula" && !formula) {
+      onStatus("Formula is required");
+      return;
+    }
     const nextTable = {
       ...table,
-      fields: [...table.fields, { name, type: newFieldType, deleted: false }]
+      fields: [
+        ...table.fields,
+        {
+          name,
+          type: newFieldType,
+          formula: newFieldType === "formula" ? formula : undefined,
+          deleted: false
+        }
+      ]
     };
     await persistTableMetadata(nextTable, `Added field ${name}`);
     setNewFieldName("");
     setNewFieldType("text");
+    setNewFieldFormula("");
   }
 
   async function deleteFieldFromCanvas(fieldName: string) {
@@ -211,6 +232,24 @@ export function useTableWorkspace({
       fields: table.fields.map((field) => (field.name === fieldName ? { ...field, deleted: true } : field))
     };
     await persistTableMetadata(nextTable, `Deleted field ${fieldName}`);
+  }
+
+  async function updateFieldFormulaFromCanvas(fieldName: string, formula: string) {
+    const trimmedFormula = formula.trim();
+    if (!trimmedFormula) {
+      onStatus("Formula is required");
+      return;
+    }
+    const field = table.fields.find((item) => item.name === fieldName);
+    if (!field || field.type !== "formula") {
+      onStatus(`Field ${fieldName} is not a formula field`);
+      return;
+    }
+    const nextTable = {
+      ...table,
+      fields: table.fields.map((item) => (item.name === fieldName ? { ...item, formula: trimmedFormula } : item))
+    };
+    await persistTableMetadata(nextTable, `Updated formula ${fieldName}`);
   }
 
   function viewFiltersFromDraft(): TableViewFilter[] {
@@ -281,7 +320,8 @@ export function useTableWorkspace({
       onStatus("Create a table before adding rows");
       return;
     }
-    const values = Object.fromEntries(activeFields.map((field) => [field.name, field.name === "status" ? "Review" : ""]));
+    const writableFields = activeFields.filter((field) => field.type !== "formula");
+    const values = Object.fromEntries(writableFields.map((field) => [field.name, field.name === "status" ? "Review" : ""]));
     values.name = `New record ${rows.length + 1}`;
     try {
       const saved = await createRow(databaseName, table.name, values);
@@ -305,7 +345,11 @@ export function useTableWorkspace({
       return;
     }
     try {
-      const saved = await updateRow(databaseName, table.name, selectedRecordID, selectedRowDraft);
+      const writableFieldNames = new Set(activeFields.filter((field) => field.type !== "formula").map((field) => field.name));
+      const values = Object.fromEntries(
+        Object.entries(selectedRowDraft).filter(([fieldName]) => writableFieldNames.has(fieldName))
+      );
+      const saved = await updateRow(databaseName, table.name, selectedRecordID, values);
       setRows((current) =>
         current.map((item) => (Number(item.record_id) === saved.record_id ? rowRecordToValues(saved) : item))
       );
@@ -355,6 +399,7 @@ export function useTableWorkspace({
     displayedRecordIDs,
     displayedRows,
     newFieldName,
+    newFieldFormula,
     newFieldType,
     newViewBase,
     newViewFilterField,
@@ -376,6 +421,7 @@ export function useTableWorkspace({
     loadSelectedRowHistory,
     resetRows,
     setNewFieldName,
+    setNewFieldFormula,
     setNewFieldType,
     setNewViewBase,
     setNewViewFilterField,
@@ -386,6 +432,7 @@ export function useTableWorkspace({
     setSelectedRecordID,
     selectGridCell,
     updateSelectedViewFromCanvas,
+    updateFieldFormulaFromCanvas,
     updateSelectedRowDraft,
     updateSelectedRowFromEditor
   };

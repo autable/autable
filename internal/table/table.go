@@ -13,6 +13,8 @@ import (
 	"codetable/internal/history"
 	"codetable/internal/metadata"
 	"codetable/internal/permission"
+
+	"github.com/dop251/goja"
 )
 
 var (
@@ -90,7 +92,7 @@ func (service *Service) CreateRow(ctx context.Context, catalog metadata.Catalog,
 		return Row{}, err
 	}
 	service.notifyRowChange(ctx, historyKey, change)
-	return row, nil
+	return materializeFormulaRow(tableMeta, row)
 }
 
 func (service *Service) UpdateRow(ctx context.Context, catalog metadata.Catalog, perms permission.Set, actorID, dbName, tableName string, recordID int64, values map[string]any) (Row, error) {
@@ -127,11 +129,12 @@ func (service *Service) UpdateRow(ctx context.Context, catalog metadata.Catalog,
 		return Row{}, err
 	}
 	service.notifyRowChange(ctx, historyKey, change)
-	return updated, nil
+	return materializeFormulaRow(tableMeta, updated)
 }
 
 func (service *Service) DeleteRow(ctx context.Context, catalog metadata.Catalog, perms permission.Set, actorID, dbName, tableName string, recordID int64) (Row, error) {
-	if _, ok := catalog.Table(dbName, tableName); !ok {
+	tableMeta, ok := catalog.Table(dbName, tableName)
+	if !ok {
 		return Row{}, fmt.Errorf("table %s.%s not found", dbName, tableName)
 	}
 	resource := dbName + "." + tableName
@@ -159,7 +162,7 @@ func (service *Service) DeleteRow(ctx context.Context, catalog metadata.Catalog,
 		return Row{}, err
 	}
 	service.notifyRowChange(ctx, historyKey, change)
-	return row, nil
+	return materializeFormulaRow(tableMeta, row)
 }
 
 func (service *Service) Rows(ctx context.Context, catalog metadata.Catalog, perms permission.Set, actorID, dbName, tableName, viewName string) ([]Row, error) {
@@ -169,6 +172,10 @@ func (service *Service) Rows(ctx context.Context, catalog metadata.Catalog, perm
 	}
 
 	rows, err := service.rows.Rows(ctx, dbName, tableName)
+	if err != nil {
+		return nil, err
+	}
+	rows, err = materializeFormulaRows(tableMeta, rows)
 	if err != nil {
 		return nil, err
 	}
@@ -224,6 +231,9 @@ func validateWritableFields(tableMeta metadata.Table, perms permission.Set, acto
 		}
 		if field.Deleted {
 			return fmt.Errorf("%w: %s", ErrDeletedField, fieldName)
+		}
+		if field.Type == "formula" {
+			return fmt.Errorf("%w: %s", ErrPermissionDenied, fieldName)
 		}
 		if !perms.CanWriteField(actorID, resource, fieldName) {
 			return fmt.Errorf("%w: %s", ErrPermissionDenied, fieldName)
@@ -388,6 +398,58 @@ func rowValue(row Row, field string) any {
 		return row.RecordID
 	}
 	return row.Values[field]
+}
+
+func materializeFormulaRows(tableMeta metadata.Table, rows []Row) ([]Row, error) {
+	materialized := make([]Row, 0, len(rows))
+	for _, row := range rows {
+		nextRow, err := materializeFormulaRow(tableMeta, row)
+		if err != nil {
+			return nil, err
+		}
+		materialized = append(materialized, nextRow)
+	}
+	return materialized, nil
+}
+
+func materializeFormulaRow(tableMeta metadata.Table, row Row) (Row, error) {
+	values := cloneValues(row.Values)
+	for _, field := range tableMeta.Fields {
+		if field.Deleted || field.Type != "formula" {
+			continue
+		}
+		value, err := evaluateFormula(field.Formula, row.RecordID, values)
+		if err != nil {
+			return Row{}, fmt.Errorf("formula field %q: %w", field.Name, err)
+		}
+		values[field.Name] = value
+	}
+	return Row{RecordID: row.RecordID, Values: values}, nil
+}
+
+func evaluateFormula(expression string, recordID int64, values map[string]any) (any, error) {
+	runtime := goja.New()
+	now := time.Now().UTC()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	if err := runtime.Set("field_record_id", recordID); err != nil {
+		return nil, err
+	}
+	if err := runtime.Set("var_now", now.UnixMilli()); err != nil {
+		return nil, err
+	}
+	if err := runtime.Set("var_today", today.UnixMilli()); err != nil {
+		return nil, err
+	}
+	for key, value := range values {
+		if err := runtime.Set("field_"+key, value); err != nil {
+			return nil, err
+		}
+	}
+	value, err := runtime.RunString("(" + expression + ")")
+	if err != nil {
+		return nil, err
+	}
+	return value.Export(), nil
 }
 
 func cloneValues(values map[string]any) map[string]any {

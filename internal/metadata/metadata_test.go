@@ -207,3 +207,63 @@ func TestUpdateTableRejectsFieldTypeChange(t *testing.T) {
 		t.Fatalf("expected adding a new field to be allowed, got %#v", table)
 	}
 }
+
+func TestFormulaFieldValidationAndEditableExpression(t *testing.T) {
+	catalog := Catalog{Databases: []Database{{
+		Name:       "workspace",
+		SQLitePath: "./data/workspace.sqlite",
+		Tables: []Table{{
+			Name: "contacts",
+			Fields: []Field{
+				{Name: "score", Type: "number"},
+				{Name: "score_plus_one", Type: "formula", Formula: "field_score + 1"},
+			},
+		}},
+	}}}
+
+	if err := catalog.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := catalog.UpdateTable("workspace", "contacts", Table{
+		Name: "contacts",
+		Fields: []Field{
+			{Name: "score", Type: "number"},
+			{Name: "score_plus_one", Type: "formula", Formula: "field_score + 2"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	table, ok := updated.Table("workspace", "contacts")
+	if !ok {
+		t.Fatal("expected updated table")
+	}
+	field, ok := table.Field("score_plus_one")
+	if !ok || field.Formula != "field_score + 2" {
+		t.Fatalf("expected formula expression update, got %#v", field)
+	}
+
+	invalid := Catalog{Databases: []Database{{
+		Name:       "workspace",
+		SQLitePath: "./data/workspace.sqlite",
+		Tables: []Table{{
+			Name:   "contacts",
+			Fields: []Field{{Name: "bad_formula", Type: "formula"}},
+		}},
+	}}}
+	if err := invalid.Validate(); err == nil {
+		t.Fatal("expected empty formula validation error")
+	}
+
+	invalid = Catalog{Databases: []Database{{
+		Name:       "workspace",
+		SQLitePath: "./data/workspace.sqlite",
+		Tables: []Table{{
+			Name:   "contacts",
+			Fields: []Field{{Name: "name", Type: "text", Formula: "field_score + 1"}},
+		}},
+	}}}
+	if err := invalid.Validate(); err == nil {
+		t.Fatal("expected formula on non-formula field validation error")
+	}
+}

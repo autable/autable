@@ -10,7 +10,7 @@ export function buildTableColumns(fields: Field[]): Column<TableGridRow>[] {
     minWidth: Math.max(128, field.name.length * 14),
     resizable: true,
     renderEditCell: textEditor,
-    editable: (row) => Number.isFinite(row.record_id) && (field.permission_level ?? 2) >= 2,
+    editable: (row) => Number.isFinite(row.record_id) && field.type !== "formula" && (field.permission_level ?? 2) >= 2,
     renderCell: ({ row }) => String(row[field.name] ?? "")
   }));
 }

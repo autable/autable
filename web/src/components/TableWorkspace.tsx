@@ -15,6 +15,7 @@ import {
   Tab,
   TabList,
   Text,
+  Textarea,
   Toolbar,
   ToolbarButton
 } from "@fluentui/react-components";
@@ -43,6 +44,7 @@ type TableWorkspaceProps = {
   onDeleteField: (fieldName: string) => void;
   onDeleteSelectedRow: (recordID?: number) => void;
   onLoadHistory: () => void;
+  onNewFieldFormulaChange: (value: string) => void;
   onNewFieldNameChange: (value: string) => void;
   onNewFieldTypeChange: (value: string) => void;
   onNewViewBaseChange: (value: string) => void;
@@ -56,6 +58,8 @@ type TableWorkspaceProps = {
   onSelectedRowValueChange: (fieldName: string, value: string) => void;
   onUpdateSelectedRow: () => void;
   onUpdateSelectedView: () => void;
+  onUpdateFieldFormula: (fieldName: string, formula: string) => void;
+  newFieldFormula: string;
   newFieldName: string;
   newFieldType: string;
   newViewBase: string;
@@ -82,6 +86,7 @@ export function TableWorkspace({
   onDeleteField,
   onDeleteSelectedRow,
   onLoadHistory,
+  onNewFieldFormulaChange,
   onNewFieldNameChange,
   onNewFieldTypeChange,
   onNewViewBaseChange,
@@ -95,6 +100,8 @@ export function TableWorkspace({
   onSelectedRowValueChange,
   onUpdateSelectedRow,
   onUpdateSelectedView,
+  onUpdateFieldFormula,
+  newFieldFormula,
   newFieldName,
   newFieldType,
   newViewBase,
@@ -120,6 +127,7 @@ export function TableWorkspace({
   const [filterOpen, setFilterOpen] = useState(false);
   const [recordMenu, setRecordMenu] = useState<{ x: number; y: number; recordID: number } | null>(null);
   const [fieldCreator, setFieldCreator] = useState<{ x: number; y: number } | null>(null);
+  const [formulaEditor, setFormulaEditor] = useState<{ x: number; y: number; fieldName: string; formula: string } | null>(null);
   const selectedView = useMemo(
     () => (table.views ?? []).find((viewDef) => viewDef.name === selectedTableView),
     [selectedTableView, table.views]
@@ -142,6 +150,15 @@ export function TableWorkspace({
         : undefined,
     [fieldCreator]
   );
+  const formulaEditorTarget = useMemo(
+    () =>
+      formulaEditor
+        ? {
+            getBoundingClientRect: () => new DOMRect(formulaEditor.x, formulaEditor.y, 0, 0)
+          }
+        : undefined,
+    [formulaEditor]
+  );
   const gridColumns = useMemo(
     () => {
       const fieldColumns = columns.map((column) => {
@@ -156,6 +173,14 @@ export function TableWorkspace({
               canWriteTable={canWriteTable}
               field={field}
               onDeleteField={onDeleteField}
+              onEditFormula={(targetField, point) =>
+                setFormulaEditor({
+                  x: point.x,
+                  y: point.y,
+                  fieldName: targetField.name,
+                  formula: targetField.formula ?? ""
+                })
+              }
             />
           )
         } satisfies Column<TableGridRow>;
@@ -176,6 +201,7 @@ export function TableWorkspace({
             onClick={(event) => {
               event.stopPropagation();
               const rect = event.currentTarget.getBoundingClientRect();
+              onNewFieldFormulaChange("");
               onNewFieldNameChange("");
               onNewFieldTypeChange("text");
               setFieldCreator({ x: rect.left, y: rect.bottom });
@@ -193,6 +219,7 @@ export function TableWorkspace({
       canWriteTable,
       columns,
       onDeleteField,
+      onNewFieldFormulaChange,
       onNewFieldNameChange,
       onNewFieldTypeChange
     ]
@@ -378,8 +405,20 @@ export function TableWorkspace({
                   <option value="email">email</option>
                   <option value="number">number</option>
                   <option value="date">date</option>
+                  <option value="formula">formula</option>
                 </Select>
               </FluentField>
+              {newFieldType === "formula" && (
+                <FluentField label="Formula">
+                  <Textarea
+                    aria-label="New field formula"
+                    value={newFieldFormula}
+                    onChange={(_, data) => onNewFieldFormulaChange(data.value)}
+                    placeholder="field_score + 1"
+                    resize="vertical"
+                  />
+                </FluentField>
+              )}
               <div className="field-editor-actions">
                 <Button onClick={() => setFieldCreator(null)}>Cancel</Button>
                 <Button
@@ -391,6 +430,48 @@ export function TableWorkspace({
                   }}
                 >
                   Add
+                </Button>
+              </div>
+            </div>
+          </PopoverSurface>
+        </Popover>
+        <Popover
+          open={Boolean(formulaEditor)}
+          onOpenChange={(_, data) => {
+            if (!data.open) {
+              setFormulaEditor(null);
+            }
+          }}
+          positioning={formulaEditorTarget ? { target: formulaEditorTarget } : undefined}
+          withArrow
+        >
+          <PopoverSurface className="field-editor-popover" aria-label="Edit formula">
+            <div className="field-editor formula-field-editor">
+              <Text weight="semibold">{formulaEditor?.fieldName}</Text>
+              <FluentField label="Formula">
+                <Textarea
+                  aria-label="Field formula"
+                  value={formulaEditor?.formula ?? ""}
+                  onChange={(_, data) =>
+                    setFormulaEditor((current) => (current ? { ...current, formula: data.value } : current))
+                  }
+                  placeholder="field_score + 1"
+                  resize="vertical"
+                />
+              </FluentField>
+              <div className="field-editor-actions">
+                <Button onClick={() => setFormulaEditor(null)}>Cancel</Button>
+                <Button
+                  appearance="primary"
+                  icon={<SaveRegular />}
+                  onClick={() => {
+                    if (formulaEditor) {
+                      void onUpdateFieldFormula(formulaEditor.fieldName, formulaEditor.formula);
+                    }
+                    setFormulaEditor(null);
+                  }}
+                >
+                  Save
                 </Button>
               </div>
             </div>
@@ -422,17 +503,19 @@ export function TableWorkspace({
 }
 
 function canWriteField(field: Field): boolean {
-  return (field.permission_level ?? 2) >= 2;
+  return field.type !== "formula" && (field.permission_level ?? 2) >= 2;
 }
 
 function FieldHeader({
   canWriteTable,
   field,
-  onDeleteField
+  onDeleteField,
+  onEditFormula
 }: {
   canWriteTable: boolean;
   field: Field;
   onDeleteField: (fieldName: string) => void;
+  onEditFormula: (field: Field, point: { x: number; y: number }) => void;
 }) {
   return (
     <div className="field-header">
@@ -451,6 +534,17 @@ function FieldHeader({
         </MenuTrigger>
         <MenuPopover>
           <MenuList>
+            {field.type === "formula" && (
+              <MenuItem
+                icon={<EditRegular />}
+                onClick={(event) => {
+                  const rect = event.currentTarget.getBoundingClientRect();
+                  onEditFormula(field, { x: rect.left, y: rect.bottom });
+                }}
+              >
+                Edit formula
+              </MenuItem>
+            )}
             <MenuItem icon={<DeleteRegular />} onClick={() => onDeleteField(field.name)}>
               Delete field
             </MenuItem>

@@ -3,6 +3,7 @@ package table
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"codetable/internal/history"
@@ -574,6 +575,85 @@ func TestRowsAppliesComposedViewFiltersAndSorts(t *testing.T) {
 	}
 	if rows[0].Values["name"] != "Grace" || rows[1].Values["name"] != "Ada" {
 		t.Fatalf("unexpected sorted view rows: %#v", rows)
+	}
+}
+
+func TestFormulaFieldsAreComputedAndNotWritable(t *testing.T) {
+	ctx := context.Background()
+	store := history.NewMemoryStore()
+	service := NewService(store)
+	catalog := metadata.Catalog{Databases: []metadata.Database{{
+		Name:       "db",
+		SQLitePath: "./db.sqlite",
+		Tables: []metadata.Table{{
+			Name: "contacts",
+			Fields: []metadata.Field{
+				{Name: "name", Type: "text"},
+				{Name: "score", Type: "number"},
+				{Name: "score_plus_one", Type: "formula", Formula: "field_score + 1"},
+				{Name: "score_band", Type: "formula", Formula: "field_score >= 5 ? 'high' : 'low'"},
+			},
+			Views: []metadata.View{{
+				Name:    "high",
+				Filters: []metadata.ViewFilter{{Field: "score_band", Op: "eq", Value: "high"}},
+				Sorts:   []metadata.ViewSort{{Field: "score_plus_one", Direction: "desc"}},
+			}},
+		}},
+	}}}
+	perms := permission.New(permission.Grant{
+		SubjectID: "u1",
+		Scope:     permission.ScopeTable,
+		Resource:  "db.contacts",
+		Level:     permission.Write,
+	})
+
+	low, err := service.CreateRow(ctx, catalog, perms, "u1", "db", "contacts", map[string]any{
+		"name":  "Ada",
+		"score": 4,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fmt.Sprint(low.Values["score_plus_one"]) != "5" || low.Values["score_band"] != "low" {
+		t.Fatalf("expected computed formula values, got %#v", low.Values)
+	}
+	if _, err := service.CreateRow(ctx, catalog, perms, "u1", "db", "contacts", map[string]any{
+		"name":           "Blocked",
+		"score":          9,
+		"score_plus_one": 10,
+	}); !errors.Is(err, ErrPermissionDenied) {
+		t.Fatalf("expected formula create write to be denied, got %v", err)
+	}
+	high, err := service.CreateRow(ctx, catalog, perms, "u1", "db", "contacts", map[string]any{
+		"name":  "Grace",
+		"score": 7,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.UpdateRow(ctx, catalog, perms, "u1", "db", "contacts", high.RecordID, map[string]any{
+		"score_plus_one": 99,
+	}); !errors.Is(err, ErrPermissionDenied) {
+		t.Fatalf("expected formula update write to be denied, got %v", err)
+	}
+
+	rows, err := service.Rows(ctx, catalog, perms, "u1", "db", "contacts", "high")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].Values["name"] != "Grace" || rows[0].Values["score_band"] != "high" {
+		t.Fatalf("expected formula-filtered high row, got %#v", rows)
+	}
+	entries, err := store.GetPrefix(ctx, history.RowPrefix("db", "contacts", low.RecordID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	change, err := history.DecodeRowChange(entries[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := change.Values["score_plus_one"]; ok {
+		t.Fatalf("formula value should not be written to history: %#v", change.Values)
 	}
 }
 

@@ -283,6 +283,10 @@ select {
   width: 220px;
 }
 
+.formula-field-editor {
+  width: 320px;
+}
+
 .field-editor-actions {
   display: flex;
   justify-content: flex-end;

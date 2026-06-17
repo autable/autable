@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -31,6 +32,7 @@ type Table struct {
 type Field struct {
 	Name            string `yaml:"name" json:"name"`
 	Type            string `yaml:"type" json:"type"`
+	Formula         string `yaml:"formula,omitempty" json:"formula,omitempty"`
 	Deleted         bool   `yaml:"deleted" json:"deleted"`
 	PermissionLevel int    `yaml:"-" json:"permission_level,omitempty"`
 }
@@ -237,6 +239,12 @@ func (table Table) validate(dbName string, tableIndex int) error {
 		seenFields[field.Name] = struct{}{}
 		if field.Type == "" {
 			return fmt.Errorf("database %q table %q field %q type is required", dbName, table.Name, field.Name)
+		}
+		if field.Type == "formula" && strings.TrimSpace(field.Formula) == "" {
+			return fmt.Errorf("database %q table %q formula field %q formula is required", dbName, table.Name, field.Name)
+		}
+		if field.Type != "formula" && strings.TrimSpace(field.Formula) != "" {
+			return fmt.Errorf("database %q table %q field %q formula is only allowed on formula fields", dbName, table.Name, field.Name)
 		}
 	}
 	if err := table.validateViews(dbName); err != nil {

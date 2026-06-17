@@ -415,6 +415,7 @@ function WorkspaceApp() {
             <TableWorkspace
               columns={tableWorkspace.columns}
               displayedRows={tableWorkspace.displayedRows}
+              newFieldFormula={tableWorkspace.newFieldFormula}
               newFieldName={tableWorkspace.newFieldName}
               newFieldType={tableWorkspace.newFieldType}
               newViewBase={tableWorkspace.newViewBase}
@@ -428,6 +429,7 @@ function WorkspaceApp() {
               onDeleteField={tableWorkspace.deleteFieldFromCanvas}
               onDeleteSelectedRow={tableWorkspace.deleteSelectedRow}
               onLoadHistory={tableWorkspace.loadSelectedRowHistory}
+              onNewFieldFormulaChange={tableWorkspace.setNewFieldFormula}
               onNewFieldNameChange={tableWorkspace.setNewFieldName}
               onNewFieldTypeChange={tableWorkspace.setNewFieldType}
               onNewViewBaseChange={tableWorkspace.setNewViewBase}
@@ -440,6 +442,7 @@ function WorkspaceApp() {
               onSelectGridCell={tableWorkspace.selectGridCell}
               onSelectRecordID={tableWorkspace.setSelectedRecordID}
               onSelectedRowValueChange={tableWorkspace.updateSelectedRowDraft}
+              onUpdateFieldFormula={tableWorkspace.updateFieldFormulaFromCanvas}
               onUpdateSelectedRow={tableWorkspace.updateSelectedRowFromEditor}
               onUpdateSelectedView={tableWorkspace.updateSelectedViewFromCanvas}
               rowHistory={tableWorkspace.rowHistory}

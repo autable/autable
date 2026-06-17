@@ -410,18 +410,46 @@ test("covers table views, row creation, and row history through the real backend
   await addFieldEditor.getByRole("button", { name: "Add" }).click();
   await expect(page.getByText("Added field priority")).toBeVisible();
 
+  await recordsGrid.getByRole("button", { name: "Add field" }).click();
+  const formulaFieldEditor = page.getByLabel("Add field");
+  await formulaFieldEditor.getByLabel("Field name").fill("summary");
+  await formulaFieldEditor.getByLabel("New field type").selectOption("formula");
+  await formulaFieldEditor.getByLabel("New field formula").fill("field_name + ' ' + field_status");
+  await formulaFieldEditor.getByRole("button", { name: "Add" }).click();
+  await expect(page.getByText("Added field summary")).toBeVisible();
+
+  let formulaRows = (await api(
+    page,
+    "GET",
+    `/api/tables/${workspace.databaseName}/${workspace.tableName}/rows`
+  )) as Array<{ values: { name?: string; summary?: string } }>;
+  expect(formulaRows.find((row) => row.values.name === "Ada Lovelace")?.values.summary).toBe("Ada Lovelace Active");
+
+  await recordsGrid.getByRole("button", { name: "Field actions summary" }).click();
+  await page.getByRole("menuitem", { name: "Edit formula" }).click();
+  const formulaEditor = page.getByLabel("Edit formula");
+  await formulaEditor.getByLabel("Field formula").fill("field_name + ' / ' + field_status");
+  await formulaEditor.getByRole("button", { name: "Save" }).click();
+  await expect(page.getByText("Updated formula summary")).toBeVisible();
+  formulaRows = (await api(
+    page,
+    "GET",
+    `/api/tables/${workspace.databaseName}/${workspace.tableName}/rows`
+  )) as Array<{ values: { name?: string; summary?: string } }>;
+  expect(formulaRows.find((row) => row.values.name === "Ada Lovelace")?.values.summary).toBe("Ada Lovelace / Active");
+
   await recordsGrid.getByRole("button", { name: "Field actions email" }).click();
   await page.getByRole("menuitem", { name: "Delete field" }).click();
   await expect(page.getByText("Deleted field email")).toBeVisible();
 
   await tableActions.getByRole("button", { name: "Row", exact: true }).click();
   await expect(page.getByText(/Created record \d+/)).toBeVisible();
-  await recordsGrid.getByRole("gridcell", { name: /New record/ }).dblclick();
+  await recordsGrid.getByRole("gridcell", { name: /^New record \d+$/ }).dblclick();
   await recordsGrid.locator(".rdg-text-editor").fill("Grace Hopper");
   await page.keyboard.press("Enter");
   await expect(page.getByText(/Updated record \d+/)).toBeVisible();
 
-  await recordsGrid.getByRole("gridcell", { name: "Review" }).last().dblclick();
+  await recordsGrid.getByRole("gridcell", { name: "Review", exact: true }).last().dblclick();
   await recordsGrid.locator(".rdg-text-editor").fill("Active");
   await page.keyboard.press("Enter");
   await expect(page.getByText(/Updated record \d+/)).toBeVisible();
@@ -446,7 +474,7 @@ test("covers table views, row creation, and row history through the real backend
 
   await page.getByRole("button", { name: "Active", exact: true }).click();
   await expect(page.getByText(/\d+ of \d+ records/).first()).toBeVisible();
-  await recordsGrid.getByRole("gridcell", { name: "Grace Hopper" }).click({ button: "right" });
+  await recordsGrid.getByRole("gridcell", { name: "Grace Hopper", exact: true }).click({ button: "right" });
   await page.getByRole("menuitem", { name: "View details" }).click();
   const detailsPanel = page.getByLabel("Record panel");
   await expect(detailsPanel.getByRole("tab", { name: "Details" })).toHaveAttribute("aria-selected", "true");
@@ -454,7 +482,7 @@ test("covers table views, row creation, and row history through the real backend
   await expect(detailsPanel.getByLabel("History record")).toHaveCount(0);
   await detailsPanel.getByRole("button", { name: "Close record panel" }).click();
 
-  await recordsGrid.getByRole("gridcell", { name: "Grace Hopper" }).click({ button: "right" });
+  await recordsGrid.getByRole("gridcell", { name: "Grace Hopper", exact: true }).click({ button: "right" });
   await page.getByRole("menuitem", { name: "View history" }).click();
   const recordPanel = page.getByLabel("Record panel");
   await expect(recordPanel.getByRole("tab", { name: "History" })).toHaveAttribute("aria-selected", "true");
@@ -462,12 +490,12 @@ test("covers table views, row creation, and row history through the real backend
   await expect(page.getByText(new RegExp(`rhistory_${workspace.databaseName}_contacts_`))).toHaveCount(0);
   await recordPanel.getByRole("button", { name: "Close record panel" }).click();
 
-  await recordsGrid.getByRole("gridcell", { name: "Grace Hopper" }).click({ button: "right" });
+  await recordsGrid.getByRole("gridcell", { name: "Grace Hopper", exact: true }).click({ button: "right" });
   await page.getByRole("menuitem", { name: "Delete record" }).click();
   await expect(page.getByText(/Deleted record \d+/)).toBeVisible();
 
   const metadata = (await api(page, "GET", "/api/metadata")) as {
-    databases: Array<{ name: string; tables: Array<{ name: string; fields: Array<{ name: string; type?: string; deleted: boolean }>; views: Array<{ name: string; filters: Array<{ field: string; value?: string }>; sorts: Array<{ field: string; direction: string }> }> }> }>;
+    databases: Array<{ name: string; tables: Array<{ name: string; fields: Array<{ name: string; type?: string; formula?: string; deleted: boolean }>; views: Array<{ name: string; filters: Array<{ field: string; value?: string }>; sorts: Array<{ field: string; direction: string }> }> }> }>;
   };
   const table = metadata.databases
     .find((database) => database.name === workspace.databaseName)
@@ -475,6 +503,7 @@ test("covers table views, row creation, and row history through the real backend
   expect(table?.fields).toEqual(
     expect.arrayContaining([
       expect.objectContaining({ name: "priority", type: "text", deleted: false }),
+      expect.objectContaining({ name: "summary", type: "formula", formula: "field_name + ' / ' + field_status", deleted: false }),
       expect.objectContaining({ name: "email", deleted: true })
     ])
   );

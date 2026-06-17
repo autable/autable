@@ -12,6 +12,16 @@ describe("tableGrid", () => {
     expect(columns.map((column) => column.name)).toEqual(["name", "email"]);
   });
 
+  it("does not make formula fields editable", () => {
+    const columns = buildTableColumns([
+      { name: "score", type: "number", deleted: false },
+      { name: "score_plus_one", type: "formula", formula: "field_score + 1", deleted: false }
+    ]);
+
+    expect(typeof columns[0].editable === "function" ? columns[0].editable({ record_id: 1 }) : columns[0].editable).toBe(true);
+    expect(typeof columns[1].editable === "function" ? columns[1].editable({ record_id: 1 }) : columns[1].editable).toBe(false);
+  });
+
   it("keeps record_id available in row values for internal row operations", () => {
     expect(rowRecordToValues({ record_id: 7, values: { name: "Ada" } })).toEqual({
       record_id: 7,
