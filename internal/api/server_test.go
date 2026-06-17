@@ -1879,6 +1879,9 @@ func TestWorkflowNodesAPI(t *testing.T) {
 	if len(dingtalk.Inputs) != 3 || dingtalk.Inputs[0].Name != "content" {
 		t.Fatalf("expected dingtalk node inputs: %#v", dingtalk)
 	}
+	if len(dingtalk.Secrets) != 2 || dingtalk.Secrets[0].Name != "access_token" || dingtalk.Secrets[1].Name != "secret" {
+		t.Fatalf("expected dingtalk node secrets: %#v", dingtalk)
+	}
 	if !byType["table.record.changed"].Trigger || len(byType["table.record.changed"].Inputs) == 0 || len(byType["table.record.changed"].Outputs) == 0 || !byType["time.schedule"].Trigger {
 		t.Fatalf("expected trigger node ports: %#v", nodes)
 	}

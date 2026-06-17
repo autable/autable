@@ -80,6 +80,8 @@ export type WorkflowNodeInfo = {
   description?: string;
   inputs: WorkflowPort[];
   outputs: WorkflowPort[];
+  variables?: WorkflowPort[];
+  secrets?: WorkflowPort[];
   stateless: boolean;
   trigger: boolean;
 };

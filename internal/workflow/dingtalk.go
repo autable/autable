@@ -62,6 +62,10 @@ func (node DingTalkRobotNode) Info() NodeInfo {
 			{Name: "errcode", Type: "number"},
 			{Name: "errmsg", Type: "string"},
 		},
+		Secrets: []Port{
+			{Name: "access_token", Type: "string", Description: "DingTalk custom robot access_token."},
+			{Name: "secret", Type: "string", Description: "DingTalk custom robot signing secret."},
+		},
 		Stateless: true,
 	}
 }

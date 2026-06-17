@@ -1,6 +1,12 @@
 import { Button, Field as FluentField, Input, Text, Textarea } from "@fluentui/react-components";
 import { PlayRegular, SaveRegular } from "@fluentui/react-icons";
-import type { WorkflowDefinition, WorkflowInstanceDeclaration, WorkflowNodeInfo, WorkflowRunResponse } from "../api";
+import type {
+  WorkflowDefinition,
+  WorkflowInstanceDeclaration,
+  WorkflowNodeInfo,
+  WorkflowPort,
+  WorkflowRunResponse
+} from "../api";
 
 type WorkflowWorkspaceProps = {
   databaseName: string;
@@ -41,6 +47,7 @@ export function WorkflowWorkspace({
   workflowRuns
 }: WorkflowWorkspaceProps) {
   const canWriteWorkflow = (workflow?.permission_level ?? 2) >= 2;
+  const workflowNodesByType = new Map(workflowNodes.map((node) => [node.type, node]));
 
   return (
     <div className="split-view">
@@ -78,6 +85,7 @@ export function WorkflowWorkspace({
             onUpdateInstanceConfig={onUpdateInstanceConfig}
             workflow={workflow}
             workflowInstances={workflowInstances}
+            workflowNodesByType={workflowNodesByType}
           />
         </div>
       </div>
@@ -94,6 +102,8 @@ export function WorkflowWorkspace({
               <div className="node-ports">
                 <span>in {formatPorts(node.inputs)}</span>
                 <span>out {formatPorts(node.outputs)}</span>
+                <span>vars {formatPorts(node.variables ?? [])}</span>
+                <span>secrets {formatPorts(node.secrets ?? [])}</span>
               </div>
             </div>
           ))}
@@ -101,18 +111,21 @@ export function WorkflowWorkspace({
         <Text weight="semibold">Instances</Text>
         <div className="node-list" aria-label="Workflow instances">
           {workflowInstances.ok ? (
-            Object.entries(workflowInstances.value).map(([instanceID, instance]) => (
-              <div key={instanceID} className="node-item">
-                <div className="node-title">
-                  <span>{instanceID}</span>
-                  <span>{instance.node}</span>
+            Object.entries(workflowInstances.value).map(([instanceID, instance]) => {
+              const ports = effectiveInstancePorts(instance, workflowNodesByType);
+              return (
+                <div key={instanceID} className="node-item">
+                  <div className="node-title">
+                    <span>{instanceID}</span>
+                    <span>{instance.node}</span>
+                  </div>
+                  <div className="node-ports">
+                    <span>vars {formatPorts(ports.variables)}</span>
+                    <span>secrets {formatPorts(ports.secrets)}</span>
+                  </div>
                 </div>
-                <div className="node-ports">
-                  <span>vars {formatPorts(instance.variables ?? [])}</span>
-                  <span>secrets {formatPorts(instance.secrets ?? [])}</span>
-                </div>
-              </div>
-            ))
+              );
+            })
           ) : (
             <Text size={200}>{workflowInstances.error}</Text>
           )}
@@ -169,7 +182,8 @@ function InstanceConfigEditor({
   canWriteWorkflow,
   onUpdateInstanceConfig,
   workflow,
-  workflowInstances
+  workflowInstances,
+  workflowNodesByType
 }: {
   canWriteWorkflow: boolean;
   onUpdateInstanceConfig: (
@@ -182,6 +196,7 @@ function InstanceConfigEditor({
   workflowInstances:
     | { ok: true; value: Record<string, WorkflowInstanceDeclaration> }
     | { ok: false; error: string };
+  workflowNodesByType: Map<string, WorkflowNodeInfo>;
 }) {
   if (!workflowInstances.ok) {
     return (
@@ -191,9 +206,13 @@ function InstanceConfigEditor({
       </div>
     );
   }
-  const entries = Object.entries(workflowInstances.value).filter(
-    ([, instance]) => (instance.variables?.length ?? 0) > 0 || (instance.secrets?.length ?? 0) > 0
-  );
+  const entries = Object.entries(workflowInstances.value)
+    .map(([instanceID, instance]) => ({
+      instanceID,
+      instance,
+      ports: effectiveInstancePorts(instance, workflowNodesByType)
+    }))
+    .filter(({ ports }) => ports.variables.length > 0 || ports.secrets.length > 0);
   if (entries.length === 0) {
     return (
       <div className="instance-config-panel">
@@ -205,13 +224,13 @@ function InstanceConfigEditor({
   return (
     <div className="instance-config-panel" aria-label="Workflow instance config">
       <Text weight="semibold">Instance config</Text>
-      {entries.map(([instanceID, instance]) => (
+      {entries.map(({ instanceID, instance, ports }) => (
         <div className="instance-config-group" key={instanceID}>
           <div className="node-title">
             <span>{instanceID}</span>
             <span>{instance.node}</span>
           </div>
-          {(instance.variables ?? []).map((port) => (
+          {ports.variables.map((port) => (
             <FluentField key={`variable-${instanceID}-${port.name}`} label={port.name}>
               <Input
                 aria-label={`Variable ${instanceID}.${port.name}`}
@@ -221,7 +240,7 @@ function InstanceConfigEditor({
               />
             </FluentField>
           ))}
-          {(instance.secrets ?? []).map((port) => (
+          {ports.secrets.map((port) => (
             <FluentField key={`secret-${instanceID}-${port.name}`} label={port.name}>
               <Input
                 aria-label={`Secret ${instanceID}.${port.name}`}
@@ -236,6 +255,27 @@ function InstanceConfigEditor({
       ))}
     </div>
   );
+}
+
+function effectiveInstancePorts(
+  instance: WorkflowInstanceDeclaration,
+  workflowNodesByType: Map<string, WorkflowNodeInfo>
+): { variables: WorkflowPort[]; secrets: WorkflowPort[] } {
+  const node = workflowNodesByType.get(instance.node);
+  return {
+    variables: mergePorts(node?.variables ?? [], instance.variables ?? []),
+    secrets: mergePorts(node?.secrets ?? [], instance.secrets ?? [])
+  };
+}
+
+function mergePorts(defaultPorts: WorkflowPort[], instancePorts: WorkflowPort[]): WorkflowPort[] {
+  const portsByName = new Map<string, WorkflowPort>();
+  for (const port of [...defaultPorts, ...instancePorts]) {
+    if (port.name) {
+      portsByName.set(port.name, port);
+    }
+  }
+  return [...portsByName.values()];
 }
 
 function formatPorts(ports: Array<{ name: string; type: string }>): string {

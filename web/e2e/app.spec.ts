@@ -547,11 +547,19 @@ test("covers workflow editor, node list, and run history through the real backen
   const workflowNodes = (await api(page, "GET", "/api/workflow/nodes")) as Array<{
     type: string;
     inputs: Array<{ name: string; type: string }>;
+    secrets?: Array<{ name: string; type: string }>;
   }>;
   const dingTalkNode = workflowNodes.find((node) => node.type === "dingtalk.robot.send");
   expect(dingTalkNode?.inputs).toEqual(
     expect.arrayContaining([expect.objectContaining({ name: "content", type: "string" })])
   );
+  expect(dingTalkNode?.secrets).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ name: "access_token", type: "string" }),
+      expect.objectContaining({ name: "secret", type: "string" })
+    ])
+  );
+  await expect(page.getByText("secrets access_token:string, secret:string")).toBeVisible();
   const nodeListLayout = await page.getByLabel("Workflow nodes").evaluate((element) => {
     const list = element as HTMLElement;
     return {
@@ -563,6 +571,11 @@ test("covers workflow editor, node list, and run history through the real backen
   expect(nodeListLayout.overflowY).toBe("auto");
   expect(nodeListLayout.scrollHeight).toBeGreaterThan(nodeListLayout.clientHeight);
   await expect(page.getByLabel("Workflow instances").getByText("row_change")).toBeVisible();
+  await page.getByLabel("Workflow JavaScript").fill(
+    "function instances(info) {\n  return { ding: { node: 'dingtalk.robot.send' } };\n}\n\nfunction run(info) {\n  return info.instance('ding').exec({ content: 'hello' });\n}"
+  );
+  await expect(page.getByLabel("Secret ding.access_token")).toBeVisible();
+  await expect(page.getByLabel("Secret ding.secret")).toBeVisible();
   const rowHistory = (await api(
     page,
     "GET",

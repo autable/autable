@@ -78,6 +78,18 @@ const formFixture = [
 
 const workflowNodeFixture = [
   {
+    type: "dingtalk.robot.send",
+    display_name: "DingTalk robot",
+    inputs: [{ name: "content", type: "string" }],
+    outputs: [{ name: "status_code", type: "int" }],
+    secrets: [
+      { name: "access_token", type: "string" },
+      { name: "secret", type: "string" }
+    ],
+    stateless: true,
+    trigger: false
+  },
+  {
     type: "echo",
     display_name: "Echo",
     inputs: [{ name: "value", type: "any" }],
@@ -380,6 +392,8 @@ describe("App", () => {
     expect((screen.getByLabelText("Workflow JavaScript") as HTMLTextAreaElement).value).toContain(
       'info.instance("review_echo").exec'
     );
+    expect(screen.getByText("dingtalk.robot.send")).toBeInTheDocument();
+    expect(screen.getByText("secrets access_token:string, secret:string")).toBeInTheDocument();
     expect(screen.getByLabelText("Variable review_echo.CHANNEL")).toHaveValue("ops");
     expect(screen.getByLabelText("Secret review_echo.TOKEN")).toHaveValue("");
     await userEvent.clear(screen.getByLabelText("Variable review_echo.CHANNEL"));
@@ -390,6 +404,14 @@ describe("App", () => {
     expect(screen.getByText("table.record.changed")).toBeInTheDocument();
     expect(screen.getByText(/history_key:string/)).toBeInTheDocument();
     expect(screen.getByText("No runs yet")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Workflow JavaScript"), {
+      target: {
+        value:
+          "function instances(info) { return { ding: { node: 'dingtalk.robot.send' } }; }\nfunction run(info) { return info.instance('ding').exec({ content: 'hello' }); }"
+      }
+    });
+    expect(screen.getByLabelText("Secret ding.access_token")).toBeInTheDocument();
+    expect(screen.getByLabelText("Secret ding.secret")).toBeInTheDocument();
   });
 
   it("loads persisted workflow runs and renders their flow", async () => {

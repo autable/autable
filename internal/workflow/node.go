@@ -8,6 +8,8 @@ type NodeInfo struct {
 	Description string `json:"description,omitempty"`
 	Inputs      []Port `json:"inputs"`
 	Outputs     []Port `json:"outputs"`
+	Variables   []Port `json:"variables,omitempty"`
+	Secrets     []Port `json:"secrets,omitempty"`
 	Stateless   bool   `json:"stateless"`
 	Trigger     bool   `json:"trigger"`
 }

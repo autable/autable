@@ -99,6 +99,9 @@ func TestDingTalkRobotNodeIsAvailableInNodeInfos(t *testing.T) {
 	if len(infos) != 1 || infos[0].Type != "dingtalk.robot.send" {
 		t.Fatalf("expected dingtalk node info, got %#v", infos)
 	}
+	if len(infos[0].Secrets) != 2 || infos[0].Secrets[0].Name != "access_token" || infos[0].Secrets[1].Name != "secret" {
+		t.Fatalf("expected dingtalk secret metadata, got %#v", infos[0].Secrets)
+	}
 }
 
 func expectedDingTalkSign(timestamp int64, secret string) string {
