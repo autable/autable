@@ -195,7 +195,14 @@ function NodeCatalogDialog({ language, workflowNodes }: { language: string; work
           Nodes
         </Button>
       </DialogTrigger>
-      <DialogSurface className="node-catalog-dialog" aria-label="Workflow node catalog">
+      <DialogSurface
+        className="node-catalog-dialog"
+        aria-label="Workflow node catalog"
+        style={{
+          width: "calc(100vw - 24px)",
+          maxWidth: "none"
+        }}
+      >
         <DialogBody>
           <DialogTitle>Workflow nodes</DialogTitle>
           <DialogContent className="node-catalog-dialog-content">

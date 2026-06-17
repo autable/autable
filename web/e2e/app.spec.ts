@@ -558,8 +558,25 @@ test("covers workflow editor, node list, and run history through the real backen
   expect(dingTalkNode?.secrets).toHaveLength(1);
   expect(dingTalkNode?.documentation?.["en-US"]).toContain("DingTalk robot");
   expect(dingTalkNode?.documentation?.["zh-CN"]).toContain("钉钉机器人");
+  const headerActionLayout = await page.getByRole("button", { name: "Workflow nodes" }).evaluate((button) => {
+    const nodesButton = button as HTMLElement;
+    const saveButton = nodesButton.parentElement?.querySelector("button:last-child") as HTMLElement | null;
+    return {
+      nodesTop: Math.round(nodesButton.getBoundingClientRect().top),
+      saveTop: saveButton ? Math.round(saveButton.getBoundingClientRect().top) : -1
+    };
+  });
+  expect(headerActionLayout.nodesTop).toBe(headerActionLayout.saveTop);
   await page.getByRole("button", { name: "Workflow nodes" }).click();
   await expect(page.getByRole("dialog", { name: "Workflow node catalog" })).toBeVisible();
+  await page.waitForTimeout(300);
+  const dialogLayout = await page.getByRole("dialog", { name: "Workflow node catalog" }).evaluate((dialog) => {
+    return {
+      dialogWidth: Math.round((dialog as HTMLElement).getBoundingClientRect().width),
+      viewportWidth: window.innerWidth
+    };
+  });
+  expect(dialogLayout.dialogWidth).toBeGreaterThanOrEqual(dialogLayout.viewportWidth - 40);
   await expect(page.getByText("钉钉机器人")).toBeVisible();
   await page.getByRole("button", { name: /table\.record\.changed/ }).click();
   await expect(page.getByText("记录变更")).toBeVisible();

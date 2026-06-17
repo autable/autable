@@ -589,17 +589,29 @@ select {
 .workflow-header-actions {
   display: flex;
   align-items: center;
+  flex-direction: row;
+  flex-wrap: nowrap;
   gap: 8px;
 }
 
+.section-header > .workflow-header-actions {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+.workflow-header-actions > * {
+  flex: 0 0 auto;
+}
+
 .node-catalog-dialog {
-  width: min(1180px, calc(100vw - 32px));
-  max-width: min(1180px, calc(100vw - 32px));
+  width: calc(100vw - 24px);
+  max-width: none;
 }
 
 .node-catalog-dialog-content {
   display: grid;
-  grid-template-columns: 280px minmax(0, 1fr);
+  grid-template-columns: 320px minmax(0, 1fr);
   gap: 16px;
   height: min(760px, calc(100vh - 140px));
   min-height: 0;
