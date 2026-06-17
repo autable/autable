@@ -1,19 +1,12 @@
 import {
   Button,
-  Dialog,
-  DialogActions,
-  DialogBody,
-  DialogContent,
-  DialogSurface,
-  DialogTitle,
-  DialogTrigger,
   Input,
   List,
   ListItem,
   Select,
   Text
 } from "@fluentui/react-components";
-import { AddRegular, DismissRegular, EditRegular, SaveRegular } from "@fluentui/react-icons";
+import { AddRegular, DismissRegular, SaveRegular } from "@fluentui/react-icons";
 import {
   type DatabaseMetadata,
   type FormDefinition,
@@ -65,51 +58,31 @@ export function PermissionPanel({
 }: PermissionPanelProps) {
   return (
     <div className="permission-view">
-      <Dialog>
-        <div className="section-header">
-          <div>
-            <Text weight="semibold">{role?.name ?? "No role selected"}</Text>
-            <Text size={200}>{database.name} role access matrix</Text>
-          </div>
-          <DialogTrigger disableButtonEnhancement>
-            <Button icon={<EditRegular />} appearance="primary" disabled={!role}>
-              Configure
-            </Button>
-          </DialogTrigger>
+      <div className="section-header">
+        <div>
+          <Text weight="semibold">{role?.name ?? "No role selected"}</Text>
+          <Text size={200}>{database.name} role access matrix</Text>
         </div>
-        {role ? (
-          <DialogSurface className="permission-dialog">
-            <DialogBody>
-              <DialogTitle>{role.name} permissions</DialogTitle>
-              <DialogContent className="permission-dialog-content">
-                <PermissionMatrix
-                  database={database}
-                  forms={forms}
-                  grants={grants}
-                  members={members}
-                  newMemberID={newMemberID}
-                  onAddMember={onAddMember}
-                  onGrantChange={onGrantChange}
-                  onMemberRemove={onMemberRemove}
-                  onNewMemberIDChange={onNewMemberIDChange}
-                  workflows={workflows}
-                />
-              </DialogContent>
-              <DialogActions>
-                <Button icon={<SaveRegular />} appearance="primary" onClick={onSave}>
-                  Save
-                </Button>
-                <DialogTrigger disableButtonEnhancement>
-                  <Button>Close</Button>
-                </DialogTrigger>
-              </DialogActions>
-            </DialogBody>
-          </DialogSurface>
-        ) : (
-          <></>
+        {role && (
+          <Button icon={<SaveRegular />} appearance="primary" onClick={onSave}>
+            Save
+          </Button>
         )}
-      </Dialog>
-      {!role && (
+      </div>
+      {role ? (
+        <PermissionMatrix
+          database={database}
+          forms={forms}
+          grants={grants}
+          members={members}
+          newMemberID={newMemberID}
+          onAddMember={onAddMember}
+          onGrantChange={onGrantChange}
+          onMemberRemove={onMemberRemove}
+          onNewMemberIDChange={onNewMemberIDChange}
+          workflows={workflows}
+        />
+      ) : (
         <div className="empty-state">
           <Text>Create a role to configure table, field, workflow, and form permissions.</Text>
         </div>

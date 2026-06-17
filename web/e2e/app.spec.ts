@@ -566,14 +566,13 @@ test("covers role members and resource permission grants through the real backen
   await page.getByRole("textbox", { name: "New role name" }).fill("editor");
   await page.getByRole("button", { name: "Create Role" }).click();
   await expect(page.getByRole("button", { name: /editor/ })).toBeVisible();
-  await page.getByRole("button", { name: "Configure" }).click();
-  const dialog = page.getByRole("dialog", { name: "editor permissions" });
-  await dialog.getByRole("textbox", { name: "Role member user id" }).fill(user.id);
-  await dialog.getByRole("button", { name: "Add role member" }).click();
-  await expect(dialog.getByText(user.id)).toBeVisible();
-  await dialog.getByLabel("contacts permission").selectOption("2");
-  await dialog.getByLabel("email permission").selectOption("1");
-  await dialog.getByRole("button", { name: "Save" }).click();
+  const permissionView = page.locator(".permission-view");
+  await permissionView.getByRole("textbox", { name: "Role member user id" }).fill(user.id);
+  await permissionView.getByRole("button", { name: "Add role member" }).click();
+  await expect(permissionView.getByText(user.id)).toBeVisible();
+  await permissionView.getByLabel("contacts permission").selectOption("2");
+  await permissionView.getByLabel("email permission").selectOption("1");
+  await permissionView.getByRole("button", { name: "Save" }).click();
   await expect(page.getByText("Saved role editor")).toBeVisible();
 
   const roles = (await api(page, "GET", `/api/databases/${databaseName}/roles`)) as Array<{

@@ -554,17 +554,9 @@ select {
   display: grid;
   grid-template-columns: minmax(220px, 0.75fr) repeat(3, minmax(0, 1fr));
   gap: 12px;
+  min-width: 0;
   min-height: 0;
-}
-
-.permission-dialog {
-  width: min(1080px, calc(100vw - 48px));
-  max-width: min(1080px, calc(100vw - 48px));
-}
-
-.permission-dialog-content {
-  max-height: min(680px, calc(100vh - 220px));
-  overflow: auto;
+  overflow: hidden;
 }
 
 .permission-card {
