@@ -358,7 +358,6 @@ test("covers table views, row creation, and row history through the real backend
   await expect(page.getByText(/\d+ of \d+ records/).first()).toBeVisible();
   const tableCanvas = page.locator(".table-view");
   const tableActions = tableCanvas.getByRole("toolbar", { name: "Table canvas actions" });
-  const canvasPanel = tableCanvas.getByLabel("Table canvas panel");
   await expect(tableActions.getByRole("button", { name: "Row", exact: true })).toBeVisible();
   await expect(page.getByRole("toolbar", { name: "Workspace actions" }).getByRole("button", { name: "Create row" })).toHaveCount(0);
 
@@ -397,11 +396,12 @@ test("covers table views, row creation, and row history through the real backend
   await page.getByRole("button", { name: workspace.tableName }).click();
   await page.getByRole("button", { name: "+ View" }).click();
   await expect(page.getByText("Created view View 2")).toBeVisible();
-  await canvasPanel.getByLabel("View filter field").selectOption("status");
-  await canvasPanel.getByLabel("View filter value").fill("Active");
-  await canvasPanel.getByLabel("View sort field").selectOption("name");
-  await canvasPanel.getByLabel("View sort direction").selectOption("desc");
-  await canvasPanel.getByRole("button", { name: "Save View" }).click();
+  const viewFilters = page.getByLabel("View filters");
+  await viewFilters.getByLabel("View filter field").selectOption("status");
+  await viewFilters.getByLabel("View filter value").fill("Active");
+  await viewFilters.getByLabel("View sort field").selectOption("name");
+  await viewFilters.getByLabel("View sort direction").selectOption("desc");
+  await viewFilters.getByRole("button", { name: "Save View" }).click();
   await expect(page.getByText("Updated view View 2")).toBeVisible();
 
   const viewRows = (await api(
@@ -413,8 +413,22 @@ test("covers table views, row creation, and row history through the real backend
 
   await page.getByRole("button", { name: "Active", exact: true }).click();
   await expect(page.getByText(/\d+ of \d+ records/).first()).toBeVisible();
-  await tableActions.getByRole("button", { name: "History" }).click();
-  await expect(page.getByText(new RegExp(`rhistory_${workspace.databaseName}_contacts_`)).first()).toBeVisible();
+  await recordsGrid.getByRole("gridcell", { name: "Grace Hopper" }).click({ button: "right" });
+  await page.getByRole("menuitem", { name: "View details" }).click();
+  const detailsPanel = page.getByLabel("Record panel");
+  await expect(detailsPanel.getByRole("tab", { name: "Details" })).toHaveAttribute("aria-selected", "true");
+  await expect(detailsPanel.getByLabel("name value")).toHaveValue("Grace Hopper");
+  await expect(detailsPanel.getByLabel("History record")).toHaveCount(0);
+  await detailsPanel.getByRole("button", { name: "Close record panel" }).click();
+
+  await recordsGrid.getByRole("gridcell", { name: "Grace Hopper" }).click({ button: "right" });
+  await page.getByRole("menuitem", { name: "View history" }).click();
+  const recordPanel = page.getByLabel("Record panel");
+  await expect(recordPanel.getByRole("tab", { name: "History" })).toHaveAttribute("aria-selected", "true");
+  await expect(recordPanel.getByLabel("Row history").getByText(/Created|Updated|Record change/).first()).toBeVisible();
+  await expect(page.getByText(new RegExp(`rhistory_${workspace.databaseName}_contacts_`))).toHaveCount(0);
+  await recordPanel.getByRole("button", { name: "Close record panel" }).click();
+
   await recordsGrid.getByRole("gridcell", { name: "Grace Hopper" }).click({ button: "right" });
   await page.getByRole("menuitem", { name: "Delete record" }).click();
   await expect(page.getByText(/Deleted record \d+/)).toBeVisible();

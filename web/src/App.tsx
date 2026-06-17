@@ -408,7 +408,6 @@ export function App() {
           {view === "table" && (
             <TableWorkspace
               columns={tableWorkspace.columns}
-              displayedRecordIDs={tableWorkspace.displayedRecordIDs}
               displayedRows={tableWorkspace.displayedRows}
               newFieldName={tableWorkspace.newFieldName}
               newFieldRequired={tableWorkspace.newFieldRequired}
@@ -436,7 +435,6 @@ export function App() {
               onRowsChange={tableWorkspace.editGridRows}
               onSelectGridCell={tableWorkspace.selectGridCell}
               onSelectRecordID={tableWorkspace.setSelectedRecordID}
-              onSelectTableView={setSelectedTableView}
               onSelectedRowValueChange={tableWorkspace.updateSelectedRowDraft}
               onUpdateField={tableWorkspace.updateFieldFromHeader}
               onUpdateSelectedRow={tableWorkspace.updateSelectedRowFromEditor}

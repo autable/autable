@@ -365,7 +365,9 @@ describe("App", () => {
     renderApp();
     await waitFor(() => expect(screen.getAllByText("1 of 1 records").length).toBeGreaterThan(0));
     await userEvent.click(screen.getByRole("button", { name: "History" }));
-    expect(await screen.findByText("rhistory_workspace_contacts_00000000000000000042_00000000000000000100")).toBeInTheDocument();
+    expect(await screen.findByRole("tab", { name: "History", selected: true })).toBeInTheDocument();
+    expect(screen.getByText("Record change")).toBeInTheDocument();
+    expect(screen.queryByText("rhistory_workspace_contacts_00000000000000000042_00000000000000000100")).not.toBeInTheDocument();
     expect(screen.getAllByText(/Backend Row/).length).toBeGreaterThan(0);
   });
 

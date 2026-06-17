@@ -11,7 +11,10 @@ import {
   MenuTrigger,
   Popover,
   PopoverSurface,
+  PopoverTrigger,
   Select,
+  Tab,
+  TabList,
   Text,
   Toolbar,
   ToolbarButton
@@ -19,7 +22,9 @@ import {
 import {
   AddRegular,
   DeleteRegular,
+  DismissRegular,
   EditRegular,
+  FilterRegular,
   HistoryRegular,
   MoreHorizontalRegular,
   SaveRegular,
@@ -28,11 +33,9 @@ import DataGrid, { type CellSelectArgs, type Column, type RowsChangeData } from 
 import { useEffect, useMemo, useState, type MouseEvent } from "react";
 import type { Field, RowChange, TableMetadata, TableViewFilter, TableViewSort } from "../api";
 import type { TableGridRow } from "../tableGrid";
-import { TableCanvasPanel, type CanvasPanel } from "./TableCanvasPanel";
 
 type TableWorkspaceProps = {
   columns: Column<TableGridRow>[];
-  displayedRecordIDs: number[];
   displayedRows: TableGridRow[];
   openViewPanelRequest: number;
   onAddRow: () => void;
@@ -52,7 +55,6 @@ type TableWorkspaceProps = {
   onNewViewSortFieldChange: (value: string) => void;
   onSelectGridCell: (args: CellSelectArgs<TableGridRow>) => void;
   onSelectRecordID: (recordID: number) => void;
-  onSelectTableView: (name: string) => void;
   onSelectedRowValueChange: (fieldName: string, value: string) => void;
   onUpdateField: (fieldName: string, nextField: Pick<Field, "type" | "required">) => void | Promise<void>;
   onUpdateSelectedRow: () => void;
@@ -76,7 +78,6 @@ type TableWorkspaceProps = {
 
 export function TableWorkspace({
   columns,
-  displayedRecordIDs,
   displayedRows,
   openViewPanelRequest,
   onAddRow,
@@ -96,7 +97,6 @@ export function TableWorkspace({
   onNewViewSortFieldChange,
   onSelectGridCell,
   onSelectRecordID,
-  onSelectTableView,
   onSelectedRowValueChange,
   onUpdateField,
   onUpdateSelectedRow,
@@ -122,8 +122,9 @@ export function TableWorkspace({
   const canWriteTable = hasTable && (table.permission_level ?? 2) >= 2;
   const canCreateRow = activeFields.some((field) => canWriteField(field));
   const hasWritableFields = activeFields.some(canWriteField);
-  const [canvasPanel, setCanvasPanel] = useState<CanvasPanel>("record");
-  const [selectedFieldName, setSelectedFieldName] = useState(activeFields[0]?.name ?? "");
+  const [recordPanelOpen, setRecordPanelOpen] = useState(false);
+  const [recordPanelTab, setRecordPanelTab] = useState<"details" | "history">("details");
+  const [filterOpen, setFilterOpen] = useState(false);
   const [recordMenu, setRecordMenu] = useState<{ x: number; y: number; recordID: number } | null>(null);
   const [fieldEditor, setFieldEditor] = useState<{
     x: number;
@@ -133,10 +134,6 @@ export function TableWorkspace({
     required: boolean;
   } | null>(null);
   const [fieldCreator, setFieldCreator] = useState<{ x: number; y: number } | null>(null);
-  const selectedField = useMemo(
-    () => activeFields.find((field) => field.name === selectedFieldName) ?? activeFields[0],
-    [activeFields, selectedFieldName]
-  );
   const selectedView = useMemo(
     () => (table.views ?? []).find((viewDef) => viewDef.name === selectedTableView),
     [selectedTableView, table.views]
@@ -239,7 +236,7 @@ export function TableWorkspace({
 
   useEffect(() => {
     if (openViewPanelRequest > 0) {
-      setCanvasPanel("view");
+      setFilterOpen(true);
     }
   }, [openViewPanelRequest]);
 
@@ -247,11 +244,16 @@ export function TableWorkspace({
     if (recordID && Number.isFinite(recordID)) {
       onSelectRecordID(recordID);
     }
-    setCanvasPanel("record");
+    setRecordPanelTab("details");
+    setRecordPanelOpen(true);
   }
 
-  function loadHistoryFromCanvas() {
-    setCanvasPanel("history");
+  function openHistoryPanel(recordID?: number) {
+    if (recordID && Number.isFinite(recordID)) {
+      onSelectRecordID(recordID);
+    }
+    setRecordPanelTab("history");
+    setRecordPanelOpen(true);
     onLoadHistory();
   }
 
@@ -265,19 +267,44 @@ export function TableWorkspace({
           </Text>
         </div>
         <Toolbar aria-label="Table canvas actions" className="table-actions">
+          <Popover open={filterOpen} onOpenChange={(_, data) => setFilterOpen(data.open)} positioning="below-start" withArrow>
+            <PopoverTrigger disableButtonEnhancement>
+              <ToolbarButton icon={<FilterRegular />} disabled={!canWriteTable}>
+                Filter
+              </ToolbarButton>
+            </PopoverTrigger>
+            <PopoverSurface className="view-filter-popover" aria-label="View filters">
+              <ViewFilterPopover
+                activeFields={activeFields}
+                canWriteTable={canWriteTable}
+                newViewBase={newViewBase}
+                newViewFilterField={newViewFilterField}
+                newViewFilterOp={newViewFilterOp}
+                newViewFilterValue={newViewFilterValue}
+                newViewSortDirection={newViewSortDirection}
+                newViewSortField={newViewSortField}
+                onNewViewBaseChange={onNewViewBaseChange}
+                onNewViewFilterFieldChange={onNewViewFilterFieldChange}
+                onNewViewFilterOpChange={onNewViewFilterOpChange}
+                onNewViewFilterValueChange={onNewViewFilterValueChange}
+                onNewViewSortDirectionChange={onNewViewSortDirectionChange}
+                onNewViewSortFieldChange={onNewViewSortFieldChange}
+                onSaveView={onUpdateSelectedView}
+                selectedView={selectedView}
+                views={table.views ?? []}
+              />
+            </PopoverSurface>
+          </Popover>
           <ToolbarButton icon={<EditRegular />} onClick={() => openRecordPanel()} disabled={!selectedRecordID || !hasWritableFields}>
             Edit Row
           </ToolbarButton>
-          <ToolbarButton icon={<HistoryRegular />} onClick={loadHistoryFromCanvas} disabled={!selectedRecordID}>
+          <ToolbarButton icon={<HistoryRegular />} onClick={() => openHistoryPanel()} disabled={!selectedRecordID}>
             History
           </ToolbarButton>
           <ToolbarButton
             icon={<AddRegular />}
             appearance="primary"
-            onClick={() => {
-              setCanvasPanel("record");
-              onAddRow();
-            }}
+            onClick={onAddRow}
             disabled={!canCreateRow}
           >
             Row
@@ -296,18 +323,6 @@ export function TableWorkspace({
           }}
           onSelectedCellChange={(args) => {
             onSelectGridCell(args);
-          }}
-          onCellClick={(args) => {
-            const recordID = Number(args.row?.record_id);
-            if (Number.isFinite(recordID)) {
-              openRecordPanel(recordID);
-            }
-          }}
-          onCellDoubleClick={(args) => {
-            const field = activeFields.find((item) => item.name === args.column.key);
-            if (field && canWriteField(field)) {
-              openRecordPanel(Number(args.row.record_id));
-            }
           }}
           onCellContextMenu={(args, event) => {
             event.preventGridDefault();
@@ -331,6 +346,29 @@ export function TableWorkspace({
         >
           <MenuPopover>
             <MenuList>
+              <MenuItem
+                icon={<EditRegular />}
+                onClick={() => {
+                  if (recordMenu) {
+                    openRecordPanel(recordMenu.recordID);
+                  }
+                  setRecordMenu(null);
+                }}
+              >
+                View details
+              </MenuItem>
+              <MenuItem
+                icon={<HistoryRegular />}
+                onClick={() => {
+                  if (recordMenu) {
+                    openHistoryPanel(recordMenu.recordID);
+                  }
+                  setRecordMenu(null);
+                }}
+              >
+                View history
+              </MenuItem>
+              <MenuDivider />
               <MenuItem
                 icon={<DeleteRegular />}
                 disabled={!canWriteTable}
@@ -454,48 +492,26 @@ export function TableWorkspace({
             </div>
           </PopoverSurface>
         </Popover>
-        <TableCanvasPanel
-          activeFields={activeFields}
-          activePanel={canvasPanel}
-          canWriteTable={canWriteTable}
-          displayedRecordIDs={displayedRecordIDs}
-          hasWritableFields={hasWritableFields}
-          newFieldName={newFieldName}
-          newFieldRequired={newFieldRequired}
-          newFieldType={newFieldType}
-          newViewBase={newViewBase}
-          newViewFilterField={newViewFilterField}
-          newViewFilterOp={newViewFilterOp}
-          newViewFilterValue={newViewFilterValue}
-          newViewSortDirection={newViewSortDirection}
-          newViewSortField={newViewSortField}
-          onAddField={onAddField}
-          onLoadHistory={onLoadHistory}
-          onNewFieldNameChange={onNewFieldNameChange}
-          onNewFieldRequiredChange={onNewFieldRequiredChange}
-          onNewFieldTypeChange={onNewFieldTypeChange}
-          onNewViewBaseChange={onNewViewBaseChange}
-          onNewViewFilterFieldChange={onNewViewFilterFieldChange}
-          onNewViewFilterOpChange={onNewViewFilterOpChange}
-          onNewViewFilterValueChange={onNewViewFilterValueChange}
-          onNewViewSortDirectionChange={onNewViewSortDirectionChange}
-          onNewViewSortFieldChange={onNewViewSortFieldChange}
-          onOpenHistory={loadHistoryFromCanvas}
-          onOpenRecord={() => openRecordPanel()}
-          onOpenView={() => setCanvasPanel("view")}
-          onSaveRecord={onUpdateSelectedRow}
-          onSaveView={onUpdateSelectedView}
-          onSelectField={setSelectedFieldName}
-          onSelectRecordID={onSelectRecordID}
-          onSelectTableView={onSelectTableView}
-          onSelectedRowValueChange={onSelectedRowValueChange}
-          rowHistory={rowHistory}
-          selectedField={selectedField}
-          selectedRecordID={selectedRecordID}
-          selectedRowDraft={selectedRowDraft}
-          selectedView={selectedView}
-          views={table.views ?? []}
-        />
+        {recordPanelOpen && (
+          <RecordDrawer
+            fields={activeFields}
+            hasWritableFields={hasWritableFields}
+            onChange={onSelectedRowValueChange}
+            onClose={() => setRecordPanelOpen(false)}
+            onLoadHistory={onLoadHistory}
+            onSave={onUpdateSelectedRow}
+            onTabChange={(tab) => {
+              setRecordPanelTab(tab);
+              if (tab === "history") {
+                onLoadHistory();
+              }
+            }}
+            rowHistory={rowHistory}
+            selectedRecordID={selectedRecordID}
+            tab={recordPanelTab}
+            values={selectedRowDraft}
+          />
+        )}
       </div>
     </div>
   );
@@ -548,4 +564,254 @@ function FieldHeader({
       </Menu>
     </div>
   );
+}
+
+function ViewFilterPopover({
+  activeFields,
+  canWriteTable,
+  newViewBase,
+  newViewFilterField,
+  newViewFilterOp,
+  newViewFilterValue,
+  newViewSortDirection,
+  newViewSortField,
+  onNewViewBaseChange,
+  onNewViewFilterFieldChange,
+  onNewViewFilterOpChange,
+  onNewViewFilterValueChange,
+  onNewViewSortDirectionChange,
+  onNewViewSortFieldChange,
+  onSaveView,
+  selectedView,
+  views
+}: {
+  activeFields: Field[];
+  canWriteTable: boolean;
+  newViewBase: string;
+  newViewFilterField: string;
+  newViewFilterOp: TableViewFilter["op"];
+  newViewFilterValue: string;
+  newViewSortDirection: TableViewSort["direction"];
+  newViewSortField: string;
+  onNewViewBaseChange: (value: string) => void;
+  onNewViewFilterFieldChange: (value: string) => void;
+  onNewViewFilterOpChange: (value: TableViewFilter["op"]) => void;
+  onNewViewFilterValueChange: (value: string) => void;
+  onNewViewSortDirectionChange: (value: TableViewSort["direction"]) => void;
+  onNewViewSortFieldChange: (value: string) => void;
+  onSaveView: () => void;
+  selectedView?: NonNullable<TableMetadata["views"]>[number];
+  views: NonNullable<TableMetadata["views"]>;
+}) {
+  const canEditView = canWriteTable && Boolean(selectedView);
+  return (
+    <div className="view-filter-editor">
+      <div className="view-filter-header">
+        <Text weight="semibold">{selectedView?.display_name || selectedView?.name || "All records"}</Text>
+        <Text size={200}>
+          {selectedView?.base_view ? `based on ${selectedView.base_view}` : selectedView ? "table view" : "base table"}
+        </Text>
+      </div>
+      <FluentField label="Base view">
+        <Select
+          aria-label="Base view"
+          value={newViewBase}
+          onChange={(_, data) => onNewViewBaseChange(data.value)}
+          disabled={!canEditView}
+        >
+          <option value="all">All records</option>
+          {views.filter((item) => item.name !== selectedView?.name).map((item) => (
+            <option key={item.name} value={item.name}>
+              {item.display_name || item.name}
+            </option>
+          ))}
+        </Select>
+      </FluentField>
+      <div className="view-filter-grid">
+        <FluentField label="Filter field">
+          <Select
+            aria-label="View filter field"
+            value={newViewFilterField}
+            onChange={(_, data) => onNewViewFilterFieldChange(data.value)}
+            disabled={!canEditView}
+          >
+            <option value="">No filter</option>
+            {activeFields.map((field) => (
+              <option key={field.name} value={field.name}>
+                {field.name}
+              </option>
+            ))}
+          </Select>
+        </FluentField>
+        <FluentField label="Filter operator">
+          <Select
+            aria-label="View filter operator"
+            value={newViewFilterOp}
+            onChange={(_, data) => onNewViewFilterOpChange(data.value as TableViewFilter["op"])}
+            disabled={!canEditView || !newViewFilterField}
+          >
+            <option value="eq">equals</option>
+            <option value="contains">contains</option>
+            <option value="not_empty">not empty</option>
+          </Select>
+        </FluentField>
+      </div>
+      <FluentField label="Filter value">
+        <Input
+          aria-label="View filter value"
+          value={newViewFilterValue}
+          onChange={(_, data) => onNewViewFilterValueChange(data.value)}
+          disabled={!canEditView || !newViewFilterField || newViewFilterOp === "not_empty"}
+        />
+      </FluentField>
+      <div className="view-filter-grid">
+        <FluentField label="Sort field">
+          <Select
+            aria-label="View sort field"
+            value={newViewSortField}
+            onChange={(_, data) => onNewViewSortFieldChange(data.value)}
+            disabled={!canEditView}
+          >
+            <option value="">No sort</option>
+            <option value="record_id">record_id</option>
+            {activeFields.map((field) => (
+              <option key={field.name} value={field.name}>
+                {field.name}
+              </option>
+            ))}
+          </Select>
+        </FluentField>
+        <FluentField label="Sort direction">
+          <Select
+            aria-label="View sort direction"
+            value={newViewSortDirection}
+            onChange={(_, data) => onNewViewSortDirectionChange(data.value as TableViewSort["direction"])}
+            disabled={!canEditView || !newViewSortField}
+          >
+            <option value="asc">ascending</option>
+            <option value="desc">descending</option>
+          </Select>
+        </FluentField>
+      </div>
+      <Button appearance="primary" icon={<SaveRegular />} onClick={onSaveView} disabled={!canEditView}>
+        Save View
+      </Button>
+    </div>
+  );
+}
+
+function RecordDrawer({
+  fields,
+  hasWritableFields,
+  onChange,
+  onClose,
+  onLoadHistory,
+  onSave,
+  onTabChange,
+  rowHistory,
+  selectedRecordID,
+  tab,
+  values
+}: {
+  fields: Field[];
+  hasWritableFields: boolean;
+  onChange: (fieldName: string, value: string) => void;
+  onClose: () => void;
+  onLoadHistory: () => void;
+  onSave: () => void;
+  onTabChange: (tab: "details" | "history") => void;
+  rowHistory: RowChange[];
+  selectedRecordID: number;
+  tab: "details" | "history";
+  values: Record<string, string>;
+}) {
+  return (
+    <aside className="record-drawer" aria-label="Record panel">
+      <div className="record-drawer-header">
+        <div>
+          <Text weight="semibold">{selectedRecordID ? `record #${selectedRecordID}` : "No record selected"}</Text>
+          <Text size={200}>{hasWritableFields ? "Writable fields" : "Read only"}</Text>
+        </div>
+        <Button appearance="subtle" icon={<DismissRegular />} aria-label="Close record panel" onClick={onClose} />
+      </div>
+      <TabList
+        aria-label="Record tabs"
+        appearance="subtle"
+        selectedValue={tab}
+        onTabSelect={(_, data) => onTabChange(data.value as "details" | "history")}
+      >
+        <Tab value="details">Details</Tab>
+        <Tab value="history">History</Tab>
+      </TabList>
+      {tab === "details" ? (
+        <div className="record-detail-list">
+          {fields.map((field) => (
+            <FluentField key={field.name} label={field.name}>
+              <Input
+                aria-label={`${field.name} value`}
+                value={values[field.name] ?? ""}
+                onChange={(_, data) => onChange(field.name, data.value)}
+                disabled={!selectedRecordID || !canWriteField(field)}
+              />
+            </FluentField>
+          ))}
+          <Button appearance="primary" icon={<SaveRegular />} onClick={onSave} disabled={!selectedRecordID || !hasWritableFields}>
+            Save Row
+          </Button>
+        </div>
+      ) : (
+        <div className="record-history-pane" aria-label="Row history">
+          <div className="record-history-toolbar">
+            <Text size={200}>{selectedRecordID ? `record #${selectedRecordID}` : "No record selected"}</Text>
+            <Button onClick={onLoadHistory} disabled={!selectedRecordID}>
+              Refresh
+            </Button>
+          </div>
+          <RowHistoryList rowHistory={rowHistory} />
+        </div>
+      )}
+    </aside>
+  );
+}
+
+function RowHistoryList({ rowHistory }: { rowHistory: RowChange[] }) {
+  if (rowHistory.length === 0) {
+    return <Text size={200}>No row history loaded</Text>;
+  }
+  return (
+    <div className="row-history-list">
+      {rowHistory.map((change) => (
+        <div key={change.history_key} className="row-history-entry">
+          <div>
+            <Text weight="semibold">{friendlyHistoryOperation(change.operation)}</Text>
+            <Text size={200}>
+              {[formatHistoryTime(change.timestamp), change.actor_id ? `by ${change.actor_id}` : ""].filter(Boolean).join(" · ")}
+            </Text>
+          </div>
+          <pre>{JSON.stringify(change.values, null, 2)}</pre>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function friendlyHistoryOperation(operation?: string): string {
+  if (operation === "create") {
+    return "Created";
+  }
+  if (operation === "update") {
+    return "Updated";
+  }
+  if (operation === "delete") {
+    return "Deleted";
+  }
+  return "Record change";
+}
+
+function formatHistoryTime(timestamp: string): string {
+  const parsed = new Date(timestamp);
+  if (Number.isNaN(parsed.getTime())) {
+    return timestamp;
+  }
+  return parsed.toLocaleString();
 }
