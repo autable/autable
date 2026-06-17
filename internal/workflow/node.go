@@ -16,7 +16,6 @@ type Port struct {
 	Name        string `json:"name"`
 	Type        string `json:"type"`
 	Description string `json:"description,omitempty"`
-	Required    bool   `json:"required"`
 }
 
 type Node interface {

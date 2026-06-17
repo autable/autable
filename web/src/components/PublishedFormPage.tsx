@@ -175,7 +175,6 @@ export function PublishedFormPage({ token }: PublishedFormPageProps) {
                     <span>{element.label}</span>
                     <Input
                       type={element.inputType}
-                      required={element.required}
                       value={formValues[element.name] ?? ""}
                       onChange={(_, data) => setFormValues((current) => ({ ...current, [element.name]: data.value }))}
                     />

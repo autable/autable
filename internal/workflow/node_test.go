@@ -9,9 +9,8 @@ func TestNodeInfoCanDescribeTrigger(t *testing.T) {
 		Stateless:   true,
 		Trigger:     true,
 		Outputs: []Port{{
-			Name:     "record",
-			Type:     "TriggerRecord",
-			Required: true,
+			Name: "record",
+			Type: "TriggerRecord",
 		}},
 	}
 

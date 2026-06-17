@@ -69,7 +69,7 @@ function instances(info) {
   return {
     echo_main: {
       node: "echo",
-      variables: [{ name: "suffix", type: "string", required: true }]
+      variables: [{ name: "suffix", type: "string" }]
     }
   };
 }
@@ -176,13 +176,13 @@ function instances(info) {
   return {
     primary_sender: {
       node: "config.capture",
-      variables: [{ name: "channel", type: "string", required: true }],
-      secrets: [{ name: "token", type: "string", required: true }]
+      variables: [{ name: "channel", type: "string" }],
+      secrets: [{ name: "token", type: "string" }]
     },
     fallback_sender: {
       node: "config.capture",
-      variables: [{ name: "channel", type: "string", required: true }],
-      secrets: [{ name: "token", type: "string", required: true }]
+      variables: [{ name: "channel", type: "string" }],
+      secrets: [{ name: "token", type: "string" }]
     }
   };
 }

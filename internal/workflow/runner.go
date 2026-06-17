@@ -311,7 +311,6 @@ func portsFromExport(value any) []Port {
 				Name:        stringValue(port["name"]),
 				Type:        stringValue(port["type"]),
 				Description: stringValue(port["description"]),
-				Required:    boolValue(port["required"]),
 			})
 		}
 	}
@@ -345,13 +344,6 @@ func stringValue(value any) string {
 		return text
 	}
 	return ""
-}
-
-func boolValue(value any) bool {
-	if boolean, ok := value.(bool); ok {
-		return boolean
-	}
-	return false
 }
 
 func exportedMap(value any) map[string]any {

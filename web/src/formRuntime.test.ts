@@ -5,7 +5,7 @@ describe("renderFormScript", () => {
   it("executes form JavaScript against the form api and root", () => {
     const result = renderFormScript(`
       function render(api, root) {
-        const email = api.input({ name: "email", label: "Email", type: "email", required: true });
+        const email = api.input({ name: "email", label: "Email", type: "email" });
         const status = api.select({ name: "status", options: ["Active", "Review"] });
         root.append(email, status, api.submit("Create record"));
         return { table: "contacts", fields: { email: "email", status: "status" } };
@@ -16,7 +16,7 @@ describe("renderFormScript", () => {
     expect(result.table).toBe("contacts");
     expect(result.fields).toEqual({ email: "email", status: "status" });
     expect(result.elements).toEqual([
-      { kind: "input", name: "email", label: "Email", inputType: "email", required: true },
+      { kind: "input", name: "email", label: "Email", inputType: "email" },
       { kind: "select", name: "status", label: "status", options: ["Active", "Review"] },
       { kind: "submit", label: "Create record" }
     ]);
@@ -41,7 +41,7 @@ describe("renderFormScript", () => {
     expect(result.table).toBe("contacts");
     expect(result.fields).toEqual({ person_name: "name" });
     expect(result.elements).toEqual([
-      { kind: "input", name: "person_name", label: "Name", inputType: "text", required: false },
+      { kind: "input", name: "person_name", label: "Name", inputType: "text" },
       { kind: "submit", label: "Submit" }
     ]);
   });

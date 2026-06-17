@@ -13,14 +13,12 @@ func (ScheduleTriggerNode) Info() NodeInfo {
 		DisplayName: "Schedule",
 		Description: "Exposes a backend schedule tick as a workflow trigger event.",
 		Inputs: []Port{{
-			Name:     "scheduled_at",
-			Type:     "int64",
-			Required: true,
+			Name: "scheduled_at",
+			Type: "int64",
 		}},
 		Outputs: []Port{{
-			Name:     "scheduled_at",
-			Type:     "int64",
-			Required: true,
+			Name: "scheduled_at",
+			Type: "int64",
 		}},
 		Stateless: true,
 		Trigger:   true,

@@ -130,7 +130,7 @@ async function setupWorkspace(page: Page): Promise<WorkspaceSetup> {
     database_name: databaseName,
     name: `quick-status-${suffix}`,
     script:
-      "function render(api, root) { root.append(api.input({ name: 'name', label: 'Name', required: true }), api.input({ name: 'email', label: 'Email', type: 'email' }), api.select({ name: 'status', label: 'Status', options: ['Active', 'Review'] }), api.submit('Create record')); return { table: 'contacts', fields: { name: 'name', email: 'email', status: 'status' } }; }"
+      "function render(api, root) { root.append(api.input({ name: 'name', label: 'Name' }), api.input({ name: 'email', label: 'Email', type: 'email' }), api.select({ name: 'status', label: 'Status', options: ['Active', 'Review'] }), api.submit('Create record')); return { table: 'contacts', fields: { name: 'name', email: 'email', status: 'status' } }; }"
   });
   await page.reload();
   await expect(page.getByRole("button", { name: databaseName })).toBeVisible();

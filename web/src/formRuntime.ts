@@ -4,7 +4,6 @@ export type FormElement =
       name: string;
       label: string;
       inputType: "text" | "email" | "search" | "tel" | "url" | "password";
-      required: boolean;
     }
   | { kind: "select"; name: string; label: string; options: string[] }
   | { kind: "submit"; label: string }
@@ -23,7 +22,6 @@ type InputConfig = {
   name: string;
   label?: string;
   type?: string;
-  required?: boolean;
 };
 
 type SelectConfig = {
@@ -53,8 +51,7 @@ export function renderFormScript(script: string): FormRenderResult {
       kind: "input",
       name: String(config.name),
       label: config.label ?? config.name,
-      inputType: normalizeInputType(config.type),
-      required: Boolean(config.required)
+      inputType: normalizeInputType(config.type)
     }),
     select: (config: SelectConfig): FormElement => ({
       kind: "select",

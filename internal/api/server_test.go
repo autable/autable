@@ -1694,7 +1694,7 @@ func TestWorkflowRunAPI(t *testing.T) {
 
 	workflowRequest := httptest.NewRequest(http.MethodPost, "/api/databases/db/workflows", bytes.NewBufferString(`{
 		"name":"welcome",
-		"script":"function instances(info) { return { welcome_echo: { node: \"echo\", variables: [{ name: \"suffix\", type: \"string\", required: true }] } }; }\nfunction run(info) { const echoed = info.instance(\"welcome_echo\").exec({ value: info.inputs.name }); return { message: echoed.value + \"-done\" }; }",
+		"script":"function instances(info) { return { welcome_echo: { node: \"echo\", variables: [{ name: \"suffix\", type: \"string\" }] } }; }\nfunction run(info) { const echoed = info.instance(\"welcome_echo\").exec({ value: info.inputs.name }); return { message: echoed.value + \"-done\" }; }",
 		"variables":{"welcome_echo.suffix":"done"}
 	}`))
 	workflowRequest.AddCookie(testSessionCookie(t, system, "u1"))

@@ -8,8 +8,8 @@ describe("workflowInstances", () => {
         return {
           primary_sender: {
             node: "message.send",
-            variables: [{ name: "channel", type: "string", required: true }],
-            secrets: [{ name: "token", type: "string", required: true }],
+            variables: [{ name: "channel", type: "string" }],
+            secrets: [{ name: "token", type: "string" }],
             params: { database: info.database_name }
           },
           fallback_sender: "message.send"

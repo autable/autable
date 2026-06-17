@@ -22,13 +22,12 @@ func (node RecordChangedTriggerNode) Info() NodeInfo {
 		DisplayName: "Record changed",
 		Description: "Loads a row history entry by rhistory key and exposes it as a trigger record.",
 		Inputs: []Port{{
-			Name:     "history_key",
-			Type:     "string",
-			Required: true,
+			Name: "history_key",
+			Type: "string",
 		}},
 		Outputs: []Port{
-			{Name: "record", Type: "TriggerRecord", Required: true},
-			{Name: "values", Type: "object", Required: true},
+			{Name: "record", Type: "TriggerRecord"},
+			{Name: "values", Type: "object"},
 			{Name: "diff", Type: "object"},
 			{Name: "actor_id", Type: "string"},
 		},

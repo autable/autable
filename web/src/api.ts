@@ -70,7 +70,6 @@ export type WorkflowPort = {
   name: string;
   type: string;
   description?: string;
-  required: boolean;
 };
 
 export type WorkflowNodeInfo = {

@@ -63,7 +63,7 @@ const formFixture = [
     database_name: "workspace",
     name: "contact-intake",
     script:
-      'function render(api, root) { root.append(api.input({ name: "name", label: "Name", required: true }), api.submit("Create record")); return { table: "contacts", fields: { name: "name" } }; }',
+      'function render(api, root) { root.append(api.input({ name: "name", label: "Name" }), api.submit("Create record")); return { table: "contacts", fields: { name: "name" } }; }',
     permission_level: 2
   },
   {
@@ -80,16 +80,16 @@ const workflowNodeFixture = [
   {
     type: "echo",
     display_name: "Echo",
-    inputs: [{ name: "value", type: "any", required: false }],
-    outputs: [{ name: "value", type: "any", required: false }],
+    inputs: [{ name: "value", type: "any" }],
+    outputs: [{ name: "value", type: "any" }],
     stateless: true,
     trigger: false
   },
   {
     type: "table.record.changed",
     display_name: "Record changed",
-    inputs: [{ name: "history_key", type: "string", required: true }],
-    outputs: [{ name: "record", type: "TriggerRecord", required: true }],
+    inputs: [{ name: "history_key", type: "string" }],
+    outputs: [{ name: "record", type: "TriggerRecord" }],
     stateless: true,
     trigger: true
   }

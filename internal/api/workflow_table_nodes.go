@@ -23,10 +23,10 @@ func (node workflowTableNode) Info() workflow.NodeInfo {
 			Description: "Creates a table row through the server table API using the workflow creator permissions.",
 			Inputs: []workflow.Port{
 				{Name: "database", Type: "string"},
-				{Name: "table", Type: "string", Required: true},
-				{Name: "values", Type: "object", Required: true},
+				{Name: "table", Type: "string"},
+				{Name: "values", Type: "object"},
 			},
-			Outputs:   []workflow.Port{{Name: "record", Type: "RowRecord", Required: true}},
+			Outputs:   []workflow.Port{{Name: "record", Type: "RowRecord"}},
 			Stateless: true,
 		}
 	case "update":
@@ -36,11 +36,11 @@ func (node workflowTableNode) Info() workflow.NodeInfo {
 			Description: "Updates a table row through the server table API using the workflow creator permissions.",
 			Inputs: []workflow.Port{
 				{Name: "database", Type: "string"},
-				{Name: "table", Type: "string", Required: true},
-				{Name: "record_id", Type: "int64", Required: true},
-				{Name: "values", Type: "object", Required: true},
+				{Name: "table", Type: "string"},
+				{Name: "record_id", Type: "int64"},
+				{Name: "values", Type: "object"},
 			},
-			Outputs:   []workflow.Port{{Name: "record", Type: "RowRecord", Required: true}},
+			Outputs:   []workflow.Port{{Name: "record", Type: "RowRecord"}},
 			Stateless: true,
 		}
 	case "delete":
@@ -50,10 +50,10 @@ func (node workflowTableNode) Info() workflow.NodeInfo {
 			Description: "Deletes a table row through the server table API using the workflow creator permissions.",
 			Inputs: []workflow.Port{
 				{Name: "database", Type: "string"},
-				{Name: "table", Type: "string", Required: true},
-				{Name: "record_id", Type: "int64", Required: true},
+				{Name: "table", Type: "string"},
+				{Name: "record_id", Type: "int64"},
 			},
-			Outputs:   []workflow.Port{{Name: "record", Type: "RowRecord", Required: true}},
+			Outputs:   []workflow.Port{{Name: "record", Type: "RowRecord"}},
 			Stateless: true,
 		}
 	default:
@@ -63,10 +63,10 @@ func (node workflowTableNode) Info() workflow.NodeInfo {
 			Description: "Lists table rows through the server table API using the workflow creator permissions.",
 			Inputs: []workflow.Port{
 				{Name: "database", Type: "string"},
-				{Name: "table", Type: "string", Required: true},
+				{Name: "table", Type: "string"},
 				{Name: "view", Type: "string"},
 			},
-			Outputs:   []workflow.Port{{Name: "rows", Type: "RowRecord[]", Required: true}},
+			Outputs:   []workflow.Port{{Name: "rows", Type: "RowRecord[]"}},
 			Stateless: true,
 		}
 	}

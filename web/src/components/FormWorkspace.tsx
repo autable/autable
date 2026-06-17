@@ -71,7 +71,6 @@ export function FormWorkspace({
                 <span>{element.label}</span>
                 <Input
                   type={element.inputType}
-                  required={element.required}
                   value={formValues[element.name] ?? ""}
                   onChange={(_, data) => onFormValueChange(element.name, data.value)}
                 />
