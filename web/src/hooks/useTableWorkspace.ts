@@ -42,7 +42,8 @@ export function useTableWorkspace({
   const [rowHistory, setRowHistory] = useState<RowChange[]>([]);
   const [selectedRowDraft, setSelectedRowDraft] = useState<Record<string, string>>({});
   const [newFieldName, setNewFieldName] = useState("");
-  const [newFieldType, setNewFieldType] = useState("text");
+  const [newFieldType, setNewFieldType] = useState("string");
+  const [newFormulaValueType, setNewFormulaValueType] = useState("string");
   const [newFieldFormula, setNewFieldFormula] = useState("");
   const [newViewBase, setNewViewBase] = useState("all");
   const [newViewFilterField, setNewViewFilterField] = useState("");
@@ -218,6 +219,7 @@ export function useTableWorkspace({
         {
           name,
           type: newFieldType,
+          value_type: newFieldType === "formula" ? newFormulaValueType : undefined,
           formula: newFieldType === "formula" ? formula : undefined,
           deleted: false
         }
@@ -225,7 +227,8 @@ export function useTableWorkspace({
     };
     await persistTableMetadata(nextTable, `Added field ${name}`);
     setNewFieldName("");
-    setNewFieldType("text");
+    setNewFieldType("string");
+    setNewFormulaValueType("string");
     setNewFieldFormula("");
   }
 
@@ -404,6 +407,7 @@ export function useTableWorkspace({
     newFieldName,
     newFieldFormula,
     newFieldType,
+    newFormulaValueType,
     newViewBase,
     newViewFilterField,
     newViewFilterOp,
@@ -426,6 +430,7 @@ export function useTableWorkspace({
     setNewFieldName,
     setNewFieldFormula,
     setNewFieldType,
+    setNewFormulaValueType,
     setNewViewBase,
     setNewViewFilterField,
     setNewViewFilterOp,

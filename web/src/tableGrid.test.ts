@@ -4,8 +4,8 @@ import { buildTableColumns, rowRecordToValues } from "./tableGrid";
 describe("tableGrid", () => {
   it("builds columns from user fields without exposing record_id", () => {
     const columns = buildTableColumns([
-      { name: "name", type: "text", deleted: false },
-      { name: "email", type: "email", deleted: false }
+      { name: "name", type: "string", deleted: false },
+      { name: "email", type: "string", deleted: false }
     ]);
 
     expect(columns.map((column) => column.key)).toEqual(["name", "email"]);
@@ -14,8 +14,8 @@ describe("tableGrid", () => {
 
   it("does not make formula fields editable", () => {
     const columns = buildTableColumns([
-      { name: "score", type: "number", deleted: false },
-      { name: "score_plus_one", type: "formula", formula: "field_score + 1", deleted: false }
+      { name: "score", type: "float", deleted: false },
+      { name: "score_plus_one", type: "formula", value_type: "float", formula: "field_score + 1", deleted: false }
     ]);
 
     expect(typeof columns[0].editable === "function" ? columns[0].editable({ record_id: 1 }) : columns[0].editable).toBe(true);

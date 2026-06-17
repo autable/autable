@@ -47,6 +47,7 @@ type TableWorkspaceProps = {
   onNewFieldFormulaChange: (value: string) => void;
   onNewFieldNameChange: (value: string) => void;
   onNewFieldTypeChange: (value: string) => void;
+  onNewFormulaValueTypeChange: (value: string) => void;
   onNewViewBaseChange: (value: string) => void;
   onNewViewFilterFieldChange: (value: string) => void;
   onNewViewFilterOpChange: (value: TableViewFilter["op"]) => void;
@@ -62,6 +63,7 @@ type TableWorkspaceProps = {
   newFieldFormula: string;
   newFieldName: string;
   newFieldType: string;
+  newFormulaValueType: string;
   newViewBase: string;
   newViewFilterField: string;
   newViewFilterOp: TableViewFilter["op"];
@@ -89,6 +91,7 @@ export function TableWorkspace({
   onNewFieldFormulaChange,
   onNewFieldNameChange,
   onNewFieldTypeChange,
+  onNewFormulaValueTypeChange,
   onNewViewBaseChange,
   onNewViewFilterFieldChange,
   onNewViewFilterOpChange,
@@ -104,6 +107,7 @@ export function TableWorkspace({
   newFieldFormula,
   newFieldName,
   newFieldType,
+  newFormulaValueType,
   newViewBase,
   newViewFilterField,
   newViewFilterOp,
@@ -203,7 +207,8 @@ export function TableWorkspace({
               const rect = event.currentTarget.getBoundingClientRect();
               onNewFieldFormulaChange("");
               onNewFieldNameChange("");
-              onNewFieldTypeChange("text");
+              onNewFieldTypeChange("string");
+              onNewFormulaValueTypeChange("string");
               setFieldCreator({ x: rect.left, y: rect.bottom });
             }}
           >
@@ -401,23 +406,35 @@ export function TableWorkspace({
                   value={newFieldType}
                   onChange={(_, data) => onNewFieldTypeChange(data.value)}
                 >
-                  <option value="text">text</option>
-                  <option value="email">email</option>
-                  <option value="number">number</option>
-                  <option value="date">date</option>
+                  <option value="string">string</option>
+                  <option value="int">int</option>
+                  <option value="float">float</option>
                   <option value="formula">formula</option>
                 </Select>
               </FluentField>
               {newFieldType === "formula" && (
-                <FluentField label="Formula">
-                  <Textarea
-                    aria-label="New field formula"
-                    value={newFieldFormula}
-                    onChange={(_, data) => onNewFieldFormulaChange(data.value)}
-                    placeholder="field_score + 1"
-                    resize="vertical"
-                  />
-                </FluentField>
+                <>
+                  <FluentField label="Formula value type">
+                    <Select
+                      aria-label="Formula value type"
+                      value={newFormulaValueType}
+                      onChange={(_, data) => onNewFormulaValueTypeChange(data.value)}
+                    >
+                      <option value="string">string</option>
+                      <option value="int">int</option>
+                      <option value="float">float</option>
+                    </Select>
+                  </FluentField>
+                  <FluentField label="Formula">
+                    <Textarea
+                      aria-label="New field formula"
+                      value={newFieldFormula}
+                      onChange={(_, data) => onNewFieldFormulaChange(data.value)}
+                      placeholder="field_score + 1"
+                      resize="vertical"
+                    />
+                  </FluentField>
+                </>
               )}
               <div className="field-editor-actions">
                 <Button onClick={() => setFieldCreator(null)}>Cancel</Button>

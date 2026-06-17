@@ -12,7 +12,7 @@ func TestCatalogValidateRejectsUserRecordID(t *testing.T) {
 		Tables: []Table{{
 			Name: "tasks",
 			Fields: []Field{
-				{Name: "record_id", Type: "text"},
+				{Name: "record_id", Type: "string"},
 			},
 		}},
 	}}}
@@ -24,8 +24,8 @@ func TestCatalogValidateRejectsUserRecordID(t *testing.T) {
 
 func TestActiveFieldsPreservesSoftDeletedMetadata(t *testing.T) {
 	table := Table{Fields: []Field{
-		{Name: "name", Type: "text"},
-		{Name: "legacy", Type: "text", Deleted: true},
+		{Name: "name", Type: "string"},
+		{Name: "legacy", Type: "string", Deleted: true},
 	}}
 
 	active := table.ActiveFields()
@@ -41,8 +41,8 @@ func TestResolveViewComposesBaseView(t *testing.T) {
 	table := Table{
 		Name: "contacts",
 		Fields: []Field{
-			{Name: "status", Type: "text"},
-			{Name: "name", Type: "text"},
+			{Name: "status", Type: "string"},
+			{Name: "name", Type: "string"},
 		},
 		Views: []View{
 			{
@@ -77,7 +77,7 @@ func TestResolveViewComposesBaseView(t *testing.T) {
 func TestValidateRejectsViewCycles(t *testing.T) {
 	table := Table{
 		Name:   "contacts",
-		Fields: []Field{{Name: "name", Type: "text"}},
+		Fields: []Field{{Name: "name", Type: "string"}},
 		Views: []View{
 			{Name: "a", BaseView: "b"},
 			{Name: "b", BaseView: "a"},
@@ -98,12 +98,12 @@ func TestAddDatabaseAddTableAndSave(t *testing.T) {
 	catalog, err = catalog.AddTable("workspace", Table{
 		Name:        "contacts",
 		DisplayName: "Contacts",
-		Fields:      []Field{{Name: "name", Type: "text"}},
+		Fields:      []Field{{Name: "name", Type: "string"}},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := catalog.AddTable("workspace", Table{Name: "contacts", Fields: []Field{{Name: "email", Type: "email"}}}); err == nil {
+	if _, err := catalog.AddTable("workspace", Table{Name: "contacts", Fields: []Field{{Name: "email", Type: "string"}}}); err == nil {
 		t.Fatal("expected duplicate table validation error")
 	}
 
@@ -128,9 +128,9 @@ func TestUpdateTableCanSoftDeleteFieldAndAddBasedView(t *testing.T) {
 		Tables: []Table{{
 			Name: "contacts",
 			Fields: []Field{
-				{Name: "name", Type: "text"},
-				{Name: "status", Type: "text"},
-				{Name: "legacy", Type: "text"},
+				{Name: "name", Type: "string"},
+				{Name: "status", Type: "string"},
+				{Name: "legacy", Type: "string"},
 			},
 			Views: []View{{
 				Name:    "active",
@@ -142,10 +142,10 @@ func TestUpdateTableCanSoftDeleteFieldAndAddBasedView(t *testing.T) {
 	updated, err := catalog.UpdateTable("workspace", "contacts", Table{
 		Name: "contacts",
 		Fields: []Field{
-			{Name: "name", Type: "text"},
-			{Name: "status", Type: "text"},
-			{Name: "legacy", Type: "text", Deleted: true},
-			{Name: "email", Type: "email"},
+			{Name: "name", Type: "string"},
+			{Name: "status", Type: "string"},
+			{Name: "legacy", Type: "string", Deleted: true},
+			{Name: "email", Type: "string"},
 		},
 		Views: []View{
 			{Name: "active", Filters: []ViewFilter{{Field: "status", Op: "eq", Value: "active"}}},
@@ -181,13 +181,13 @@ func TestUpdateTableRejectsFieldTypeChange(t *testing.T) {
 		SQLitePath: "./data/workspace.sqlite",
 		Tables: []Table{{
 			Name:   "contacts",
-			Fields: []Field{{Name: "priority", Type: "text"}},
+			Fields: []Field{{Name: "priority", Type: "string"}},
 		}},
 	}}}
 
 	if _, err := catalog.UpdateTable("workspace", "contacts", Table{
 		Name:   "contacts",
-		Fields: []Field{{Name: "priority", Type: "number"}},
+		Fields: []Field{{Name: "priority", Type: "float"}},
 	}); err == nil {
 		t.Fatal("expected field type change to be rejected")
 	}
@@ -195,8 +195,8 @@ func TestUpdateTableRejectsFieldTypeChange(t *testing.T) {
 	updated, err := catalog.UpdateTable("workspace", "contacts", Table{
 		Name: "contacts",
 		Fields: []Field{
-			{Name: "priority", Type: "text"},
-			{Name: "status", Type: "text"},
+			{Name: "priority", Type: "string"},
+			{Name: "status", Type: "string"},
 		},
 	})
 	if err != nil {
@@ -215,8 +215,8 @@ func TestFormulaFieldValidationAndEditableExpression(t *testing.T) {
 		Tables: []Table{{
 			Name: "contacts",
 			Fields: []Field{
-				{Name: "score", Type: "number"},
-				{Name: "score_plus_one", Type: "formula", Formula: "field_score + 1"},
+				{Name: "score", Type: "float"},
+				{Name: "score_plus_one", Type: "formula", ValueType: "float", Formula: "field_score + 1"},
 			},
 		}},
 	}}}
@@ -227,8 +227,8 @@ func TestFormulaFieldValidationAndEditableExpression(t *testing.T) {
 	updated, err := catalog.UpdateTable("workspace", "contacts", Table{
 		Name: "contacts",
 		Fields: []Field{
-			{Name: "score", Type: "number"},
-			{Name: "score_plus_one", Type: "formula", Formula: "field_score + 2"},
+			{Name: "score", Type: "float"},
+			{Name: "score_plus_one", Type: "formula", ValueType: "float", Formula: "field_score + 2"},
 		},
 	})
 	if err != nil {
@@ -241,6 +241,15 @@ func TestFormulaFieldValidationAndEditableExpression(t *testing.T) {
 	field, ok := table.Field("score_plus_one")
 	if !ok || field.Formula != "field_score + 2" {
 		t.Fatalf("expected formula expression update, got %#v", field)
+	}
+	if _, err := catalog.UpdateTable("workspace", "contacts", Table{
+		Name: "contacts",
+		Fields: []Field{
+			{Name: "score", Type: "float"},
+			{Name: "score_plus_one", Type: "formula", ValueType: "string", Formula: "String(field_score + 2)"},
+		},
+	}); err == nil {
+		t.Fatal("expected formula value_type change to be rejected")
 	}
 
 	invalid := Catalog{Databases: []Database{{
@@ -260,7 +269,7 @@ func TestFormulaFieldValidationAndEditableExpression(t *testing.T) {
 		SQLitePath: "./data/workspace.sqlite",
 		Tables: []Table{{
 			Name:   "contacts",
-			Fields: []Field{{Name: "name", Type: "text", Formula: "field_score + 1"}},
+			Fields: []Field{{Name: "name", Type: "string", Formula: "field_score + 1"}},
 		}},
 	}}}
 	if err := invalid.Validate(); err == nil {

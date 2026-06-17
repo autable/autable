@@ -261,7 +261,7 @@ function WorkspaceApp() {
         {
           name,
           display_name: name,
-          fields: [{ name: "name", type: "text", deleted: false }],
+          fields: [{ name: "name", type: "string", deleted: false }],
           views: []
         }
       );
@@ -428,6 +428,7 @@ function WorkspaceApp() {
               newFieldFormula={tableWorkspace.newFieldFormula}
               newFieldName={tableWorkspace.newFieldName}
               newFieldType={tableWorkspace.newFieldType}
+              newFormulaValueType={tableWorkspace.newFormulaValueType}
               newViewBase={tableWorkspace.newViewBase}
               newViewFilterField={tableWorkspace.newViewFilterField}
               newViewFilterOp={tableWorkspace.newViewFilterOp}
@@ -442,6 +443,7 @@ function WorkspaceApp() {
               onNewFieldFormulaChange={tableWorkspace.setNewFieldFormula}
               onNewFieldNameChange={tableWorkspace.setNewFieldName}
               onNewFieldTypeChange={tableWorkspace.setNewFieldType}
+              onNewFormulaValueTypeChange={tableWorkspace.setNewFormulaValueType}
               onNewViewBaseChange={tableWorkspace.setNewViewBase}
               onNewViewFilterFieldChange={tableWorkspace.setNewViewFilterField}
               onNewViewFilterOpChange={tableWorkspace.setNewViewFilterOp}

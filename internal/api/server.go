@@ -825,7 +825,7 @@ func (server *Server) handlePostDatabaseResource(w http.ResponseWriter, r *http.
 			writeError(w, http.StatusBadRequest, err)
 			return
 		}
-		if err := server.addTable(dbName, tableMeta); err != nil {
+		if err := server.addTable(r.Context(), dbName, tableMeta); err != nil {
 			writeError(w, http.StatusBadRequest, err)
 			return
 		}
@@ -992,7 +992,7 @@ func (server *Server) handleUpdateTableMetadata(w http.ResponseWriter, r *http.R
 	if tableMeta.Name == "" {
 		tableMeta.Name = tableName
 	}
-	if err := server.updateTable(dbName, tableName, tableMeta); err != nil {
+	if err := server.updateTable(r.Context(), dbName, tableName, tableMeta); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
@@ -1825,7 +1825,7 @@ func (server *Server) createDatabase(ctx context.Context, database metadata.Data
 	return nil
 }
 
-func (server *Server) addTable(dbName string, tableMeta metadata.Table) error {
+func (server *Server) addTable(ctx context.Context, dbName string, tableMeta metadata.Table) error {
 	if server.metadataPath == "" {
 		return errors.New("metadata writes are not configured")
 	}
@@ -1835,6 +1835,9 @@ func (server *Server) addTable(dbName string, tableMeta metadata.Table) error {
 	if err != nil {
 		return err
 	}
+	if err := server.tables.SyncTable(ctx, next, dbName, tableMeta.Name); err != nil {
+		return err
+	}
 	if err := metadata.Save(server.metadataPath, next); err != nil {
 		return err
 	}
@@ -1842,7 +1845,7 @@ func (server *Server) addTable(dbName string, tableMeta metadata.Table) error {
 	return nil
 }
 
-func (server *Server) updateTable(dbName, tableName string, tableMeta metadata.Table) error {
+func (server *Server) updateTable(ctx context.Context, dbName, tableName string, tableMeta metadata.Table) error {
 	if server.metadataPath == "" {
 		return errors.New("metadata writes are not configured")
 	}
@@ -1850,6 +1853,9 @@ func (server *Server) updateTable(dbName, tableName string, tableMeta metadata.T
 	defer server.catalogMu.Unlock()
 	next, err := server.catalog.UpdateTable(dbName, tableName, tableMeta)
 	if err != nil {
+		return err
+	}
+	if err := server.tables.SyncTable(ctx, next, dbName, tableName); err != nil {
 		return err
 	}
 	if err := metadata.Save(server.metadataPath, next); err != nil {

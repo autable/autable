@@ -6,13 +6,13 @@ databases:
         display_name: Contacts
         fields:
           - name: name
-            type: text
+            type: string
             deleted: false
           - name: email
-            type: email
+            type: string
             deleted: false
           - name: status
-            type: text
+            type: string
             deleted: false
         views:
           - name: active

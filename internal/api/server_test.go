@@ -578,22 +578,22 @@ func TestMetadataAPIOnlyReturnsVisibleDatabasesAndTables(t *testing.T) {
 				{
 					Name: "contacts",
 					Fields: []metadata.Field{
-						{Name: "name", Type: "text"},
-						{Name: "email", Type: "email"},
-						{Name: "status", Type: "text"},
+						{Name: "name", Type: "string"},
+						{Name: "email", Type: "string"},
+						{Name: "status", Type: "string"},
 					},
 					Views: []metadata.View{
 						{Name: "by-email", Filters: []metadata.ViewFilter{{Field: "email", Op: "not_empty"}}},
 						{Name: "active", Filters: []metadata.ViewFilter{{Field: "status", Op: "eq", Value: "active"}}},
 					},
 				},
-				{Name: "private_notes", Fields: []metadata.Field{{Name: "body", Type: "text"}}},
+				{Name: "private_notes", Fields: []metadata.Field{{Name: "body", Type: "string"}}},
 			},
 		},
 		{
 			Name:       "hidden",
 			SQLitePath: "./data/hidden.sqlite",
-			Tables:     []metadata.Table{{Name: "secrets", Fields: []metadata.Field{{Name: "value", Type: "text"}}}},
+			Tables:     []metadata.Table{{Name: "secrets", Fields: []metadata.Field{{Name: "value", Type: "string"}}}},
 		},
 	}}
 	server, system, _ := newTestServerWithMetadataFile(t, catalog)
@@ -699,7 +699,7 @@ func TestDatabaseOwnerCanCreateTable(t *testing.T) {
 	request := httptest.NewRequest(http.MethodPost, "/api/databases/workspace/tables", bytes.NewBufferString(`{
 		"name":"contacts",
 		"display_name":"Contacts",
-		"fields":[{"name":"name","type":"text"},{"name":"email","type":"email"}],
+		"fields":[{"name":"name","type":"string"},{"name":"email","type":"string"}],
 		"views":[]
 	}`))
 	request.AddCookie(testSessionCookie(t, system, "owner"))
@@ -734,8 +734,8 @@ func TestTableOwnerCanUpdateFieldsAndViews(t *testing.T) {
 		Tables: []metadata.Table{{
 			Name: "contacts",
 			Fields: []metadata.Field{
-				{Name: "name", Type: "text"},
-				{Name: "status", Type: "text"},
+				{Name: "name", Type: "string"},
+				{Name: "status", Type: "string"},
 			},
 			Views: []metadata.View{{
 				Name:    "active",
@@ -756,9 +756,9 @@ func TestTableOwnerCanUpdateFieldsAndViews(t *testing.T) {
 	request := httptest.NewRequest(http.MethodPut, "/api/databases/workspace/tables/contacts", bytes.NewBufferString(`{
 		"name":"contacts",
 		"fields":[
-			{"name":"name","type":"text"},
-			{"name":"status","type":"text","deleted":true},
-			{"name":"email","type":"email"}
+			{"name":"name","type":"string"},
+			{"name":"status","type":"string","deleted":true},
+			{"name":"email","type":"string"}
 		],
 		"views":[
 			{"name":"active","filters":[{"field":"status","op":"eq","value":"active"}]},
@@ -804,8 +804,8 @@ func TestDatabaseOwnerCanManageRoles(t *testing.T) {
 		Tables: []metadata.Table{{
 			Name: "contacts",
 			Fields: []metadata.Field{
-				{Name: "name", Type: "text"},
-				{Name: "email", Type: "email"},
+				{Name: "name", Type: "string"},
+				{Name: "email", Type: "string"},
 			},
 		}},
 	}}}
@@ -878,8 +878,8 @@ func TestRoleGrantValidationKeepsResourcesInsideDatabase(t *testing.T) {
 			Tables: []metadata.Table{{
 				Name: "contacts",
 				Fields: []metadata.Field{
-					{Name: "name", Type: "text"},
-					{Name: "legacy", Type: "text", Deleted: true},
+					{Name: "name", Type: "string"},
+					{Name: "legacy", Type: "string", Deleted: true},
 				},
 			}},
 		},
@@ -888,7 +888,7 @@ func TestRoleGrantValidationKeepsResourcesInsideDatabase(t *testing.T) {
 			SQLitePath: "./data/other.sqlite",
 			Tables: []metadata.Table{{
 				Name:   "contacts",
-				Fields: []metadata.Field{{Name: "name", Type: "text"}},
+				Fields: []metadata.Field{{Name: "name", Type: "string"}},
 			}},
 		},
 	}}
@@ -961,8 +961,8 @@ func TestRoleGrantValidationKeepsResourcesInsideDatabase(t *testing.T) {
 func TestRoleGrantAPIRejectsCrossDatabaseResources(t *testing.T) {
 	ctx := context.Background()
 	catalog := metadata.Catalog{Databases: []metadata.Database{
-		{Name: "workspace", SQLitePath: "./data/workspace.sqlite", Tables: []metadata.Table{{Name: "contacts", Fields: []metadata.Field{{Name: "name", Type: "text"}}}}},
-		{Name: "other", SQLitePath: "./data/other.sqlite", Tables: []metadata.Table{{Name: "contacts", Fields: []metadata.Field{{Name: "name", Type: "text"}}}}},
+		{Name: "workspace", SQLitePath: "./data/workspace.sqlite", Tables: []metadata.Table{{Name: "contacts", Fields: []metadata.Field{{Name: "name", Type: "string"}}}}},
+		{Name: "other", SQLitePath: "./data/other.sqlite", Tables: []metadata.Table{{Name: "contacts", Fields: []metadata.Field{{Name: "name", Type: "string"}}}}},
 	}}
 	server, system, _ := newTestServerWithMetadataFile(t, catalog)
 	if err := system.SaveGrant(ctx, permission.Grant{
@@ -1102,7 +1102,7 @@ func TestNonDatabaseOwnerCannotCreateTable(t *testing.T) {
 	server, system, _ := newTestServerWithMetadataFile(t, catalog)
 	request := httptest.NewRequest(http.MethodPost, "/api/databases/workspace/tables", bytes.NewBufferString(`{
 		"name":"contacts",
-		"fields":[{"name":"name","type":"text"}]
+		"fields":[{"name":"name","type":"string"}]
 	}`))
 	request.AddCookie(testSessionCookie(t, system, "other"))
 	recorder := httptest.NewRecorder()
@@ -1228,7 +1228,8 @@ func TestCreateRowAPICanUsePersistentRepository(t *testing.T) {
 		t.Fatalf("expected 201, got %d: %s", recorder.Code, recorder.Body.String())
 	}
 
-	rows, err := repository.Rows(ctx, "db", "contacts")
+	tableMeta, _ := catalog.Table("db", "contacts")
+	rows, err := repository.Rows(ctx, "db", tableMeta)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1583,8 +1584,8 @@ func TestDatabaseWriteCanManageDatabaseWorkflowsAndForms(t *testing.T) {
 func TestWorkflowAndFormUpdatesCannotMoveAcrossDatabases(t *testing.T) {
 	ctx := context.Background()
 	catalog := metadata.Catalog{Databases: []metadata.Database{
-		{Name: "db", SQLitePath: "./data/db.sqlite", Tables: []metadata.Table{{Name: "contacts", Fields: []metadata.Field{{Name: "name", Type: "text"}}}}},
-		{Name: "other", SQLitePath: "./data/other.sqlite", Tables: []metadata.Table{{Name: "contacts", Fields: []metadata.Field{{Name: "name", Type: "text"}}}}},
+		{Name: "db", SQLitePath: "./data/db.sqlite", Tables: []metadata.Table{{Name: "contacts", Fields: []metadata.Field{{Name: "name", Type: "string"}}}}},
+		{Name: "other", SQLitePath: "./data/other.sqlite", Tables: []metadata.Table{{Name: "contacts", Fields: []metadata.Field{{Name: "name", Type: "string"}}}}},
 	}}
 	server, system, _ := newTestServerWithMetadataFile(t, catalog)
 	if err := system.SaveGrant(ctx, permission.Grant{
@@ -2508,9 +2509,9 @@ func testCatalog(sqlitePath string) metadata.Catalog {
 		Tables: []metadata.Table{{
 			Name: "contacts",
 			Fields: []metadata.Field{
-				{Name: "name", Type: "text"},
-				{Name: "email", Type: "email"},
-				{Name: "status", Type: "text"},
+				{Name: "name", Type: "string"},
+				{Name: "email", Type: "string"},
+				{Name: "status", Type: "string"},
 			},
 			Views: []metadata.View{
 				{

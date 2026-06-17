@@ -26,19 +26,20 @@ func TestRepositoryCreatesOneSQLiteFilePerMetadataDatabase(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
+	contacts := contactsTable()
 
-	if _, err := repository.CreateRow(ctx, "sales", "contacts", map[string]any{"name": "Ada"}); err != nil {
+	if _, err := repository.CreateRow(ctx, "sales", contacts, map[string]any{"name": "Ada"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repository.CreateRow(ctx, "ops", "contacts", map[string]any{"name": "Grace"}); err != nil {
+	if _, err := repository.CreateRow(ctx, "ops", contacts, map[string]any{"name": "Grace"}); err != nil {
 		t.Fatal(err)
 	}
 
-	salesRows, err := repository.Rows(ctx, "sales", "contacts")
+	salesRows, err := repository.Rows(ctx, "sales", contacts)
 	if err != nil {
 		t.Fatal(err)
 	}
-	opsRows, err := repository.Rows(ctx, "ops", "contacts")
+	opsRows, err := repository.Rows(ctx, "ops", contacts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,18 +51,36 @@ func TestRepositoryCreatesOneSQLiteFilePerMetadataDatabase(t *testing.T) {
 	}
 }
 
-func TestRepositoryPersistsRowsAcrossReopen(t *testing.T) {
+func TestRepositoryPersistsRowsAcrossReopenWithRealColumns(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "workspace.sqlite")
 	catalog := metadata.Catalog{Databases: []metadata.Database{{Name: "workspace", SQLitePath: path}}}
+	contacts := contactsTable()
 
 	repository, err := OpenCatalog(ctx, catalog)
 	if err != nil {
 		t.Fatal(err)
 	}
-	row, err := repository.CreateRow(ctx, "workspace", "contacts", map[string]any{"name": "Ada"})
+	row, err := repository.CreateRow(ctx, "workspace", contacts, map[string]any{"name": "Ada", "email": "ada@example.com"})
 	if err != nil {
 		t.Fatal(err)
+	}
+	db, err := repository.database("workspace")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stored map[string]any
+	if err := db.Table("contacts").Where(map[string]any{"record_id": row.RecordID}).Take(&stored).Error; err != nil {
+		t.Fatal(err)
+	}
+	if stored["name"] != "Ada" || stored["email"] != "ada@example.com" {
+		t.Fatalf("expected real field columns, got %#v", stored)
+	}
+	if _, ok := stored["values"]; ok {
+		t.Fatalf("records must not use values json column anymore: %#v", stored)
+	}
+	if int64Value(stored["created_at"]) <= 0 || int64Value(stored["updated_at"]) <= 0 {
+		t.Fatalf("expected millisecond integer timestamps, got %#v", stored)
 	}
 	if err := repository.Close(); err != nil {
 		t.Fatal(err)
@@ -76,23 +95,47 @@ func TestRepositoryPersistsRowsAcrossReopen(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
-	loaded, err := reopened.Row(ctx, "workspace", "contacts", row.RecordID)
+	loaded, err := reopened.Row(ctx, "workspace", contacts, row.RecordID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if loaded.RecordID != row.RecordID || loaded.Values["name"] != "Ada" {
 		t.Fatalf("unexpected persisted row: %#v", loaded)
 	}
-	db, err := reopened.database("workspace")
+}
+
+func TestRepositorySupportsUnsafeLogicalTableNames(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "workspace.sqlite")
+	catalog := metadata.Catalog{Databases: []metadata.Database{{Name: "workspace", SQLitePath: path}}}
+	tableMeta := metadata.Table{Name: "测试表", Fields: []metadata.Field{{Name: "name", Type: "string"}, {Name: "count", Type: "int"}}}
+
+	repository, err := OpenCatalog(ctx, catalog)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var stored Record
-	if err := db.First(&stored, &Record{RecordID: row.RecordID, TableName: "contacts"}).Error; err != nil {
+	t.Cleanup(func() {
+		if err := repository.Close(); err != nil {
+			t.Fatal(err)
+		}
+	})
+	row, err := repository.CreateRow(ctx, "workspace", tableMeta, map[string]any{"name": "Ada", "count": int64(2)})
+	if err != nil {
 		t.Fatal(err)
 	}
-	if stored.CreatedAt <= 0 || stored.UpdatedAt <= 0 {
-		t.Fatalf("expected millisecond integer timestamps, got created=%d updated=%d", stored.CreatedAt, stored.UpdatedAt)
+	if row.Values["name"] != "Ada" || row.Values["count"] != int64(2) {
+		t.Fatalf("unexpected unsafe table row: %#v", row)
+	}
+	db, err := repository.database("workspace")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stored map[string]any
+	if err := db.Table(physicalTableName(tableMeta.Name)).Where(map[string]any{"record_id": row.RecordID}).Take(&stored).Error; err != nil {
+		t.Fatal(err)
+	}
+	if stored["name"] != "Ada" || int64Value(stored["count"]) != 2 {
+		t.Fatalf("expected real columns in physical table, got %#v", stored)
 	}
 }
 
@@ -100,16 +143,18 @@ func TestRepositoryAllocatesRecordIDsPerTableAcrossReopen(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "workspace.sqlite")
 	catalog := metadata.Catalog{Databases: []metadata.Database{{Name: "workspace", SQLitePath: path}}}
+	contacts := contactsTable()
+	projects := metadata.Table{Name: "projects", Fields: []metadata.Field{{Name: "name", Type: "string"}}}
 
 	repository, err := OpenCatalog(ctx, catalog)
 	if err != nil {
 		t.Fatal(err)
 	}
-	contact, err := repository.CreateRow(ctx, "workspace", "contacts", map[string]any{"name": "Ada"})
+	contact, err := repository.CreateRow(ctx, "workspace", contacts, map[string]any{"name": "Ada"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	project, err := repository.CreateRow(ctx, "workspace", "projects", map[string]any{"name": "Apollo"})
+	project, err := repository.CreateRow(ctx, "workspace", projects, map[string]any{"name": "Apollo"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,11 +174,11 @@ func TestRepositoryAllocatesRecordIDsPerTableAcrossReopen(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
-	nextContact, err := reopened.CreateRow(ctx, "workspace", "contacts", map[string]any{"name": "Grace"})
+	nextContact, err := reopened.CreateRow(ctx, "workspace", contacts, map[string]any{"name": "Grace"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	nextProject, err := reopened.CreateRow(ctx, "workspace", "projects", map[string]any{"name": "Gemini"})
+	nextProject, err := reopened.CreateRow(ctx, "workspace", projects, map[string]any{"name": "Gemini"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,6 +191,7 @@ func TestRepositoryRestoresRowsWithOriginalRecordID(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "workspace.sqlite")
 	catalog := metadata.Catalog{Databases: []metadata.Database{{Name: "workspace", SQLitePath: path}}}
+	contacts := contactsTable()
 
 	repository, err := OpenCatalog(ctx, catalog)
 	if err != nil {
@@ -156,27 +202,27 @@ func TestRepositoryRestoresRowsWithOriginalRecordID(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
-	row, err := repository.CreateRow(ctx, "workspace", "contacts", map[string]any{"name": "Ada"})
+	row, err := repository.CreateRow(ctx, "workspace", contacts, map[string]any{"name": "Ada"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repository.DeleteRow(ctx, "workspace", "contacts", row.RecordID); err != nil {
+	if _, err := repository.DeleteRow(ctx, "workspace", contacts, row.RecordID); err != nil {
 		t.Fatal(err)
 	}
-	if err := repository.RestoreRow(ctx, "workspace", "contacts", table.Row{
+	if err := repository.RestoreRow(ctx, "workspace", contacts, table.Row{
 		RecordID: row.RecordID,
-		Values:   map[string]any{"name": "Ada restored"},
+		Values:   map[string]any{"name": "Ada restored", "email": "ada@example.com"},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	restored, err := repository.Row(ctx, "workspace", "contacts", row.RecordID)
+	restored, err := repository.Row(ctx, "workspace", contacts, row.RecordID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if restored.RecordID != row.RecordID || restored.Values["name"] != "Ada restored" {
 		t.Fatalf("unexpected restored row: %#v", restored)
 	}
-	next, err := repository.CreateRow(ctx, "workspace", "contacts", map[string]any{"name": "Grace"})
+	next, err := repository.CreateRow(ctx, "workspace", contacts, map[string]any{"name": "Grace"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -185,30 +231,32 @@ func TestRepositoryRestoresRowsWithOriginalRecordID(t *testing.T) {
 	}
 }
 
-func TestRepositoryUpdateRowMergesValuesAcrossReopen(t *testing.T) {
+func TestRepositoryUpdateRowReplacesProvidedValuesAcrossReopen(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "workspace.sqlite")
 	catalog := metadata.Catalog{Databases: []metadata.Database{{Name: "workspace", SQLitePath: path}}}
+	contacts := contactsTable()
 
 	repository, err := OpenCatalog(ctx, catalog)
 	if err != nil {
 		t.Fatal(err)
 	}
-	row, err := repository.CreateRow(ctx, "workspace", "contacts", map[string]any{
+	row, err := repository.CreateRow(ctx, "workspace", contacts, map[string]any{
 		"name":  "Ada",
 		"email": "ada@example.com",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	updated, err := repository.UpdateRow(ctx, "workspace", "contacts", row.RecordID, map[string]any{
+	updated, err := repository.UpdateRow(ctx, "workspace", contacts, row.RecordID, map[string]any{
+		"name":  "Ada",
 		"email": "ada@codetable.test",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if updated.Values["name"] != "Ada" || updated.Values["email"] != "ada@codetable.test" {
-		t.Fatalf("unexpected merged row: %#v", updated)
+		t.Fatalf("unexpected updated row: %#v", updated)
 	}
 	if err := repository.Close(); err != nil {
 		t.Fatal(err)
@@ -223,7 +271,7 @@ func TestRepositoryUpdateRowMergesValuesAcrossReopen(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
-	loaded, err := reopened.Row(ctx, "workspace", "contacts", row.RecordID)
+	loaded, err := reopened.Row(ctx, "workspace", contacts, row.RecordID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -236,16 +284,17 @@ func TestRepositoryDeleteRowRemovesPersistedRecord(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "workspace.sqlite")
 	catalog := metadata.Catalog{Databases: []metadata.Database{{Name: "workspace", SQLitePath: path}}}
+	contacts := contactsTable()
 
 	repository, err := OpenCatalog(ctx, catalog)
 	if err != nil {
 		t.Fatal(err)
 	}
-	row, err := repository.CreateRow(ctx, "workspace", "contacts", map[string]any{"name": "Ada"})
+	row, err := repository.CreateRow(ctx, "workspace", contacts, map[string]any{"name": "Ada"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	deleted, err := repository.DeleteRow(ctx, "workspace", "contacts", row.RecordID)
+	deleted, err := repository.DeleteRow(ctx, "workspace", contacts, row.RecordID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -265,11 +314,21 @@ func TestRepositoryDeleteRowRemovesPersistedRecord(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
-	rows, err := reopened.Rows(ctx, "workspace", "contacts")
+	rows, err := reopened.Rows(ctx, "workspace", contacts)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(rows) != 0 {
 		t.Fatalf("expected deleted row to stay deleted after reopen, got %#v", rows)
+	}
+}
+
+func contactsTable() metadata.Table {
+	return metadata.Table{
+		Name: "contacts",
+		Fields: []metadata.Field{
+			{Name: "name", Type: "string"},
+			{Name: "email", Type: "string"},
+		},
 	}
 }

@@ -32,6 +32,7 @@ type Table struct {
 type Field struct {
 	Name            string `yaml:"name" json:"name"`
 	Type            string `yaml:"type" json:"type"`
+	ValueType       string `yaml:"value_type,omitempty" json:"value_type,omitempty"`
 	Formula         string `yaml:"formula,omitempty" json:"formula,omitempty"`
 	Deleted         bool   `yaml:"deleted" json:"deleted"`
 	PermissionLevel int    `yaml:"-" json:"permission_level,omitempty"`
@@ -208,17 +209,20 @@ func (catalog Catalog) UpdateTable(dbName, tableName string, table Table) (Catal
 }
 
 func validateFieldTypesUnchanged(existing Table, next Table) error {
-	existingTypes := map[string]string{}
+	existingTypes := map[string]Field{}
 	for _, field := range existing.Fields {
-		existingTypes[field.Name] = field.Type
+		existingTypes[field.Name] = field
 	}
 	for _, field := range next.Fields {
-		existingType, ok := existingTypes[field.Name]
+		existingField, ok := existingTypes[field.Name]
 		if !ok {
 			continue
 		}
-		if field.Type != existingType {
+		if field.Type != existingField.Type {
 			return fmt.Errorf("field %q type cannot be changed", field.Name)
+		}
+		if field.Type == "formula" && field.ValueType != existingField.ValueType {
+			return fmt.Errorf("formula field %q value_type cannot be changed", field.Name)
 		}
 	}
 	return nil
@@ -240,11 +244,20 @@ func (table Table) validate(dbName string, tableIndex int) error {
 		if field.Type == "" {
 			return fmt.Errorf("database %q table %q field %q type is required", dbName, table.Name, field.Name)
 		}
+		if field.Type != "int" && field.Type != "float" && field.Type != "string" && field.Type != "formula" {
+			return fmt.Errorf("database %q table %q field %q type %q is unsupported", dbName, table.Name, field.Name, field.Type)
+		}
 		if field.Type == "formula" && strings.TrimSpace(field.Formula) == "" {
 			return fmt.Errorf("database %q table %q formula field %q formula is required", dbName, table.Name, field.Name)
 		}
+		if field.Type == "formula" && !isStoredFieldType(field.ValueType) {
+			return fmt.Errorf("database %q table %q formula field %q value_type is required", dbName, table.Name, field.Name)
+		}
 		if field.Type != "formula" && strings.TrimSpace(field.Formula) != "" {
 			return fmt.Errorf("database %q table %q field %q formula is only allowed on formula fields", dbName, table.Name, field.Name)
+		}
+		if field.Type != "formula" && field.ValueType != "" {
+			return fmt.Errorf("database %q table %q field %q value_type is only allowed on formula fields", dbName, table.Name, field.Name)
 		}
 	}
 	if err := table.validateViews(dbName); err != nil {
@@ -313,7 +326,7 @@ func (table Table) ActiveFields() []Field {
 
 func (table Table) Field(name string) (Field, bool) {
 	if name == "record_id" {
-		return Field{Name: "record_id", Type: "integer"}, true
+		return Field{Name: "record_id", Type: "int"}, true
 	}
 	for _, field := range table.Fields {
 		if field.Name == name {
@@ -321,6 +334,17 @@ func (table Table) Field(name string) (Field, bool) {
 		}
 	}
 	return Field{}, false
+}
+
+func (field Field) StorageType() string {
+	if field.Type == "formula" {
+		return field.ValueType
+	}
+	return field.Type
+}
+
+func isStoredFieldType(fieldType string) bool {
+	return fieldType == "int" || fieldType == "float" || fieldType == "string"
 }
 
 func (table Table) View(name string) (View, bool) {

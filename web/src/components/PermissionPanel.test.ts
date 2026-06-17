@@ -10,9 +10,9 @@ const database: DatabaseMetadata = {
       name: "contacts",
       display_name: "Contacts",
       fields: [
-        { name: "name", type: "text", deleted: false },
-        { name: "email", type: "email", deleted: false },
-        { name: "legacy", type: "text", deleted: true }
+        { name: "name", type: "string", deleted: false },
+        { name: "email", type: "string", deleted: false },
+        { name: "legacy", type: "string", deleted: true }
       ],
       views: []
     }

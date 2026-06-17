@@ -151,9 +151,9 @@ async function setupWorkspace(page: Page): Promise<WorkspaceSetup> {
     name: tableName,
     display_name: "Contacts",
     fields: [
-      { name: "name", type: "text", deleted: false },
-      { name: "email", type: "email", deleted: false },
-      { name: "status", type: "text", deleted: false }
+      { name: "name", type: "string", deleted: false },
+      { name: "email", type: "string", deleted: false },
+      { name: "status", type: "string", deleted: false }
     ],
     views: [
       {
@@ -222,7 +222,7 @@ test("shows database-owned workflow and form lists across table owners", async (
   await api(page, "POST", `/api/databases/${databaseName}/tables`, {
     name: "contacts",
     display_name: "Contacts",
-    fields: [{ name: "name", type: "text", deleted: false }],
+    fields: [{ name: "name", type: "string", deleted: false }],
     views: []
   });
   await api(page, "POST", "/api/permissions/grants", {
@@ -273,7 +273,7 @@ test("hides workflow and form resources without resource permission", async ({ p
   await api(page, "POST", `/api/databases/${databaseName}/tables`, {
     name: "contacts",
     display_name: "Contacts",
-    fields: [{ name: "name", type: "text", deleted: false }],
+    fields: [{ name: "name", type: "string", deleted: false }],
     views: []
   });
   await api(page, "POST", `/api/databases/${databaseName}/workflows`, {
@@ -327,7 +327,7 @@ test("renders read-only workflow and form resources as non-editable", async ({ p
   await api(page, "POST", `/api/databases/${databaseName}/tables`, {
     name: "contacts",
     display_name: "Contacts",
-    fields: [{ name: "name", type: "text", deleted: false }],
+    fields: [{ name: "name", type: "string", deleted: false }],
     views: []
   });
   const workflow = (await api(page, "POST", `/api/databases/${databaseName}/workflows`, {
@@ -455,7 +455,7 @@ test("covers table views, row creation, and row history through the real backend
   await recordsGrid.getByRole("button", { name: "Add field" }).click();
   const addFieldEditor = page.getByLabel("Add field");
   await addFieldEditor.getByLabel("Field name").fill("priority");
-  await addFieldEditor.getByLabel("New field type").selectOption("text");
+  await addFieldEditor.getByLabel("New field type").selectOption("string");
   await addFieldEditor.getByRole("button", { name: "Add" }).click();
   await expect(page.getByText("Added field priority")).toBeVisible();
   await expect(recordsGrid.getByRole("gridcell", { name: "Ada Lovelace", exact: true })).toBeVisible();
@@ -465,6 +465,7 @@ test("covers table views, row creation, and row history through the real backend
   const formulaFieldEditor = page.getByLabel("Add field");
   await formulaFieldEditor.getByLabel("Field name").fill("summary");
   await formulaFieldEditor.getByLabel("New field type").selectOption("formula");
+  await formulaFieldEditor.getByLabel("Formula value type").selectOption("string");
   await formulaFieldEditor.getByLabel("New field formula").fill("field_name + ' ' + field_status");
   await formulaFieldEditor.getByRole("button", { name: "Add" }).click();
   await expect(page.getByText("Added field summary")).toBeVisible();
@@ -570,8 +571,8 @@ test("covers table views, row creation, and row history through the real backend
     ?.tables.find((item) => item.name === workspace.tableName);
   expect(table?.fields).toEqual(
     expect.arrayContaining([
-      expect.objectContaining({ name: "priority", type: "text", deleted: false }),
-      expect.objectContaining({ name: "summary", type: "formula", formula: "field_name + ' / ' + field_status", deleted: false }),
+      expect.objectContaining({ name: "priority", type: "string", deleted: false }),
+      expect.objectContaining({ name: "summary", type: "formula", value_type: "string", formula: "field_name + ' / ' + field_status", deleted: false }),
       expect.objectContaining({ name: "email", deleted: true })
     ])
   );

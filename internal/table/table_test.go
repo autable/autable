@@ -21,8 +21,8 @@ func TestCreateRowAssignsRecordIDAndWritesHistory(t *testing.T) {
 		Tables: []metadata.Table{{
 			Name: "contacts",
 			Fields: []metadata.Field{
-				{Name: "name", Type: "text"},
-				{Name: "email", Type: "email"},
+				{Name: "name", Type: "string"},
+				{Name: "email", Type: "string"},
 			},
 		}},
 	}}}
@@ -72,7 +72,7 @@ func TestCreateRowNotifiesHistoryBackedRowChange(t *testing.T) {
 		SQLitePath: "./db.sqlite",
 		Tables: []metadata.Table{{
 			Name:   "contacts",
-			Fields: []metadata.Field{{Name: "name", Type: "text"}},
+			Fields: []metadata.Field{{Name: "name", Type: "string"}},
 		}},
 	}}}
 	perms := permission.New(permission.Grant{
@@ -116,8 +116,8 @@ func TestCreateRowRejectsDeletedField(t *testing.T) {
 		Tables: []metadata.Table{{
 			Name: "contacts",
 			Fields: []metadata.Field{
-				{Name: "name", Type: "text"},
-				{Name: "legacy", Type: "text", Deleted: true},
+				{Name: "name", Type: "string"},
+				{Name: "legacy", Type: "string", Deleted: true},
 			},
 		}},
 	}}}
@@ -142,7 +142,7 @@ func TestCreateRowEnforcesFieldWritePermission(t *testing.T) {
 		SQLitePath: "./db.sqlite",
 		Tables: []metadata.Table{{
 			Name:   "contacts",
-			Fields: []metadata.Field{{Name: "name", Type: "text"}},
+			Fields: []metadata.Field{{Name: "name", Type: "string"}},
 		}},
 	}}}
 	perms := permission.New(permission.Grant{
@@ -167,8 +167,8 @@ func TestCreateRowHonorsFieldOverrideOfTableWrite(t *testing.T) {
 		Tables: []metadata.Table{{
 			Name: "contacts",
 			Fields: []metadata.Field{
-				{Name: "name", Type: "text"},
-				{Name: "email", Type: "email"},
+				{Name: "name", Type: "string"},
+				{Name: "email", Type: "string"},
 			},
 		}},
 	}}}
@@ -210,8 +210,8 @@ func TestUpdateRowMergesValuesAndWritesHistory(t *testing.T) {
 		Tables: []metadata.Table{{
 			Name: "contacts",
 			Fields: []metadata.Field{
-				{Name: "name", Type: "text"},
-				{Name: "email", Type: "email"},
+				{Name: "name", Type: "string"},
+				{Name: "email", Type: "string"},
 			},
 		}},
 	}}}
@@ -268,7 +268,7 @@ func TestUpdateRowRejectsRecordIDAndReadOnlyField(t *testing.T) {
 		SQLitePath: "./db.sqlite",
 		Tables: []metadata.Table{{
 			Name:   "contacts",
-			Fields: []metadata.Field{{Name: "name", Type: "text"}},
+			Fields: []metadata.Field{{Name: "name", Type: "string"}},
 		}},
 	}}}
 	writePerms := permission.New(permission.Grant{
@@ -307,8 +307,8 @@ func TestUpdateRowHonorsFieldOverrideOfTableWrite(t *testing.T) {
 		Tables: []metadata.Table{{
 			Name: "contacts",
 			Fields: []metadata.Field{
-				{Name: "name", Type: "text"},
-				{Name: "email", Type: "email"},
+				{Name: "name", Type: "string"},
+				{Name: "email", Type: "string"},
 			},
 		}},
 	}}}
@@ -359,7 +359,7 @@ func TestDeleteRowRequiresTableWriteRemovesRowAndWritesHistory(t *testing.T) {
 		SQLitePath: "./db.sqlite",
 		Tables: []metadata.Table{{
 			Name:   "contacts",
-			Fields: []metadata.Field{{Name: "name", Type: "text"}},
+			Fields: []metadata.Field{{Name: "name", Type: "string"}},
 		}},
 	}}}
 	writePerms := permission.New(permission.Grant{
@@ -425,7 +425,7 @@ func TestCreateRowUsesInjectedRepository(t *testing.T) {
 		SQLitePath: "./db.sqlite",
 		Tables: []metadata.Table{{
 			Name:   "contacts",
-			Fields: []metadata.Field{{Name: "name", Type: "text"}},
+			Fields: []metadata.Field{{Name: "name", Type: "string"}},
 		}},
 	}}}
 	perms := permission.New(permission.Grant{
@@ -458,7 +458,8 @@ func TestCreateRowRollsBackWhenHistoryWriteFails(t *testing.T) {
 	if _, err := service.CreateRow(ctx, catalog, perms, "u1", "db", "contacts", map[string]any{"name": "Ada"}); err == nil {
 		t.Fatal("expected history failure")
 	}
-	rows, err := repository.Rows(ctx, "db", "contacts")
+	tableMeta, _ := catalog.Table("db", "contacts")
+	rows, err := repository.Rows(ctx, "db", tableMeta)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -488,7 +489,8 @@ func TestUpdateRowDoesNotMutateWhenHistoryWriteFails(t *testing.T) {
 	if _, err := service.UpdateRow(ctx, catalog, perms, "u1", "db", "contacts", row.RecordID, map[string]any{"name": "Grace"}); err == nil {
 		t.Fatal("expected history failure")
 	}
-	loaded, err := repository.Row(ctx, "db", "contacts", row.RecordID)
+	tableMeta, _ := catalog.Table("db", "contacts")
+	loaded, err := repository.Row(ctx, "db", tableMeta, row.RecordID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -518,7 +520,8 @@ func TestDeleteRowDoesNotMutateWhenHistoryWriteFails(t *testing.T) {
 	if _, err := service.DeleteRow(ctx, catalog, perms, "u1", "db", "contacts", row.RecordID); err == nil {
 		t.Fatal("expected history failure")
 	}
-	loaded, err := repository.Row(ctx, "db", "contacts", row.RecordID)
+	tableMeta, _ := catalog.Table("db", "contacts")
+	loaded, err := repository.Row(ctx, "db", tableMeta, row.RecordID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -536,8 +539,8 @@ func TestRowsAppliesComposedViewFiltersAndSorts(t *testing.T) {
 		Tables: []metadata.Table{{
 			Name: "contacts",
 			Fields: []metadata.Field{
-				{Name: "name", Type: "text"},
-				{Name: "status", Type: "text"},
+				{Name: "name", Type: "string"},
+				{Name: "status", Type: "string"},
 			},
 			Views: []metadata.View{
 				{
@@ -588,10 +591,11 @@ func TestFormulaFieldsAreComputedAndNotWritable(t *testing.T) {
 		Tables: []metadata.Table{{
 			Name: "contacts",
 			Fields: []metadata.Field{
-				{Name: "name", Type: "text"},
-				{Name: "score", Type: "number"},
-				{Name: "score_plus_one", Type: "formula", Formula: "field_score + 1"},
-				{Name: "score_band", Type: "formula", Formula: "field_score >= 5 ? 'high' : 'low'"},
+				{Name: "name", Type: "string"},
+				{Name: "score", Type: "float"},
+				{Name: "score_plus_one", Type: "formula", ValueType: "float", Formula: "field_score + 1"},
+				{Name: "score_band", Type: "formula", ValueType: "string", Formula: "field_score >= 5 ? 'high' : 'low'"},
+				{Name: "row_label", Type: "formula", ValueType: "string", Formula: "'row-' + field_record_id"},
 			},
 			Views: []metadata.View{{
 				Name:    "high",
@@ -614,7 +618,7 @@ func TestFormulaFieldsAreComputedAndNotWritable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if fmt.Sprint(low.Values["score_plus_one"]) != "5" || low.Values["score_band"] != "low" {
+	if fmt.Sprint(low.Values["score_plus_one"]) != "5" || low.Values["score_band"] != "low" || low.Values["row_label"] != "row-1" {
 		t.Fatalf("expected computed formula values, got %#v", low.Values)
 	}
 	if _, err := service.CreateRow(ctx, catalog, perms, "u1", "db", "contacts", map[string]any{
@@ -652,8 +656,67 @@ func TestFormulaFieldsAreComputedAndNotWritable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := change.Values["score_plus_one"]; ok {
-		t.Fatalf("formula value should not be written to history: %#v", change.Values)
+	if fmt.Sprint(change.Values["score_plus_one"]) != "5" || change.Values["score_band"] != "low" {
+		t.Fatalf("expected persisted formula values in row history, got %#v", change.Values)
+	}
+}
+
+func TestSyncTableRecomputesFormulaFieldsWithoutHistory(t *testing.T) {
+	ctx := context.Background()
+	store := history.NewMemoryStore()
+	service := NewService(store)
+	catalog := metadata.Catalog{Databases: []metadata.Database{{
+		Name:       "db",
+		SQLitePath: "./db.sqlite",
+		Tables: []metadata.Table{{
+			Name: "contacts",
+			Fields: []metadata.Field{
+				{Name: "score", Type: "int"},
+				{Name: "score_formula", Type: "formula", ValueType: "int", Formula: "field_score + 1"},
+			},
+		}},
+	}}}
+	perms := permission.New(permission.Grant{
+		SubjectID: "u1",
+		Scope:     permission.ScopeTable,
+		Resource:  "db.contacts",
+		Level:     permission.Write,
+	})
+
+	row, err := service.CreateRow(ctx, catalog, perms, "u1", "db", "contacts", map[string]any{"score": 4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row.Values["score_formula"] != int64(5) {
+		t.Fatalf("expected initial formula value, got %#v", row.Values)
+	}
+	updatedCatalog := metadata.Catalog{Databases: []metadata.Database{{
+		Name:       "db",
+		SQLitePath: "./db.sqlite",
+		Tables: []metadata.Table{{
+			Name: "contacts",
+			Fields: []metadata.Field{
+				{Name: "score", Type: "int"},
+				{Name: "score_formula", Type: "formula", ValueType: "int", Formula: "field_score + 2"},
+			},
+		}},
+	}}}
+	if err := service.SyncTable(ctx, updatedCatalog, "db", "contacts"); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := service.Rows(ctx, updatedCatalog, perms, "u1", "db", "contacts", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].Values["score_formula"] != int64(6) {
+		t.Fatalf("expected recomputed formula value, got %#v", rows)
+	}
+	entries, err := store.GetPrefix(ctx, history.RowPrefix("db", "contacts", row.RecordID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("formula system recompute must not write history, got %d entries", len(entries))
 	}
 }
 
@@ -677,7 +740,7 @@ func testTableCatalog() metadata.Catalog {
 		SQLitePath: "./db.sqlite",
 		Tables: []metadata.Table{{
 			Name:   "contacts",
-			Fields: []metadata.Field{{Name: "name", Type: "text"}},
+			Fields: []metadata.Field{{Name: "name", Type: "string"}},
 		}},
 	}}}
 }
@@ -700,9 +763,9 @@ func TestRowsRejectsViewsUsingUnreadableFields(t *testing.T) {
 		Tables: []metadata.Table{{
 			Name: "contacts",
 			Fields: []metadata.Field{
-				{Name: "name", Type: "text"},
-				{Name: "email", Type: "email"},
-				{Name: "status", Type: "text"},
+				{Name: "name", Type: "string"},
+				{Name: "email", Type: "string"},
+				{Name: "status", Type: "string"},
 			},
 			Views: []metadata.View{
 				{Name: "active", Filters: []metadata.ViewFilter{{Field: "status", Op: "eq", Value: "active"}}},

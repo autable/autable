@@ -14,9 +14,9 @@ const catalogFixture = {
           name: "contacts",
           display_name: "Contacts",
           fields: [
-            { name: "name", type: "text", deleted: false },
-            { name: "email", type: "email", deleted: false },
-            { name: "status", type: "text", deleted: false }
+            { name: "name", type: "string", deleted: false },
+            { name: "email", type: "string", deleted: false },
+            { name: "status", type: "string", deleted: false }
           ],
           views: [
             { name: "active", display_name: "Active", filters: [], sorts: [] },
@@ -328,7 +328,7 @@ describe("App", () => {
           JSON.stringify({
             name: "projects",
             display_name: "projects",
-            fields: [{ name: "name", type: "text", deleted: false }],
+            fields: [{ name: "name", type: "string", deleted: false }],
             views: []
           }),
           { status: 201 }
@@ -345,7 +345,7 @@ describe("App", () => {
                   {
                     name: "projects",
                     display_name: "projects",
-                    fields: [{ name: "name", type: "text", deleted: false }],
+                    fields: [{ name: "name", type: "string", deleted: false }],
                     views: []
                   }
                 ]
@@ -587,13 +587,13 @@ describe("App", () => {
                 {
                   name: "projects",
                   display_name: "Projects",
-                  fields: [{ name: "name", type: "text", deleted: false }],
+                  fields: [{ name: "name", type: "string", deleted: false }],
                   views: []
                 },
                 {
                   name: "contacts",
                   display_name: "Contacts",
-                  fields: [{ name: "name", type: "text", deleted: false }],
+                  fields: [{ name: "name", type: "string", deleted: false }],
                   views: []
                 }
               ]

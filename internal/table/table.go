@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -30,12 +31,13 @@ type Row struct {
 type RowChangeHandler func(ctx context.Context, historyKey string, change history.RowChange)
 
 type RowRepository interface {
-	CreateRow(ctx context.Context, dbName, tableName string, values map[string]any) (Row, error)
-	UpdateRow(ctx context.Context, dbName, tableName string, recordID int64, values map[string]any) (Row, error)
-	DeleteRow(ctx context.Context, dbName, tableName string, recordID int64) (Row, error)
-	Row(ctx context.Context, dbName, tableName string, recordID int64) (Row, error)
-	RestoreRow(ctx context.Context, dbName, tableName string, row Row) error
-	Rows(ctx context.Context, dbName, tableName string) ([]Row, error)
+	EnsureTable(ctx context.Context, dbName string, tableMeta metadata.Table) error
+	CreateRow(ctx context.Context, dbName string, tableMeta metadata.Table, values map[string]any) (Row, error)
+	UpdateRow(ctx context.Context, dbName string, tableMeta metadata.Table, recordID int64, values map[string]any) (Row, error)
+	DeleteRow(ctx context.Context, dbName string, tableMeta metadata.Table, recordID int64) (Row, error)
+	Row(ctx context.Context, dbName string, tableMeta metadata.Table, recordID int64) (Row, error)
+	RestoreRow(ctx context.Context, dbName string, tableMeta metadata.Table, row Row) error
+	Rows(ctx context.Context, dbName string, tableMeta metadata.Table) ([]Row, error)
 }
 
 type Service struct {
@@ -71,9 +73,23 @@ func (service *Service) CreateRow(ctx context.Context, catalog metadata.Catalog,
 	if err := validateWritableFields(tableMeta, perms, actorID, resource, values); err != nil {
 		return Row{}, err
 	}
-
-	row, err := service.rows.CreateRow(ctx, dbName, tableName, cloneValues(values))
+	storedValues, err := normalizeInputValues(tableMeta, values)
 	if err != nil {
+		return Row{}, err
+	}
+
+	row, err := service.rows.CreateRow(ctx, dbName, tableMeta, storedValues)
+	if err != nil {
+		return Row{}, err
+	}
+	storedValues, err = calculateFormulaValues(tableMeta, row.RecordID, row.Values)
+	if err != nil {
+		_, _ = service.rows.DeleteRow(ctx, dbName, tableMeta, row.RecordID)
+		return Row{}, err
+	}
+	row, err = service.rows.UpdateRow(ctx, dbName, tableMeta, row.RecordID, storedValues)
+	if err != nil {
+		_, _ = service.rows.DeleteRow(ctx, dbName, tableMeta, row.RecordID)
 		return Row{}, err
 	}
 	change := history.RowChange{
@@ -88,11 +104,11 @@ func (service *Service) CreateRow(ctx context.Context, catalog metadata.Catalog,
 	}
 	historyKey, err := history.SaveRowChange(ctx, service.history, change)
 	if err != nil {
-		_, _ = service.rows.DeleteRow(ctx, dbName, tableName, row.RecordID)
+		_, _ = service.rows.DeleteRow(ctx, dbName, tableMeta, row.RecordID)
 		return Row{}, err
 	}
 	service.notifyRowChange(ctx, historyKey, change)
-	return materializeFormulaRow(tableMeta, row)
+	return row, nil
 }
 
 func (service *Service) UpdateRow(ctx context.Context, catalog metadata.Catalog, perms permission.Set, actorID, dbName, tableName string, recordID int64, values map[string]any) (Row, error) {
@@ -105,11 +121,23 @@ func (service *Service) UpdateRow(ctx context.Context, catalog metadata.Catalog,
 		return Row{}, err
 	}
 
-	existing, err := service.rows.Row(ctx, dbName, tableName, recordID)
+	existing, err := service.rows.Row(ctx, dbName, tableMeta, recordID)
 	if err != nil {
 		return Row{}, err
 	}
-	updated, err := service.rows.UpdateRow(ctx, dbName, tableName, recordID, cloneValues(values))
+	nextValues := cloneValues(existing.Values)
+	normalizedValues, err := normalizeInputValues(tableMeta, values)
+	if err != nil {
+		return Row{}, err
+	}
+	for key, value := range normalizedValues {
+		nextValues[key] = value
+	}
+	nextValues, err = calculateFormulaValues(tableMeta, recordID, nextValues)
+	if err != nil {
+		return Row{}, err
+	}
+	updated, err := service.rows.UpdateRow(ctx, dbName, tableMeta, recordID, nextValues)
 	if err != nil {
 		return Row{}, err
 	}
@@ -125,11 +153,11 @@ func (service *Service) UpdateRow(ctx context.Context, catalog metadata.Catalog,
 	}
 	historyKey, err := history.SaveRowChange(ctx, service.history, change)
 	if err != nil {
-		_ = service.rows.RestoreRow(ctx, dbName, tableName, existing)
+		_ = service.rows.RestoreRow(ctx, dbName, tableMeta, existing)
 		return Row{}, err
 	}
 	service.notifyRowChange(ctx, historyKey, change)
-	return materializeFormulaRow(tableMeta, updated)
+	return updated, nil
 }
 
 func (service *Service) DeleteRow(ctx context.Context, catalog metadata.Catalog, perms permission.Set, actorID, dbName, tableName string, recordID int64) (Row, error) {
@@ -142,7 +170,7 @@ func (service *Service) DeleteRow(ctx context.Context, catalog metadata.Catalog,
 		return Row{}, fmt.Errorf("%w: %s", ErrPermissionDenied, resource)
 	}
 
-	row, err := service.rows.DeleteRow(ctx, dbName, tableName, recordID)
+	row, err := service.rows.DeleteRow(ctx, dbName, tableMeta, recordID)
 	if err != nil {
 		return Row{}, err
 	}
@@ -158,11 +186,11 @@ func (service *Service) DeleteRow(ctx context.Context, catalog metadata.Catalog,
 	}
 	historyKey, err := history.SaveRowChange(ctx, service.history, change)
 	if err != nil {
-		_ = service.rows.RestoreRow(ctx, dbName, tableName, row)
+		_ = service.rows.RestoreRow(ctx, dbName, tableMeta, row)
 		return Row{}, err
 	}
 	service.notifyRowChange(ctx, historyKey, change)
-	return materializeFormulaRow(tableMeta, row)
+	return row, nil
 }
 
 func (service *Service) Rows(ctx context.Context, catalog metadata.Catalog, perms permission.Set, actorID, dbName, tableName, viewName string) ([]Row, error) {
@@ -171,11 +199,7 @@ func (service *Service) Rows(ctx context.Context, catalog metadata.Catalog, perm
 		return nil, fmt.Errorf("table %s.%s not found", dbName, tableName)
 	}
 
-	rows, err := service.rows.Rows(ctx, dbName, tableName)
-	if err != nil {
-		return nil, err
-	}
-	rows, err = materializeFormulaRows(tableMeta, rows)
+	rows, err := service.rows.Rows(ctx, dbName, tableMeta)
 	if err != nil {
 		return nil, err
 	}
@@ -204,6 +228,30 @@ func (service *Service) Rows(ctx context.Context, catalog metadata.Catalog, perm
 		filtered = append(filtered, Row{RecordID: row.RecordID, Values: values})
 	}
 	return filtered, nil
+}
+
+func (service *Service) SyncTable(ctx context.Context, catalog metadata.Catalog, dbName, tableName string) error {
+	tableMeta, ok := catalog.Table(dbName, tableName)
+	if !ok {
+		return fmt.Errorf("table %s.%s not found", dbName, tableName)
+	}
+	if err := service.rows.EnsureTable(ctx, dbName, tableMeta); err != nil {
+		return err
+	}
+	rows, err := service.rows.Rows(ctx, dbName, tableMeta)
+	if err != nil {
+		return err
+	}
+	for _, row := range rows {
+		nextValues, err := calculateFormulaValues(tableMeta, row.RecordID, cloneValues(row.Values))
+		if err != nil {
+			return err
+		}
+		if _, err := service.rows.UpdateRow(ctx, dbName, tableMeta, row.RecordID, nextValues); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func viewFieldsReadable(perms permission.Set, actorID, resource string, filters []metadata.ViewFilter, sorts []metadata.ViewSort) bool {
@@ -255,11 +303,15 @@ func NewMemoryRowRepository() *MemoryRowRepository {
 	}
 }
 
-func (repository *MemoryRowRepository) CreateRow(_ context.Context, dbName, tableName string, values map[string]any) (Row, error) {
+func (repository *MemoryRowRepository) EnsureTable(_ context.Context, _ string, _ metadata.Table) error {
+	return nil
+}
+
+func (repository *MemoryRowRepository) CreateRow(_ context.Context, dbName string, tableMeta metadata.Table, values map[string]any) (Row, error) {
 	repository.mu.Lock()
 	defer repository.mu.Unlock()
 
-	resource := dbName + "." + tableName
+	resource := dbName + "." + tableMeta.Name
 	repository.nextID[resource]++
 	recordID := repository.nextID[resource]
 	row := Row{RecordID: recordID, Values: cloneValues(values)}
@@ -270,11 +322,11 @@ func (repository *MemoryRowRepository) CreateRow(_ context.Context, dbName, tabl
 	return row, nil
 }
 
-func (repository *MemoryRowRepository) UpdateRow(_ context.Context, dbName, tableName string, recordID int64, values map[string]any) (Row, error) {
+func (repository *MemoryRowRepository) UpdateRow(_ context.Context, dbName string, tableMeta metadata.Table, recordID int64, values map[string]any) (Row, error) {
 	repository.mu.Lock()
 	defer repository.mu.Unlock()
 
-	resource := dbName + "." + tableName
+	resource := dbName + "." + tableMeta.Name
 	row, ok := repository.rows[resource][recordID]
 	if !ok {
 		return Row{}, fmt.Errorf("row %s.%d not found", resource, recordID)
@@ -288,11 +340,11 @@ func (repository *MemoryRowRepository) UpdateRow(_ context.Context, dbName, tabl
 	return Row{RecordID: row.RecordID, Values: cloneValues(row.Values)}, nil
 }
 
-func (repository *MemoryRowRepository) DeleteRow(_ context.Context, dbName, tableName string, recordID int64) (Row, error) {
+func (repository *MemoryRowRepository) DeleteRow(_ context.Context, dbName string, tableMeta metadata.Table, recordID int64) (Row, error) {
 	repository.mu.Lock()
 	defer repository.mu.Unlock()
 
-	resource := dbName + "." + tableName
+	resource := dbName + "." + tableMeta.Name
 	row, ok := repository.rows[resource][recordID]
 	if !ok {
 		return Row{}, fmt.Errorf("row %s.%d not found", resource, recordID)
@@ -301,11 +353,11 @@ func (repository *MemoryRowRepository) DeleteRow(_ context.Context, dbName, tabl
 	return Row{RecordID: row.RecordID, Values: cloneValues(row.Values)}, nil
 }
 
-func (repository *MemoryRowRepository) Row(_ context.Context, dbName, tableName string, recordID int64) (Row, error) {
+func (repository *MemoryRowRepository) Row(_ context.Context, dbName string, tableMeta metadata.Table, recordID int64) (Row, error) {
 	repository.mu.Lock()
 	defer repository.mu.Unlock()
 
-	resource := dbName + "." + tableName
+	resource := dbName + "." + tableMeta.Name
 	row, ok := repository.rows[resource][recordID]
 	if !ok {
 		return Row{}, fmt.Errorf("row %s.%d not found", resource, recordID)
@@ -313,11 +365,11 @@ func (repository *MemoryRowRepository) Row(_ context.Context, dbName, tableName 
 	return Row{RecordID: row.RecordID, Values: cloneValues(row.Values)}, nil
 }
 
-func (repository *MemoryRowRepository) RestoreRow(_ context.Context, dbName, tableName string, row Row) error {
+func (repository *MemoryRowRepository) RestoreRow(_ context.Context, dbName string, tableMeta metadata.Table, row Row) error {
 	repository.mu.Lock()
 	defer repository.mu.Unlock()
 
-	resource := dbName + "." + tableName
+	resource := dbName + "." + tableMeta.Name
 	if repository.rows[resource] == nil {
 		repository.rows[resource] = map[int64]Row{}
 	}
@@ -328,11 +380,11 @@ func (repository *MemoryRowRepository) RestoreRow(_ context.Context, dbName, tab
 	return nil
 }
 
-func (repository *MemoryRowRepository) Rows(_ context.Context, dbName, tableName string) ([]Row, error) {
+func (repository *MemoryRowRepository) Rows(_ context.Context, dbName string, tableMeta metadata.Table) ([]Row, error) {
 	repository.mu.Lock()
 	defer repository.mu.Unlock()
 
-	resource := dbName + "." + tableName
+	resource := dbName + "." + tableMeta.Name
 	rows := make([]Row, 0, len(repository.rows[resource]))
 	for _, row := range repository.rows[resource] {
 		rows = append(rows, Row{RecordID: row.RecordID, Values: cloneValues(row.Values)})
@@ -400,31 +452,135 @@ func rowValue(row Row, field string) any {
 	return row.Values[field]
 }
 
-func materializeFormulaRows(tableMeta metadata.Table, rows []Row) ([]Row, error) {
-	materialized := make([]Row, 0, len(rows))
-	for _, row := range rows {
-		nextRow, err := materializeFormulaRow(tableMeta, row)
-		if err != nil {
-			return nil, err
-		}
-		materialized = append(materialized, nextRow)
-	}
-	return materialized, nil
-}
-
-func materializeFormulaRow(tableMeta metadata.Table, row Row) (Row, error) {
-	values := cloneValues(row.Values)
+func calculateFormulaValues(tableMeta metadata.Table, recordID int64, values map[string]any) (map[string]any, error) {
+	nextValues := cloneValues(values)
 	for _, field := range tableMeta.Fields {
 		if field.Deleted || field.Type != "formula" {
 			continue
 		}
-		value, err := evaluateFormula(field.Formula, row.RecordID, values)
+		value, err := evaluateFormula(field.Formula, recordID, nextValues)
 		if err != nil {
-			return Row{}, fmt.Errorf("formula field %q: %w", field.Name, err)
+			return nil, fmt.Errorf("formula field %q: %w", field.Name, err)
 		}
-		values[field.Name] = value
+		value, err = normalizeFieldValue(field, value)
+		if err != nil {
+			return nil, fmt.Errorf("formula field %q: %w", field.Name, err)
+		}
+		nextValues[field.Name] = value
 	}
-	return Row{RecordID: row.RecordID, Values: values}, nil
+	return nextValues, nil
+}
+
+func normalizeInputValues(tableMeta metadata.Table, values map[string]any) (map[string]any, error) {
+	normalized := map[string]any{}
+	for key, value := range values {
+		field, ok := tableMeta.Field(key)
+		if !ok {
+			return nil, fmt.Errorf("%w: %s", metadata.ErrUnknownField, key)
+		}
+		normalizedValue, err := normalizeFieldValue(field, value)
+		if err != nil {
+			return nil, fmt.Errorf("field %q: %w", key, err)
+		}
+		normalized[key] = normalizedValue
+	}
+	return normalized, nil
+}
+
+func normalizeFieldValue(field metadata.Field, value any) (any, error) {
+	if value == nil {
+		return nil, nil
+	}
+	switch field.StorageType() {
+	case "string":
+		return fmt.Sprint(value), nil
+	case "int":
+		return normalizeInt(value)
+	case "float":
+		return normalizeFloat(value)
+	default:
+		return nil, fmt.Errorf("unsupported field type %q", field.StorageType())
+	}
+}
+
+func normalizeInt(value any) (int64, error) {
+	switch typed := value.(type) {
+	case int:
+		return int64(typed), nil
+	case int8:
+		return int64(typed), nil
+	case int16:
+		return int64(typed), nil
+	case int32:
+		return int64(typed), nil
+	case int64:
+		return typed, nil
+	case uint:
+		return int64(typed), nil
+	case uint8:
+		return int64(typed), nil
+	case uint16:
+		return int64(typed), nil
+	case uint32:
+		return int64(typed), nil
+	case uint64:
+		return int64(typed), nil
+	case float32:
+		if float64(int64(typed)) != float64(typed) {
+			return 0, fmt.Errorf("expected integer, got %v", value)
+		}
+		return int64(typed), nil
+	case float64:
+		if float64(int64(typed)) != typed {
+			return 0, fmt.Errorf("expected integer, got %v", value)
+		}
+		return int64(typed), nil
+	case string:
+		parsed, err := strconv.ParseInt(strings.TrimSpace(typed), 10, 64)
+		if err != nil {
+			return 0, err
+		}
+		return parsed, nil
+	default:
+		return 0, fmt.Errorf("expected integer, got %T", value)
+	}
+}
+
+func normalizeFloat(value any) (float64, error) {
+	switch typed := value.(type) {
+	case int:
+		return float64(typed), nil
+	case int8:
+		return float64(typed), nil
+	case int16:
+		return float64(typed), nil
+	case int32:
+		return float64(typed), nil
+	case int64:
+		return float64(typed), nil
+	case uint:
+		return float64(typed), nil
+	case uint8:
+		return float64(typed), nil
+	case uint16:
+		return float64(typed), nil
+	case uint32:
+		return float64(typed), nil
+	case uint64:
+		return float64(typed), nil
+	case float32:
+		return float64(typed), nil
+	case float64:
+		return typed, nil
+	case string:
+		parsed, err := strconv.ParseFloat(strings.TrimSpace(typed), 64)
+		if err != nil {
+			return 0, err
+		}
+		return parsed, nil
+	default:
+		return 0, fmt.Errorf("expected float, got %T", value)
+	}
 }
 
 func evaluateFormula(expression string, recordID int64, values map[string]any) (any, error) {
