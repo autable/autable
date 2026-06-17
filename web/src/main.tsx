@@ -1,7 +1,7 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
 import { FluentProvider, webLightTheme } from "@fluentui/react-components";
-import "@glideapps/glide-data-grid/dist/index.css";
+import "react-data-grid/lib/styles.css";
 import "./styles.css";
 import { App } from "./App";
 

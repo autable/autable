@@ -1,14 +1,20 @@
-import type { GridColumn } from "@glideapps/glide-data-grid";
+import { textEditor, type Column } from "react-data-grid";
 import type { Field, RowRecord } from "./api";
 
-export function buildTableColumns(fields: Field[]): GridColumn[] {
+export type TableGridRow = Record<string, unknown> & { record_id: number };
+
+export function buildTableColumns(fields: Field[]): Column<TableGridRow>[] {
   return fields.map((field) => ({
-    id: field.name,
-    title: field.required ? `${field.name} *` : field.name,
-    width: Math.max(128, field.name.length * 14)
+    key: field.name,
+    name: field.required ? `${field.name} *` : field.name,
+    minWidth: Math.max(128, field.name.length * 14),
+    resizable: true,
+    renderEditCell: textEditor,
+    editable: (row) => Number.isFinite(row.record_id) && (field.permission_level ?? 2) >= 2,
+    renderCell: ({ row }) => String(row[field.name] ?? "")
   }));
 }
 
-export function rowRecordToValues(row: RowRecord): Record<string, unknown> {
+export function rowRecordToValues(row: RowRecord): TableGridRow {
   return { record_id: row.record_id, ...row.values };
 }

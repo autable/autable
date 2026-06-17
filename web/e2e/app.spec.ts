@@ -377,10 +377,16 @@ test("covers table views, row creation, and row history through the real backend
 
   await tableActions.getByRole("button", { name: "Row", exact: true }).click();
   await expect(page.getByText(/Created record \d+/)).toBeVisible();
-  await tableActions.getByRole("button", { name: "Edit Row" }).click();
-  await canvasPanel.getByLabel("name value").fill("Grace Hopper");
-  await canvasPanel.getByLabel("status value").fill("Active");
-  await canvasPanel.getByRole("button", { name: "Save Row" }).click();
+
+  const recordsGrid = tableCanvas.getByRole("grid", { name: "Table records" });
+  await recordsGrid.getByRole("gridcell", { name: /New record/ }).dblclick();
+  await recordsGrid.locator(".rdg-text-editor").fill("Grace Hopper");
+  await page.keyboard.press("Enter");
+  await expect(page.getByText(/Updated record \d+/)).toBeVisible();
+
+  await recordsGrid.getByRole("gridcell", { name: "Review" }).last().dblclick();
+  await recordsGrid.locator(".rdg-text-editor").fill("Active");
+  await page.keyboard.press("Enter");
   await expect(page.getByText(/Updated record \d+/)).toBeVisible();
 
   await tableActions.getByRole("button", { name: "View", exact: true }).click();

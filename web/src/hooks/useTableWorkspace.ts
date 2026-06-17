@@ -1,10 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import {
-  type EditableGridCell,
-  type GridCell,
-  GridCellKind,
-  type Item
-} from "@glideapps/glide-data-grid";
+import type { CellSelectArgs, RowsChangeData } from "react-data-grid";
 import {
   createRow,
   deleteRow,
@@ -21,7 +16,7 @@ import {
   type TableViewSort
 } from "../api";
 import { rowDraftFromRecord } from "../appState";
-import { buildTableColumns, rowRecordToValues } from "../tableGrid";
+import { buildTableColumns, rowRecordToValues, type TableGridRow } from "../tableGrid";
 import { applyTableView } from "../tableViews";
 
 type UseTableWorkspaceOptions = {
@@ -41,7 +36,7 @@ export function useTableWorkspace({
   onCatalogChanged,
   onStatus
 }: UseTableWorkspaceOptions) {
-  const [rows, setRows] = useState<Array<Record<string, unknown>>>([]);
+  const [rows, setRows] = useState<TableGridRow[]>([]);
   const [rowsViewName, setRowsViewName] = useState("all");
   const [selectedRecordID, setSelectedRecordID] = useState(0);
   const [rowHistory, setRowHistory] = useState<RowChange[]>([]);
@@ -59,7 +54,7 @@ export function useTableWorkspace({
 
   const activeFields = table.fields.filter((field) => !field.deleted);
   const activeFieldNames = useMemo(() => activeFields.map((field) => field.name), [table.fields]);
-  const displayedRows = useMemo(
+  const displayedRows = useMemo<TableGridRow[]>(
     () => (rowsViewName === selectedTableView ? rows : applyTableView(rows, table.views ?? [], selectedTableView)),
     [rows, rowsViewName, table.views, selectedTableView]
   );
@@ -122,35 +117,34 @@ export function useTableWorkspace({
     if (targetTableName !== table.name) {
       return;
     }
-    setRows((current) => [...current, row]);
+    setRows((current) => [...current, row as TableGridRow]);
     setRowsViewName("local");
     setSelectedRecordID(Number(row.record_id));
     setRowHistory([]);
   }
 
-  const getCellContent = ([columnIndex, rowIndex]: Item): GridCell => {
-    const column = columns[columnIndex];
-    const field = activeFields.find((item) => item.name === column?.id);
-    const row = displayedRows[rowIndex];
-    const value = row?.[String(column.id)] ?? "";
-    return {
-      kind: GridCellKind.Text,
-      allowOverlay: (field?.permission_level ?? 2) >= 2,
-      displayData: String(value),
-      data: String(value)
-    };
-  };
+  function selectGridCell(args: CellSelectArgs<TableGridRow>) {
+    const recordID = Number(args.row?.record_id);
+    if (Number.isFinite(recordID)) {
+      setSelectedRecordID(recordID);
+      setRowHistory([]);
+    }
+  }
 
-  async function editCell([columnIndex, rowIndex]: Item, newValue: EditableGridCell) {
-    const column = columns[columnIndex];
-    const field = String(column.id);
+  async function editGridRows(nextRows: TableGridRow[], data: RowsChangeData<TableGridRow>) {
+    const rowIndex = data.indexes[0];
+    const nextRow = nextRows[rowIndex];
+    const previousRow = displayedRows[rowIndex];
+    const field = data.column.key;
     const fieldMeta = activeFields.find((item) => item.name === field);
-    const row = displayedRows[rowIndex];
-    if (!row || field === "record_id" || newValue.kind !== GridCellKind.Text || (fieldMeta?.permission_level ?? 2) < 2) {
+    if (!nextRow || !previousRow || field === "record_id" || (fieldMeta?.permission_level ?? 2) < 2) {
       return;
     }
-    const recordID = Number(row.record_id);
-    const nextValue = newValue.data;
+    const recordID = Number(nextRow.record_id);
+    const nextValue = nextRow[field] ?? "";
+    if (previousRow[field] === nextValue) {
+      return;
+    }
     setRows((current) =>
       current.map((item) => (Number(item.record_id) === recordID ? { ...item, [field]: nextValue } : item))
     );
@@ -330,7 +324,6 @@ export function useTableWorkspace({
     columns,
     displayedRecordIDs,
     displayedRows,
-    getCellContent,
     newFieldName,
     newFieldRequired,
     newFieldType,
@@ -351,7 +344,7 @@ export function useTableWorkspace({
     createViewFromCanvas,
     deleteFieldFromCanvas,
     deleteSelectedRow,
-    editCell,
+    editGridRows,
     loadSelectedRowHistory,
     resetRows,
     setNewFieldName,
@@ -365,6 +358,7 @@ export function useTableWorkspace({
     setNewViewSortDirection,
     setNewViewSortField,
     setSelectedRecordID,
+    selectGridCell,
     updateSelectedRowDraft,
     updateSelectedRowFromEditor
   };

@@ -1,6 +1,6 @@
 import type { TableView } from "./api";
 
-export function applyTableView(rows: Array<Record<string, unknown>>, views: TableView[], selectedView: string) {
+export function applyTableView<T extends Record<string, unknown>>(rows: T[], views: TableView[], selectedView: string): T[] {
   if (selectedView === "all") {
     return rows;
   }

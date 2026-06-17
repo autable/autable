@@ -396,7 +396,6 @@ export function App() {
               columns={tableWorkspace.columns}
               displayedRecordIDs={tableWorkspace.displayedRecordIDs}
               displayedRows={tableWorkspace.displayedRows}
-              getCellContent={tableWorkspace.getCellContent}
               newFieldName={tableWorkspace.newFieldName}
               newFieldRequired={tableWorkspace.newFieldRequired}
               newFieldType={tableWorkspace.newFieldType}
@@ -409,7 +408,6 @@ export function App() {
               newViewSortField={tableWorkspace.newViewSortField}
               onAddRow={tableWorkspace.addDraftRow}
               onAddField={tableWorkspace.addFieldFromCanvas}
-              onCellEdited={tableWorkspace.editCell}
               onCreateView={tableWorkspace.createViewFromCanvas}
               onDeleteField={tableWorkspace.deleteFieldFromCanvas}
               onDeleteSelectedRow={tableWorkspace.deleteSelectedRow}
@@ -424,6 +422,8 @@ export function App() {
               onNewViewNameChange={tableWorkspace.setNewViewName}
               onNewViewSortDirectionChange={tableWorkspace.setNewViewSortDirection}
               onNewViewSortFieldChange={tableWorkspace.setNewViewSortField}
+              onRowsChange={tableWorkspace.editGridRows}
+              onSelectGridCell={tableWorkspace.selectGridCell}
               onSelectRecordID={tableWorkspace.setSelectedRecordID}
               onSelectTableView={setSelectedTableView}
               onSelectedRowValueChange={tableWorkspace.updateSelectedRowDraft}

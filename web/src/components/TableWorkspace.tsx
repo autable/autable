@@ -6,24 +6,19 @@ import {
   ToolbarDivider
 } from "@fluentui/react-components";
 import { AddRegular, DeleteRegular, EditRegular, HistoryRegular, TableRegular } from "@fluentui/react-icons";
-import DataEditor, {
-  type EditableGridCell,
-  type GridCell,
-  type GridColumn,
-  type Item
-} from "@glideapps/glide-data-grid";
+import DataGrid, { type CellSelectArgs, type Column, type RowsChangeData } from "react-data-grid";
 import { useMemo, useState } from "react";
 import type { Field, RowChange, TableMetadata, TableViewFilter, TableViewSort } from "../api";
+import type { TableGridRow } from "../tableGrid";
 import { TableCanvasPanel, type CanvasPanel } from "./TableCanvasPanel";
 
 type TableWorkspaceProps = {
-  columns: GridColumn[];
+  columns: Column<TableGridRow>[];
   displayedRecordIDs: number[];
-  displayedRows: Array<Record<string, unknown>>;
-  getCellContent: (cell: Item) => GridCell;
+  displayedRows: TableGridRow[];
   onAddRow: () => void;
   onAddField: () => void;
-  onCellEdited: (cell: Item, newValue: EditableGridCell) => void | Promise<void>;
+  onRowsChange: (rows: TableGridRow[], data: RowsChangeData<TableGridRow>) => void | Promise<void>;
   onCreateView: () => void;
   onDeleteField: (fieldName: string) => void;
   onDeleteSelectedRow: () => void;
@@ -38,6 +33,7 @@ type TableWorkspaceProps = {
   onNewViewNameChange: (value: string) => void;
   onNewViewSortDirectionChange: (value: TableViewSort["direction"]) => void;
   onNewViewSortFieldChange: (value: string) => void;
+  onSelectGridCell: (args: CellSelectArgs<TableGridRow>) => void;
   onSelectRecordID: (recordID: number) => void;
   onSelectTableView: (name: string) => void;
   onSelectedRowValueChange: (fieldName: string, value: string) => void;
@@ -53,7 +49,7 @@ type TableWorkspaceProps = {
   newViewSortDirection: TableViewSort["direction"];
   newViewSortField: string;
   rowHistory: RowChange[];
-  rows: Array<Record<string, unknown>>;
+  rows: TableGridRow[];
   selectedRecordID: number;
   selectedRowDraft: Record<string, string>;
   selectedTableView: string;
@@ -64,10 +60,9 @@ export function TableWorkspace({
   columns,
   displayedRecordIDs,
   displayedRows,
-  getCellContent,
   onAddRow,
   onAddField,
-  onCellEdited,
+  onRowsChange,
   onCreateView,
   onDeleteField,
   onDeleteSelectedRow,
@@ -82,6 +77,7 @@ export function TableWorkspace({
   onNewViewNameChange,
   onNewViewSortDirectionChange,
   onNewViewSortFieldChange,
+  onSelectGridCell,
   onSelectRecordID,
   onSelectTableView,
   onSelectedRowValueChange,
@@ -193,82 +189,86 @@ export function TableWorkspace({
         </Toolbar>
       </div>
       <div className="grid-host">
-        <DataEditor
-          getCellContent={getCellContent}
-          onCellEdited={(cell, newValue) => {
-            const field = activeFields[cell[0]];
-            if (!field || !canWriteField(field)) {
-              return;
-            }
-            void onCellEdited(cell, newValue);
+        <DataGrid
+          aria-label="Table records"
+          className="codetable-grid rdg-light"
+          columns={columns}
+          rows={displayedRows}
+          rowKeyGetter={(row) => row.record_id}
+          onRowsChange={(nextRows, data) => {
+            void onRowsChange(nextRows, data);
           }}
-          onCellClicked={([, rowIndex]) => {
-            const recordID = Number(displayedRows[rowIndex]?.record_id);
+          onSelectedCellChange={(args) => {
+            onSelectGridCell(args);
+          }}
+          onCellClick={(args) => {
+            const recordID = Number(args.row?.record_id);
             if (Number.isFinite(recordID)) {
               openRecordPanel(recordID);
             }
           }}
-          onHeaderClicked={(columnIndex) => {
-            const field = activeFields[columnIndex];
+          onCellDoubleClick={(args) => {
+            const field = activeFields.find((item) => item.name === args.column.key);
+            if (field && canWriteField(field)) {
+              openRecordPanel(Number(args.row.record_id));
+            }
+          }}
+          onCellContextMenu={(args, event) => {
+            event.preventGridDefault();
+            const field = activeFields.find((item) => item.name === args.column.key);
             if (field) {
               openFieldPanel(field.name);
             }
           }}
-          columns={columns}
-          rows={displayedRows.length}
-          rowMarkers="clickable-number"
-          smoothScrollX
-          smoothScrollY
-          width="100%"
-          height="100%"
+          defaultColumnOptions={{ resizable: true }}
+        />
+        <TableCanvasPanel
+          activeFields={activeFields}
+          activePanel={canvasPanel}
+          canWriteTable={canWriteTable}
+          displayedRecordIDs={displayedRecordIDs}
+          hasWritableFields={hasWritableFields}
+          newFieldName={newFieldName}
+          newFieldRequired={newFieldRequired}
+          newFieldType={newFieldType}
+          newViewBase={newViewBase}
+          newViewFilterField={newViewFilterField}
+          newViewFilterOp={newViewFilterOp}
+          newViewFilterValue={newViewFilterValue}
+          newViewName={newViewName}
+          newViewSortDirection={newViewSortDirection}
+          newViewSortField={newViewSortField}
+          onAddField={onAddField}
+          onCreateView={onCreateView}
+          onDeleteField={onDeleteField}
+          onLoadHistory={onLoadHistory}
+          onNewFieldNameChange={onNewFieldNameChange}
+          onNewFieldRequiredChange={onNewFieldRequiredChange}
+          onNewFieldTypeChange={onNewFieldTypeChange}
+          onNewViewBaseChange={onNewViewBaseChange}
+          onNewViewFilterFieldChange={onNewViewFilterFieldChange}
+          onNewViewFilterOpChange={onNewViewFilterOpChange}
+          onNewViewFilterValueChange={onNewViewFilterValueChange}
+          onNewViewNameChange={onNewViewNameChange}
+          onNewViewSortDirectionChange={onNewViewSortDirectionChange}
+          onNewViewSortFieldChange={onNewViewSortFieldChange}
+          onOpenFields={() => openFieldPanel()}
+          onOpenHistory={loadHistoryFromCanvas}
+          onOpenRecord={() => openRecordPanel()}
+          onOpenView={() => setCanvasPanel("view")}
+          onSaveRecord={onUpdateSelectedRow}
+          onSelectField={setSelectedFieldName}
+          onSelectRecordID={onSelectRecordID}
+          onSelectTableView={onSelectTableView}
+          onSelectedRowValueChange={onSelectedRowValueChange}
+          rowHistory={rowHistory}
+          selectedField={selectedField}
+          selectedRecordID={selectedRecordID}
+          selectedRowDraft={selectedRowDraft}
+          selectedView={selectedView}
+          views={table.views ?? []}
         />
       </div>
-      <TableCanvasPanel
-        activeFields={activeFields}
-        activePanel={canvasPanel}
-        canWriteTable={canWriteTable}
-        displayedRecordIDs={displayedRecordIDs}
-        hasWritableFields={hasWritableFields}
-        newFieldName={newFieldName}
-        newFieldRequired={newFieldRequired}
-        newFieldType={newFieldType}
-        newViewBase={newViewBase}
-        newViewFilterField={newViewFilterField}
-        newViewFilterOp={newViewFilterOp}
-        newViewFilterValue={newViewFilterValue}
-        newViewName={newViewName}
-        newViewSortDirection={newViewSortDirection}
-        newViewSortField={newViewSortField}
-        onAddField={onAddField}
-        onCreateView={onCreateView}
-        onDeleteField={onDeleteField}
-        onLoadHistory={onLoadHistory}
-        onNewFieldNameChange={onNewFieldNameChange}
-        onNewFieldRequiredChange={onNewFieldRequiredChange}
-        onNewFieldTypeChange={onNewFieldTypeChange}
-        onNewViewBaseChange={onNewViewBaseChange}
-        onNewViewFilterFieldChange={onNewViewFilterFieldChange}
-        onNewViewFilterOpChange={onNewViewFilterOpChange}
-        onNewViewFilterValueChange={onNewViewFilterValueChange}
-        onNewViewNameChange={onNewViewNameChange}
-        onNewViewSortDirectionChange={onNewViewSortDirectionChange}
-        onNewViewSortFieldChange={onNewViewSortFieldChange}
-        onOpenFields={() => openFieldPanel()}
-        onOpenHistory={loadHistoryFromCanvas}
-        onOpenRecord={() => openRecordPanel()}
-        onOpenView={() => setCanvasPanel("view")}
-        onSaveRecord={onUpdateSelectedRow}
-        onSelectField={setSelectedFieldName}
-        onSelectRecordID={onSelectRecordID}
-        onSelectTableView={onSelectTableView}
-        onSelectedRowValueChange={onSelectedRowValueChange}
-        rowHistory={rowHistory}
-        selectedField={selectedField}
-        selectedRecordID={selectedRecordID}
-        selectedRowDraft={selectedRowDraft}
-        selectedView={selectedView}
-        views={table.views ?? []}
-      />
     </div>
   );
 }

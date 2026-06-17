@@ -139,7 +139,7 @@ select {
 
 .table-view {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) minmax(170px, 30vh);
+  grid-template-rows: auto minmax(0, 1fr);
   gap: 12px;
 }
 
@@ -169,22 +169,38 @@ select {
 }
 
 .grid-host {
+  position: relative;
+  display: grid;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
   border: 1px solid var(--colorNeutralStroke2);
+  border-radius: 6px;
   background: var(--colorNeutralBackground1);
 }
 
+.codetable-grid {
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+}
+
 .table-canvas-panel {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  left: 12px;
+  z-index: 2;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   min-width: 0;
-  min-height: 0;
+  max-height: min(320px, 45%);
   overflow: hidden;
   padding: 12px;
   border: 1px solid var(--colorNeutralStroke2);
+  border-radius: 6px;
   background: var(--colorNeutralBackground1);
+  box-shadow: var(--shadow16);
 }
 
 .canvas-panel-tabs {

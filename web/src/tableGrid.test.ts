@@ -8,8 +8,8 @@ describe("tableGrid", () => {
       { name: "email", type: "email", required: false, deleted: false }
     ]);
 
-    expect(columns.map((column) => column.id)).toEqual(["name", "email"]);
-    expect(columns.map((column) => column.title)).toEqual(["name *", "email"]);
+    expect(columns.map((column) => column.key)).toEqual(["name", "email"]);
+    expect(columns.map((column) => column.name)).toEqual(["name *", "email"]);
   });
 
   it("keeps record_id available in row values for internal row operations", () => {

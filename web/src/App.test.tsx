@@ -366,7 +366,7 @@ describe("App", () => {
     await waitFor(() => expect(screen.getAllByText("1 of 1 records").length).toBeGreaterThan(0));
     await userEvent.click(screen.getByRole("button", { name: "History" }));
     expect(await screen.findByText("rhistory_workspace_contacts_00000000000000000042_00000000000000000100")).toBeInTheDocument();
-    expect(screen.getByText(/Backend Row/)).toBeInTheDocument();
+    expect(screen.getAllByText(/Backend Row/).length).toBeGreaterThan(0);
   });
 
   it("shows workflow JavaScript as the workflow view", async () => {
