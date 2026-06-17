@@ -604,6 +604,10 @@ test("covers workflow editor, node list, and run history through the real backen
   expect(savedWorkflow?.secrets["row_change.token"]).toBe("hidden-token".length);
   expect(typeof savedWorkflow?.created_at).toBe("number");
   expect(typeof savedWorkflow?.updated_at).toBe("number");
+  await page.getByRole("button", { name: "Edit config row_change" }).click();
+  await expect(page.getByLabel("Secret row_change.token")).toHaveValue("x".repeat("hidden-token".length));
+  await expect(page.getByText(/Saved secret length/)).toHaveCount(0);
+  await page.keyboard.press("Escape");
   await page.getByLabel("Workflow Inputs JSON").fill(JSON.stringify({ history_key: rowHistory[0].history_key }, null, 2));
   await page.getByRole("button", { name: "Run" }).click();
   await expect(page.getByText(/Workflow run saved: whistory_/)).toBeVisible();

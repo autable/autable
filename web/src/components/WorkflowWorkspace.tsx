@@ -212,6 +212,7 @@ function InstanceConfigPopover({
   const [open, setOpen] = useState(false);
   const [variableDrafts, setVariableDrafts] = useState<Record<string, string>>({});
   const [secretDrafts, setSecretDrafts] = useState<Record<string, string>>({});
+  const [dirtySecrets, setDirtySecrets] = useState<Record<string, boolean>>({});
 
   function resetDrafts() {
     setVariableDrafts(
@@ -219,11 +220,22 @@ function InstanceConfigPopover({
         ports.variables.map((port) => [port.name, workflow?.variables?.[instanceConfigKey(instanceID, port.name)] ?? ""])
       )
     );
-    setSecretDrafts(Object.fromEntries(ports.secrets.map((port) => [port.name, ""])));
+    setSecretDrafts(
+      Object.fromEntries(
+        ports.secrets.map((port) => [
+          port.name,
+          secretMask(workflow?.secrets?.[instanceConfigKey(instanceID, port.name)] ?? 0)
+        ])
+      )
+    );
+    setDirtySecrets({});
   }
 
   async function saveDrafts() {
-    await onSaveInstanceConfig(instanceID, variableDrafts, secretDrafts);
+    const changedSecrets = Object.fromEntries(
+      Object.entries(secretDrafts).filter(([name, value]) => dirtySecrets[name] && value !== "")
+    );
+    await onSaveInstanceConfig(instanceID, variableDrafts, changedSecrets);
     setOpen(false);
   }
 
@@ -260,17 +272,21 @@ function InstanceConfigPopover({
         {ports.secrets.map((port) => {
           const length = workflow?.secrets?.[instanceConfigKey(instanceID, port.name)] ?? 0;
           return (
-            <FluentField
-              key={`secret-${instanceID}-${port.name}`}
-              label={port.name}
-              hint={length > 0 ? `Saved secret length: ${length}` : "No saved secret"}
-            >
+            <FluentField key={`secret-${instanceID}-${port.name}`} label={port.name}>
               <Input
                 aria-label={`Secret ${instanceID}.${port.name}`}
                 type="password"
-                placeholder={length > 0 ? "Leave blank to keep saved value" : "Enter secret value"}
+                placeholder="Enter secret value"
                 value={secretDrafts[port.name] ?? ""}
-                onChange={(_, data) => setSecretDrafts((current) => ({ ...current, [port.name]: data.value }))}
+                onFocus={() => {
+                  if (!dirtySecrets[port.name] && length > 0) {
+                    setSecretDrafts((current) => ({ ...current, [port.name]: "" }));
+                  }
+                }}
+                onChange={(_, data) => {
+                  setDirtySecrets((current) => ({ ...current, [port.name]: true }));
+                  setSecretDrafts((current) => ({ ...current, [port.name]: data.value }));
+                }}
                 disabled={!canWriteWorkflow}
               />
             </FluentField>
@@ -316,6 +332,10 @@ function formatPorts(ports: Array<{ name: string; type: string }>): string {
 
 function instanceConfigKey(instanceID: string, name: string): string {
   return `${instanceID}.${name}`;
+}
+
+function secretMask(length: number): string {
+  return length > 0 ? "x".repeat(length) : "";
 }
 
 function RunPayload({ title, value }: { title: string; value: Record<string, unknown> }) {

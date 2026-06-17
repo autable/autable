@@ -407,8 +407,8 @@ describe("App", () => {
     expect(screen.getByText("secrets access_token:string")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Edit config review_echo" }));
     expect(screen.getByLabelText("Variable review_echo.CHANNEL")).toHaveValue("ops");
-    expect(screen.getByLabelText("Secret review_echo.TOKEN")).toHaveValue("");
-    expect(screen.getByText("Saved secret length: 12")).toBeInTheDocument();
+    expect(screen.getByLabelText("Secret review_echo.TOKEN")).toHaveValue("x".repeat(12));
+    expect(screen.queryByText(/Saved secret length/)).not.toBeInTheDocument();
     await userEvent.clear(screen.getByLabelText("Variable review_echo.CHANNEL"));
     fireEvent.change(screen.getByLabelText("Variable review_echo.CHANNEL"), { target: { value: "support" } });
     expect(screen.getByLabelText("Variable review_echo.CHANNEL")).toHaveValue("support");
