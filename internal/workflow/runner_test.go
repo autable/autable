@@ -2,18 +2,102 @@ package workflow
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"testing"
 	"time"
 
 	"codetable/internal/history"
 )
 
+type testEchoNode struct{}
+
 type creatorCaptureNode struct {
 	creatorID string
 }
 
+type testRowChangeTriggerNode struct {
+	store history.Store
+}
+
 type configCaptureNode struct {
 	captures map[string]RuntimeInfo
+}
+
+func (testEchoNode) Info() NodeInfo {
+	return NodeInfo{
+		Type:        "echo",
+		DisplayName: "Echo",
+		Inputs:      []Port{{Name: "value", Type: "any"}},
+		Outputs:     []Port{{Name: "value", Type: "any"}},
+		Stateless:   true,
+	}
+}
+
+func (testEchoNode) Run(_ context.Context, input map[string]any, _ RuntimeInfo) (map[string]any, error) {
+	return input, nil
+}
+
+func (node testRowChangeTriggerNode) Info() NodeInfo {
+	return NodeInfo{
+		Type:        "table.record.changed",
+		DisplayName: "Record changed",
+		Inputs:      []Port{{Name: "table", Type: "string"}},
+		Outputs:     []Port{{Name: "history_key", Type: "string"}},
+		Stateless:   true,
+		Trigger:     true,
+	}
+}
+
+func (node testRowChangeTriggerNode) RunTrigger(_ context.Context, params map[string]any, event TriggerEvent, _ RuntimeInfo) (map[string]any, bool, error) {
+	if event.Kind != "row_change" {
+		return nil, false, nil
+	}
+	if tableName, ok := params["table"].(string); ok && tableName != "" && tableName != event.RowChange.Table {
+		return nil, false, nil
+	}
+	record := TriggerRecord{
+		HistoryKey: event.HistoryKey,
+		Database:   event.RowChange.Database,
+		Table:      event.RowChange.Table,
+		RecordID:   event.RowChange.RecordID,
+		Timestamp:  event.RowChange.Timestamp,
+	}
+	return map[string]any{
+		"history_key": event.HistoryKey,
+		"operation":   event.RowChange.Operation,
+		"record":      record,
+		"values":      event.RowChange.Values,
+		"diff":        event.RowChange.Diff,
+		"actor_id":    event.RowChange.ActorID,
+	}, true, nil
+}
+
+func (node testRowChangeTriggerNode) Run(ctx context.Context, input map[string]any, _ RuntimeInfo) (map[string]any, error) {
+	historyKey, ok := input["history_key"].(string)
+	if !ok || historyKey == "" {
+		return nil, errors.New("history_key is required")
+	}
+	entry, err := node.store.Get(ctx, historyKey)
+	if err != nil {
+		return nil, fmt.Errorf("load row history: %w", err)
+	}
+	change, err := history.DecodeRowChange(entry)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{
+		"record": TriggerRecord{
+			HistoryKey: historyKey,
+			Database:   change.Database,
+			Table:      change.Table,
+			RecordID:   change.RecordID,
+			Timestamp:  change.Timestamp,
+		},
+		"values":   change.Values,
+		"diff":     change.Diff,
+		"actor_id": change.ActorID,
+	}, nil
 }
 
 func (node *creatorCaptureNode) Info() NodeInfo {
@@ -60,7 +144,7 @@ func (node *configCaptureNode) Run(_ context.Context, _ map[string]any, info Run
 func TestRunnerExecutesJavaScriptAndPersistsWorkflowHistory(t *testing.T) {
 	ctx := context.Background()
 	store := history.NewMemoryStore()
-	runner := NewRunner(store, EchoNode{})
+	runner := NewRunner(store, testEchoNode{})
 
 	run, key, err := runner.Run(ctx, Definition{
 		ID: 7,
@@ -222,7 +306,7 @@ function run(info) {
 func TestRunnerReadsTriggerDeclaration(t *testing.T) {
 	ctx := context.Background()
 	store := history.NewMemoryStore()
-	runner := NewRunner(store, NewRecordChangedTriggerNode(store))
+	runner := NewRunner(store, testRowChangeTriggerNode{store: store})
 
 	declaration, err := runner.Trigger(ctx, Definition{
 		ID: 11,
@@ -262,9 +346,68 @@ function run(info) { return {}; }
 	}
 }
 
+func TestRunnerRunsTriggerNodeIntoWorkflowInputs(t *testing.T) {
+	ctx := context.Background()
+	store := history.NewMemoryStore()
+	runner := NewRunner(store, testRowChangeTriggerNode{store: store})
+	definition := Definition{
+		ID: 11,
+		Script: `
+function instances(info) {
+  return { contacts_changed: "table.record.changed" };
+}
+function trigger(info) {
+  return {
+    instance: "contacts_changed",
+    params: {
+      table: "contacts",
+      operations: ["create"],
+      fields: ["name"]
+    }
+  };
+}
+function run(info) { return info.inputs; }
+`,
+	}
+	declaration, err := runner.Trigger(ctx, definition)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inputs, matched, err := runner.TriggerRunInputs(ctx, definition, declaration, TriggerEvent{
+		Kind:       "row_change",
+		HistoryKey: "rhistory_db_contacts_00000000000000000005_00000000000000000100",
+		RowChange: history.RowChange{
+			Database:  "db",
+			Table:     "contacts",
+			RecordID:  5,
+			Operation: "create",
+			Values:    map[string]any{"name": "Ada"},
+			Diff:      history.RowDiff{"name": {Old: nil, New: "Ada"}},
+			ActorID:   "u1",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !matched || inputs["history_key"] == "" || inputs["operation"] != "create" {
+		t.Fatalf("unexpected trigger inputs: matched=%t inputs=%#v", matched, inputs)
+	}
+	record, ok := inputs["record"].(TriggerRecord)
+	if !ok || record.RecordID != 5 || record.Table != "contacts" {
+		t.Fatalf("unexpected trigger record: %#v", inputs["record"])
+	}
+	run, _, err := runner.Run(ctx, definition, inputs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(run.Steps) != 0 || run.Outputs["operation"] != "create" {
+		t.Fatalf("trigger node should feed run inputs without a run step: %#v", run)
+	}
+}
+
 func TestRunnerRejectsNonTriggerDeclarationNode(t *testing.T) {
 	ctx := context.Background()
-	runner := NewRunner(history.NewMemoryStore(), EchoNode{})
+	runner := NewRunner(history.NewMemoryStore(), testEchoNode{})
 
 	_, err := runner.Trigger(ctx, Definition{
 		ID:     12,
@@ -277,7 +420,7 @@ func TestRunnerRejectsNonTriggerDeclarationNode(t *testing.T) {
 
 func TestRunnerRequiresTriggerFunction(t *testing.T) {
 	ctx := context.Background()
-	runner := NewRunner(history.NewMemoryStore(), EchoNode{})
+	runner := NewRunner(history.NewMemoryStore(), testEchoNode{})
 
 	_, err := runner.Trigger(ctx, Definition{
 		ID:     13,
@@ -290,7 +433,7 @@ func TestRunnerRequiresTriggerFunction(t *testing.T) {
 
 func TestRunnerDoesNotNormalizeExportDefaultScripts(t *testing.T) {
 	ctx := context.Background()
-	runner := NewRunner(history.NewMemoryStore(), EchoNode{})
+	runner := NewRunner(history.NewMemoryStore(), testEchoNode{})
 
 	_, _, err := runner.Run(ctx, Definition{
 		ID:     14,
@@ -316,7 +459,7 @@ func TestRunnerExecutesRecordChangedTriggerNode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	runner := NewRunner(store, NewRecordChangedTriggerNode(store))
+	runner := NewRunner(store, testRowChangeTriggerNode{store: store})
 
 	run, _, err := runner.Run(ctx, Definition{
 		ID:     10,

@@ -542,9 +542,9 @@ test("covers workflow editor, node list, and run history through the real backen
   await expect(page.getByRole("button", { name: workflowName })).toBeVisible();
   await expect(page.getByLabel("Workflow JavaScript")).toHaveValue(/function trigger\(info\)/);
   await expect(page.getByLabel("Workflow JavaScript")).toHaveValue(/table\.record\.changed/);
-  await expect(page.getByText("echo").first()).toBeVisible();
   const workflowNodes = (await api(page, "GET", "/api/workflow/nodes")) as Array<{
     type: string;
+    documentation?: Record<string, string>;
     inputs: Array<{ name: string; type: string }>;
     secrets?: Array<{ name: string; type: string }>;
   }>;
@@ -556,8 +556,15 @@ test("covers workflow editor, node list, and run history through the real backen
     expect.arrayContaining([expect.objectContaining({ name: "access_token", type: "string" })])
   );
   expect(dingTalkNode?.secrets).toHaveLength(1);
-  await expect(page.getByText("secrets access_token:string")).toBeVisible();
-  const nodeListLayout = await page.getByLabel("Workflow nodes").evaluate((element) => {
+  expect(dingTalkNode?.documentation?.["en-US"]).toContain("DingTalk robot");
+  expect(dingTalkNode?.documentation?.["zh-CN"]).toContain("钉钉机器人");
+  await page.getByRole("button", { name: "Workflow nodes" }).click();
+  await expect(page.getByRole("dialog", { name: "Workflow node catalog" })).toBeVisible();
+  await expect(page.getByText("钉钉机器人")).toBeVisible();
+  await page.getByRole("button", { name: /table\.record\.changed/ }).click();
+  await expect(page.getByText("记录变更")).toBeVisible();
+  await expect(page.getByText(/run\(info\)\.inputs/)).toBeVisible();
+  const nodeDialogLayout = await page.getByLabel("Workflow node documentation").evaluate((element) => {
     const list = element as HTMLElement;
     return {
       overflowY: window.getComputedStyle(list).overflowY,
@@ -565,8 +572,13 @@ test("covers workflow editor, node list, and run history through the real backen
       scrollHeight: list.scrollHeight
     };
   });
-  expect(nodeListLayout.overflowY).toBe("auto");
-  expect(nodeListLayout.scrollHeight).toBeGreaterThan(nodeListLayout.clientHeight);
+  expect(nodeDialogLayout.overflowY).toBe("auto");
+  expect(nodeDialogLayout.scrollHeight).toBeGreaterThanOrEqual(nodeDialogLayout.clientHeight);
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "Switch language" }).click();
+  await page.getByRole("button", { name: "Workflow nodes" }).click();
+  await expect(page.getByText("DingTalk robot").first()).toBeVisible();
+  await page.keyboard.press("Escape");
   await expect(page.getByLabel("Workflow instances").getByText("row_change")).toBeVisible();
   await page.getByLabel("Workflow JavaScript").fill(
     "function instances(info) {\n  return { ding: { node: 'dingtalk.robot.send' } };\n}\n\nfunction run(info) {\n  return info.instance('ding').exec({ content: 'hello' });\n}"
@@ -580,7 +592,7 @@ test("covers workflow editor, node list, and run history through the real backen
     `/api/tables/${workspace.databaseName}/${workspace.tableName}/rows/1/history`
   )) as Array<{ history_key: string }>;
   await page.getByLabel("Workflow JavaScript").fill(
-    "function instances(info) {\n  return { row_change: { node: 'table.record.changed', variables: [{ name: 'label', type: 'string' }], secrets: [{ name: 'token', type: 'string' }] } };\n}\n\nfunction run(info) {\n  const triggered = info.instance('row_change').exec({ history_key: info.inputs.history_key });\n  return { record_id: triggered.record.record_id, name: triggered.values.name };\n}"
+    "function instances(info) {\n  return { row_change: { node: 'table.record.changed', variables: [{ name: 'label', type: 'string' }], secrets: [{ name: 'token', type: 'string' }] } };\n}\n\nfunction trigger(info) {\n  return { instance: 'row_change', params: { table: 'contacts', operations: ['create', 'update', 'delete'] } };\n}\n\nfunction run(info) {\n  return { record_id: info.inputs.record.record_id, name: info.inputs.values.name };\n}"
   );
   await page.getByRole("button", { name: "Edit config row_change" }).click();
   await page.getByLabel("Variable row_change.label").fill("review");
@@ -608,12 +620,26 @@ test("covers workflow editor, node list, and run history through the real backen
   await expect(page.getByLabel("Secret row_change.token")).toHaveValue("x".repeat("hidden-token".length));
   await expect(page.getByText(/Saved secret length/)).toHaveCount(0);
   await page.keyboard.press("Escape");
-  await page.getByLabel("Workflow Inputs JSON").fill(JSON.stringify({ history_key: rowHistory[0].history_key }, null, 2));
+  await page.getByLabel("Workflow Inputs JSON").fill(
+    JSON.stringify(
+      {
+        history_key: rowHistory[0].history_key,
+        database: workspace.databaseName,
+        table: workspace.tableName,
+        record_id: 1,
+        operation: "create",
+        record: { record_id: 1, table: workspace.tableName },
+        values: { name: "Ada Lovelace" },
+        diff: { name: { old: null, new: "Ada Lovelace" } }
+      },
+      null,
+      2
+    )
+  );
   await page.getByRole("button", { name: "Run" }).click();
   await expect(page.getByText(/Workflow run saved: whistory_/)).toBeVisible();
   await expect(page.getByRole("button", { name: /whistory_/ })).toBeVisible();
   const runFlow = page.getByLabel("Workflow run flow");
-  await expect(runFlow.getByText("table.record.changed")).toBeVisible();
   await expect(runFlow.getByText("Run input")).toBeVisible();
   await expect(runFlow.getByText("Run output")).toBeVisible();
   await expect(runFlow.getByText(rowHistory[0].history_key).first()).toBeVisible();

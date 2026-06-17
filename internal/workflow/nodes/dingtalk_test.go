@@ -1,4 +1,4 @@
-package workflow
+package nodes
 
 import (
 	"context"
@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"codetable/internal/workflow"
 )
 
 func TestDingTalkRobotNodeSendsWebhookTextMessage(t *testing.T) {
@@ -39,7 +41,7 @@ func TestDingTalkRobotNodeSendsWebhookTextMessage(t *testing.T) {
 		"content":     "Codetable alert",
 		"at_user_ids": []any{"user-a", "user-b"},
 		"at_all":      true,
-	}, RuntimeInfo{
+	}, workflow.RuntimeInfo{
 		Secrets: map[string]string{
 			"access_token": "robot-token",
 		},
@@ -69,22 +71,25 @@ func TestDingTalkRobotNodeSendsWebhookTextMessage(t *testing.T) {
 
 func TestDingTalkRobotNodeRequiresSecretsAndContent(t *testing.T) {
 	node := NewDingTalkRobotNodeForTest(nil, "http://127.0.0.1/robot/send")
-	if _, err := node.Run(context.Background(), map[string]any{"content": "hello"}, RuntimeInfo{}); err == nil {
+	if _, err := node.Run(context.Background(), map[string]any{"content": "hello"}, workflow.RuntimeInfo{}); err == nil {
 		t.Fatal("expected missing access_token error")
 	}
-	if _, err := node.Run(context.Background(), map[string]any{}, RuntimeInfo{Secrets: map[string]string{"access_token": "token"}}); err == nil {
+	if _, err := node.Run(context.Background(), map[string]any{}, workflow.RuntimeInfo{Secrets: map[string]string{"access_token": "token"}}); err == nil {
 		t.Fatal("expected missing content error")
 	}
 }
 
 func TestDingTalkRobotNodeIsAvailableInNodeInfos(t *testing.T) {
-	runner := NewRunner(nil, NewDingTalkRobotNode())
+	runner := workflow.NewRunner(nil, NewDingTalkRobotNode())
 	infos := runner.NodeInfos()
 	if len(infos) != 1 || infos[0].Type != "dingtalk.robot.send" {
 		t.Fatalf("expected dingtalk node info, got %#v", infos)
 	}
 	if len(infos[0].Secrets) != 1 || infos[0].Secrets[0].Name != "access_token" {
 		t.Fatalf("expected dingtalk secret metadata, got %#v", infos[0].Secrets)
+	}
+	if infos[0].Documentation["en-US"] == "" || infos[0].Documentation["zh-CN"] == "" {
+		t.Fatalf("expected embedded documentation, got %#v", infos[0].Documentation)
 	}
 }
 

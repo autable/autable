@@ -24,6 +24,7 @@ import (
 	"codetable/internal/systemdb"
 	"codetable/internal/table"
 	"codetable/internal/workflow"
+	"codetable/internal/workflow/nodes"
 )
 
 type Server struct {
@@ -158,7 +159,7 @@ func NewServer(catalog metadata.Catalog, system *systemdb.DB, tables *table.Serv
 		system,
 		tables,
 		historyStore,
-		workflow.NewRunner(historyStore, workflow.EchoNode{}, workflow.NewRecordChangedTriggerNode(historyStore), workflow.ScheduleTriggerNode{}, workflow.NewDingTalkRobotNode()),
+		workflow.NewRunner(historyStore, nodes.EchoNode{}, nodes.NewRecordChangedTriggerNode(historyStore), nodes.ScheduleTriggerNode{}, nodes.NewDingTalkRobotNode()),
 	)
 }
 
@@ -172,7 +173,7 @@ func NewServerWithOIDCProviders(catalog metadata.Catalog, system *systemdb.DB, t
 		system,
 		tables,
 		historyStore,
-		workflow.NewRunner(historyStore, workflow.EchoNode{}, workflow.NewRecordChangedTriggerNode(historyStore), workflow.ScheduleTriggerNode{}, workflow.NewDingTalkRobotNode()),
+		workflow.NewRunner(historyStore, nodes.EchoNode{}, nodes.NewRecordChangedTriggerNode(historyStore), nodes.ScheduleTriggerNode{}, nodes.NewDingTalkRobotNode()),
 		providers,
 	)
 }
@@ -1282,10 +1283,13 @@ func (server *Server) processWorkflowEvent(ctx context.Context, event workflowEv
 		if errors.Is(err, workflow.ErrMissingTrigger) {
 			continue
 		}
-		if err != nil || !server.workflowEventMatches(ctx, workflowDefinition.ID, declaration, event) {
+		if err != nil || !server.workflowEventMayRun(ctx, workflowDefinition.ID, declaration, event) {
 			continue
 		}
-		inputs := workflowEventInputs(event)
+		inputs, matched, err := server.runner.TriggerRunInputs(ctx, definition, declaration, workflowTriggerEvent(event))
+		if err != nil || !matched {
+			continue
+		}
 		if event.Kind == workflowEventSchedule {
 			_, _, _ = server.runner.RunAt(ctx, definition, inputs, event.ScheduledAt)
 			continue
@@ -1294,60 +1298,33 @@ func (server *Server) processWorkflowEvent(ctx context.Context, event workflowEv
 	}
 }
 
-func (server *Server) workflowEventMatches(ctx context.Context, workflowID int64, declaration workflow.TriggerDeclaration, event workflowEvent) bool {
+func (server *Server) workflowEventMayRun(ctx context.Context, workflowID int64, declaration workflow.TriggerDeclaration, event workflowEvent) bool {
 	switch event.Kind {
 	case workflowEventSchedule:
 		return server.scheduleTriggerMatches(ctx, workflowID, declaration, event.ScheduledAt)
 	case workflowEventRowChange:
-		return rowChangeTriggerMatches(declaration, event.RowChange)
+		return declaration.Node == "table.record.changed"
 	default:
 		return false
 	}
 }
 
-func workflowEventInputs(event workflowEvent) map[string]any {
+func workflowTriggerEvent(event workflowEvent) workflow.TriggerEvent {
 	switch event.Kind {
 	case workflowEventSchedule:
-		return map[string]any{
-			"scheduled_at": event.ScheduledAt.UTC().UnixMilli(),
-			"event":        "schedule",
+		return workflow.TriggerEvent{
+			Kind:        "schedule",
+			ScheduledAt: event.ScheduledAt.UTC().UnixMilli(),
 		}
 	case workflowEventRowChange:
-		change := event.RowChange
-		return map[string]any{
-			"history_key": event.HistoryKey,
-			"database":    change.Database,
-			"table":       change.Table,
-			"record_id":   change.RecordID,
-			"operation":   change.Operation,
-			"diff":        change.Diff,
+		return workflow.TriggerEvent{
+			Kind:       "row_change",
+			HistoryKey: event.HistoryKey,
+			RowChange:  event.RowChange,
 		}
 	default:
-		return map[string]any{}
+		return workflow.TriggerEvent{}
 	}
-}
-
-func rowChangeTriggerMatches(declaration workflow.TriggerDeclaration, change history.RowChange) bool {
-	if declaration.Node != "table.record.changed" {
-		return false
-	}
-	if tableName, ok := triggerStringParam(declaration.Params, "table"); ok && tableName != change.Table {
-		return false
-	}
-	if operations := triggerStringSetParam(declaration.Params, "operations"); len(operations) > 0 {
-		if _, ok := operations[change.Operation]; !ok {
-			return false
-		}
-	}
-	if fields := triggerStringSetParam(declaration.Params, "fields"); len(fields) > 0 {
-		for field := range change.Diff {
-			if _, ok := fields[field]; ok {
-				return true
-			}
-		}
-		return false
-	}
-	return true
 }
 
 func triggerStringParam(params map[string]any, key string) (string, bool) {
@@ -1369,33 +1346,6 @@ func triggerInt64Param(params map[string]any, key string) (int64, bool) {
 	default:
 		return 0, false
 	}
-}
-
-func triggerStringSetParam(params map[string]any, key string) map[string]struct{} {
-	raw, ok := params[key]
-	if !ok {
-		return nil
-	}
-	values := map[string]struct{}{}
-	switch typed := raw.(type) {
-	case []any:
-		for _, item := range typed {
-			if value, ok := item.(string); ok && value != "" {
-				values[value] = struct{}{}
-			}
-		}
-	case []string:
-		for _, value := range typed {
-			if value != "" {
-				values[value] = struct{}{}
-			}
-		}
-	case string:
-		if typed != "" {
-			values[typed] = struct{}{}
-		}
-	}
-	return values
 }
 
 func (server *Server) handleSaveForm(w http.ResponseWriter, r *http.Request) {

@@ -206,6 +206,38 @@ func (runner *Runner) Trigger(ctx context.Context, definition Definition) (Trigg
 	return declaration, ctx.Err()
 }
 
+func (runner *Runner) TriggerRunInputs(ctx context.Context, definition Definition, declaration TriggerDeclaration, event TriggerEvent) (map[string]any, bool, error) {
+	instances, err := runner.Instances(ctx, definition)
+	if err != nil {
+		return nil, false, err
+	}
+	instance, ok := instances[declaration.Instance]
+	if !ok {
+		return nil, false, fmt.Errorf("trigger instance %q is not declared", declaration.Instance)
+	}
+	node, ok := runner.nodes[declaration.Node]
+	if !ok {
+		return nil, false, fmt.Errorf("trigger node %q is not registered", declaration.Node)
+	}
+	triggerNode, ok := node.(TriggerNode)
+	if !ok {
+		return nil, false, fmt.Errorf("node %q cannot run trigger events", declaration.Node)
+	}
+	output, matched, err := triggerNode.RunTrigger(ctx, cloneAnyMap(declaration.Params), event, RuntimeInfo{
+		WorkflowID:   definition.ID,
+		DatabaseName: definition.DatabaseName,
+		InstanceID:   declaration.Instance,
+		NodeType:     declaration.Node,
+		CreatorID:    definition.CreatorID,
+		Secrets:      instanceStringMap(definition.Secrets, declaration.Instance, instance.Secrets),
+		Variables:    instanceStringMap(definition.Variables, declaration.Instance, instance.Variables),
+	})
+	if err != nil || !matched {
+		return nil, matched, err
+	}
+	return cloneAnyMap(output), true, ctx.Err()
+}
+
 func (runner *Runner) runInstance(ctx context.Context, definition Definition, runID, instanceID string, declaration InstanceDeclaration, input map[string]any, run *history.WorkflowRun) (map[string]any, error) {
 	node, ok := runner.nodes[declaration.Node]
 	step := history.StepRecord{NodeID: instanceID, NodeType: declaration.Node, Input: cloneAnyMap(input)}

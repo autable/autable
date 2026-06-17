@@ -1,6 +1,12 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import {
   Button,
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogSurface,
+  DialogTitle,
+  DialogTrigger,
   Field as FluentField,
   Input,
   Popover,
@@ -9,7 +15,7 @@ import {
   Text,
   Textarea
 } from "@fluentui/react-components";
-import { EditRegular, PlayRegular, SaveRegular } from "@fluentui/react-icons";
+import { EditRegular, InfoRegular, PlayRegular, SaveRegular } from "@fluentui/react-icons";
 import type {
   WorkflowDefinition,
   WorkflowInstanceDeclaration,
@@ -20,6 +26,7 @@ import type {
 
 type WorkflowWorkspaceProps = {
   databaseName: string;
+  language: string;
   onExecute: () => void;
   onSave: () => void;
   onSaveInstanceConfig: (
@@ -42,6 +49,7 @@ type WorkflowWorkspaceProps = {
 
 export function WorkflowWorkspace({
   databaseName,
+  language,
   onExecute,
   onSave,
   onSaveInstanceConfig,
@@ -66,9 +74,12 @@ export function WorkflowWorkspace({
             <Text weight="semibold">{workflow?.name ?? "workflow"}.js</Text>
             <Text size={200}>{databaseName} workflow</Text>
           </div>
-          <Button icon={<SaveRegular />} appearance="primary" onClick={onSave} disabled={!canWriteWorkflow}>
-            Save
-          </Button>
+          <div className="workflow-header-actions">
+            <NodeCatalogDialog language={language} workflowNodes={workflowNodes} />
+            <Button icon={<SaveRegular />} appearance="primary" onClick={onSave} disabled={!canWriteWorkflow}>
+              Save
+            </Button>
+          </div>
         </div>
         <Textarea
           className="code-editor"
@@ -92,24 +103,6 @@ export function WorkflowWorkspace({
         </div>
       </div>
       <div className="history-pane">
-        <Text weight="semibold">Nodes</Text>
-        <div className="node-list" aria-label="Workflow nodes">
-          {workflowNodes.map((node) => (
-            <div key={node.type} className={node.trigger ? "node-item trigger" : "node-item"}>
-              <div className="node-title">
-                <span>{node.type}</span>
-                <span>{node.stateless ? "stateless" : "stateful"}</span>
-              </div>
-              <Text size={200}>{node.description ?? node.display_name}</Text>
-              <div className="node-ports">
-                <span>in {formatPorts(node.inputs)}</span>
-                <span>out {formatPorts(node.outputs)}</span>
-                <span>vars {formatPorts(node.variables ?? [])}</span>
-                <span>secrets {formatPorts(node.secrets ?? [])}</span>
-              </div>
-            </div>
-          ))}
-        </div>
         <Text weight="semibold">Instances</Text>
         <div className="node-list" aria-label="Workflow instances">
           {workflowInstances.ok ? (
@@ -159,7 +152,7 @@ export function WorkflowWorkspace({
           </div>
         )}
         <div className="flow-line" aria-label="Workflow run flow">
-          {selectedRun && selectedRun.run.steps.length > 0 ? (
+          {selectedRun ? (
             <>
               <RunPayload title="Run input" value={selectedRun.run.inputs ?? {}} />
               {selectedRun.run.steps.map((step, index) => (
@@ -188,6 +181,145 @@ export function WorkflowWorkspace({
       </div>
     </div>
   );
+}
+
+function NodeCatalogDialog({ language, workflowNodes }: { language: string; workflowNodes: WorkflowNodeInfo[] }) {
+  const [selectedType, setSelectedType] = useState(workflowNodes[0]?.type ?? "");
+  const selectedNode = workflowNodes.find((node) => node.type === selectedType) ?? workflowNodes[0];
+  const documentation = selectedNode ? nodeDocumentation(selectedNode, language) : "";
+
+  return (
+    <Dialog>
+      <DialogTrigger disableButtonEnhancement>
+        <Button icon={<InfoRegular />} aria-label="Workflow nodes">
+          Nodes
+        </Button>
+      </DialogTrigger>
+      <DialogSurface className="node-catalog-dialog" aria-label="Workflow node catalog">
+        <DialogBody>
+          <DialogTitle>Workflow nodes</DialogTitle>
+          <DialogContent className="node-catalog-dialog-content">
+            <div className="node-catalog-menu" aria-label="Workflow node catalog list">
+              {workflowNodes.map((node) => (
+                <Button
+                  key={node.type}
+                  appearance={node.type === selectedNode?.type ? "secondary" : "subtle"}
+                  className={node.trigger ? "node-catalog-menu-item trigger" : "node-catalog-menu-item"}
+                  onClick={() => setSelectedType(node.type)}
+                >
+                  <span>{node.type}</span>
+                  <span>{node.display_name}</span>
+                </Button>
+              ))}
+            </div>
+            <div className="node-doc-panel" aria-label="Workflow node documentation">
+              {selectedNode ? (
+                <>
+                  <div className="node-doc-heading">
+                    <Text weight="semibold">{selectedNode.type}</Text>
+                    <Text size={200}>{selectedNode.trigger ? "trigger" : selectedNode.stateless ? "stateless" : "stateful"}</Text>
+                  </div>
+                  <MarkdownDocument content={documentation} />
+                </>
+              ) : (
+                <Text size={200}>No workflow nodes available</Text>
+              )}
+            </div>
+          </DialogContent>
+        </DialogBody>
+      </DialogSurface>
+    </Dialog>
+  );
+}
+
+function nodeDocumentation(node: WorkflowNodeInfo, language: string): string {
+  return (
+    node.documentation?.[language] ??
+    node.documentation?.["en-US"] ??
+    node.documentation?.["zh-CN"] ??
+    node.description ??
+    node.display_name
+  );
+}
+
+function MarkdownDocument({ content }: { content: string }) {
+  const lines = content.split(/\r?\n/);
+  const blocks: ReactNode[] = [];
+  let index = 0;
+
+  while (index < lines.length) {
+    const line = lines[index];
+    if (!line.trim()) {
+      index += 1;
+      continue;
+    }
+    if (line.startsWith("```")) {
+      const codeLines: string[] = [];
+      index += 1;
+      while (index < lines.length && !lines[index].startsWith("```")) {
+        codeLines.push(lines[index]);
+        index += 1;
+      }
+      index += 1;
+      blocks.push(
+        <pre key={`code-${blocks.length}`}>
+          <code>{codeLines.join("\n")}</code>
+        </pre>
+      );
+      continue;
+    }
+    if (line.startsWith("### ")) {
+      blocks.push(<h3 key={`h3-${blocks.length}`}>{renderInlineMarkdown(line.slice(4))}</h3>);
+      index += 1;
+      continue;
+    }
+    if (line.startsWith("## ")) {
+      blocks.push(<h2 key={`h2-${blocks.length}`}>{renderInlineMarkdown(line.slice(3))}</h2>);
+      index += 1;
+      continue;
+    }
+    if (line.startsWith("- ")) {
+      const items: string[] = [];
+      while (index < lines.length && lines[index].startsWith("- ")) {
+        items.push(lines[index].slice(2));
+        index += 1;
+      }
+      blocks.push(
+        <ul key={`list-${blocks.length}`}>
+          {items.map((item, itemIndex) => (
+            <li key={`${item}-${itemIndex}`}>{renderInlineMarkdown(item)}</li>
+          ))}
+        </ul>
+      );
+      continue;
+    }
+
+    const paragraphLines = [line];
+    index += 1;
+    while (
+      index < lines.length &&
+      lines[index].trim() &&
+      !lines[index].startsWith("## ") &&
+      !lines[index].startsWith("### ") &&
+      !lines[index].startsWith("- ") &&
+      !lines[index].startsWith("```")
+    ) {
+      paragraphLines.push(lines[index]);
+      index += 1;
+    }
+    blocks.push(<p key={`p-${blocks.length}`}>{renderInlineMarkdown(paragraphLines.join(" "))}</p>);
+  }
+
+  return <div className="markdown-doc">{blocks}</div>;
+}
+
+function renderInlineMarkdown(text: string): ReactNode[] {
+  return text.split(/(`[^`]+`)/g).map((part, index) => {
+    if (part.startsWith("`") && part.endsWith("`")) {
+      return <code key={`${part}-${index}`}>{part.slice(1, -1)}</code>;
+    }
+    return <span key={`${part}-${index}`}>{part}</span>;
+  });
 }
 
 function InstanceConfigPopover({

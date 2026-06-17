@@ -1,4 +1,4 @@
-package workflow
+package nodes
 
 import (
 	"bytes"
@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+
+	"codetable/internal/workflow"
 )
 
 const dingtalkRobotEndpoint = "https://oapi.dingtalk.com/robot/send"
@@ -37,30 +39,31 @@ func NewDingTalkRobotNodeForTest(client *http.Client, endpoint string) DingTalkR
 	return node
 }
 
-func (node DingTalkRobotNode) Info() NodeInfo {
-	return NodeInfo{
-		Type:        "dingtalk.robot.send",
-		DisplayName: "DingTalk robot",
-		Description: "Sends a text message through a DingTalk custom robot webhook.",
-		Inputs: []Port{
+func (node DingTalkRobotNode) Info() workflow.NodeInfo {
+	return workflow.NodeInfo{
+		Type:          "dingtalk.robot.send",
+		DisplayName:   "DingTalk robot",
+		Description:   "Sends a text message through a DingTalk custom robot webhook.",
+		Documentation: documentation("dingtalk.robot.send"),
+		Inputs: []workflow.Port{
 			{Name: "content", Type: "string", Description: "Text content to send."},
 			{Name: "at_user_ids", Type: "string[]", Description: "Optional DingTalk user IDs to mention."},
 			{Name: "at_all", Type: "boolean", Description: "Mention everyone in the group."},
 		},
-		Outputs: []Port{
+		Outputs: []workflow.Port{
 			{Name: "status_code", Type: "int"},
 			{Name: "response", Type: "object"},
 			{Name: "errcode", Type: "number"},
 			{Name: "errmsg", Type: "string"},
 		},
-		Secrets: []Port{
+		Secrets: []workflow.Port{
 			{Name: "access_token", Type: "string", Description: "DingTalk custom robot access_token."},
 		},
 		Stateless: true,
 	}
 }
 
-func (node DingTalkRobotNode) Run(ctx context.Context, input map[string]any, info RuntimeInfo) (map[string]any, error) {
+func (node DingTalkRobotNode) Run(ctx context.Context, input map[string]any, info workflow.RuntimeInfo) (map[string]any, error) {
 	accessToken := strings.TrimSpace(info.Secrets["access_token"])
 	if accessToken == "" {
 		return nil, errors.New("dingtalk access_token secret is required")
@@ -170,4 +173,4 @@ func stringSliceInput(input map[string]any, key string) []string {
 	}
 }
 
-var _ Node = DingTalkRobotNode{}
+var _ workflow.Node = DingTalkRobotNode{}

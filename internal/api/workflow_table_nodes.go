@@ -7,72 +7,10 @@ import (
 
 	"codetable/internal/table"
 	"codetable/internal/workflow"
+	"codetable/internal/workflow/nodes"
 )
 
-type workflowTableNode struct {
-	server *Server
-	kind   string
-}
-
-func (node workflowTableNode) Info() workflow.NodeInfo {
-	switch node.kind {
-	case "create":
-		return workflow.NodeInfo{
-			Type:        "table.row.create",
-			DisplayName: "Create row",
-			Description: "Creates a table row through the server table API using the workflow creator permissions.",
-			Inputs: []workflow.Port{
-				{Name: "database", Type: "string"},
-				{Name: "table", Type: "string"},
-				{Name: "values", Type: "object"},
-			},
-			Outputs:   []workflow.Port{{Name: "record", Type: "RowRecord"}},
-			Stateless: true,
-		}
-	case "update":
-		return workflow.NodeInfo{
-			Type:        "table.row.update",
-			DisplayName: "Update row",
-			Description: "Updates a table row through the server table API using the workflow creator permissions.",
-			Inputs: []workflow.Port{
-				{Name: "database", Type: "string"},
-				{Name: "table", Type: "string"},
-				{Name: "record_id", Type: "int64"},
-				{Name: "values", Type: "object"},
-			},
-			Outputs:   []workflow.Port{{Name: "record", Type: "RowRecord"}},
-			Stateless: true,
-		}
-	case "delete":
-		return workflow.NodeInfo{
-			Type:        "table.row.delete",
-			DisplayName: "Delete row",
-			Description: "Deletes a table row through the server table API using the workflow creator permissions.",
-			Inputs: []workflow.Port{
-				{Name: "database", Type: "string"},
-				{Name: "table", Type: "string"},
-				{Name: "record_id", Type: "int64"},
-			},
-			Outputs:   []workflow.Port{{Name: "record", Type: "RowRecord"}},
-			Stateless: true,
-		}
-	default:
-		return workflow.NodeInfo{
-			Type:        "table.row.list",
-			DisplayName: "List rows",
-			Description: "Lists table rows through the server table API using the workflow creator permissions.",
-			Inputs: []workflow.Port{
-				{Name: "database", Type: "string"},
-				{Name: "table", Type: "string"},
-				{Name: "view", Type: "string"},
-			},
-			Outputs:   []workflow.Port{{Name: "rows", Type: "RowRecord[]"}},
-			Stateless: true,
-		}
-	}
-}
-
-func (node workflowTableNode) Run(ctx context.Context, input map[string]any, info workflow.RuntimeInfo) (map[string]any, error) {
+func (server *Server) RunWorkflowTableNode(ctx context.Context, kind string, input map[string]any, info workflow.RuntimeInfo) (map[string]any, error) {
 	if info.CreatorID == "" {
 		return nil, errors.New("workflow creator is required")
 	}
@@ -80,18 +18,18 @@ func (node workflowTableNode) Run(ctx context.Context, input map[string]any, inf
 	if err != nil {
 		return nil, err
 	}
-	perms, err := node.server.system.EffectiveGrantsForSubject(ctx, info.CreatorID)
+	perms, err := server.system.EffectiveGrantsForSubject(ctx, info.CreatorID)
 	if err != nil {
 		return nil, err
 	}
-	catalog := node.server.catalogSnapshot()
-	switch node.kind {
+	catalog := server.catalogSnapshot()
+	switch kind {
 	case "create":
 		values, err := workflowValuesInput(input)
 		if err != nil {
 			return nil, err
 		}
-		row, err := node.server.tables.CreateRow(ctx, catalog, perms, info.CreatorID, dbName, tableName, values)
+		row, err := server.tables.CreateRow(ctx, catalog, perms, info.CreatorID, dbName, tableName, values)
 		return workflowRowOutput(row, err)
 	case "update":
 		recordID, err := workflowRecordIDInput(input)
@@ -102,18 +40,18 @@ func (node workflowTableNode) Run(ctx context.Context, input map[string]any, inf
 		if err != nil {
 			return nil, err
 		}
-		row, err := node.server.tables.UpdateRow(ctx, catalog, perms, info.CreatorID, dbName, tableName, recordID, values)
+		row, err := server.tables.UpdateRow(ctx, catalog, perms, info.CreatorID, dbName, tableName, recordID, values)
 		return workflowRowOutput(row, err)
 	case "delete":
 		recordID, err := workflowRecordIDInput(input)
 		if err != nil {
 			return nil, err
 		}
-		row, err := node.server.tables.DeleteRow(ctx, catalog, perms, info.CreatorID, dbName, tableName, recordID)
+		row, err := server.tables.DeleteRow(ctx, catalog, perms, info.CreatorID, dbName, tableName, recordID)
 		return workflowRowOutput(row, err)
 	default:
 		viewName, _ := input["view"].(string)
-		rows, err := node.server.tables.Rows(ctx, catalog, perms, info.CreatorID, dbName, tableName, viewName)
+		rows, err := server.tables.Rows(ctx, catalog, perms, info.CreatorID, dbName, tableName, viewName)
 		if err != nil {
 			return nil, err
 		}
@@ -178,10 +116,8 @@ func workflowRowRecord(row table.Row) map[string]any {
 }
 
 func (server *Server) registerWorkflowTableNodes() {
-	server.runner.Register(workflowTableNode{server: server, kind: "create"})
-	server.runner.Register(workflowTableNode{server: server, kind: "update"})
-	server.runner.Register(workflowTableNode{server: server, kind: "delete"})
-	server.runner.Register(workflowTableNode{server: server, kind: "list"})
+	server.runner.Register(nodes.NewTableRowNode(server, "create"))
+	server.runner.Register(nodes.NewTableRowNode(server, "update"))
+	server.runner.Register(nodes.NewTableRowNode(server, "delete"))
+	server.runner.Register(nodes.NewTableRowNode(server, "list"))
 }
-
-var _ workflow.Node = workflowTableNode{}

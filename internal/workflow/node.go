@@ -1,17 +1,22 @@
 package workflow
 
-import "context"
+import (
+	"context"
+
+	"codetable/internal/history"
+)
 
 type NodeInfo struct {
-	Type        string `json:"type"`
-	DisplayName string `json:"display_name"`
-	Description string `json:"description,omitempty"`
-	Inputs      []Port `json:"inputs"`
-	Outputs     []Port `json:"outputs"`
-	Variables   []Port `json:"variables,omitempty"`
-	Secrets     []Port `json:"secrets,omitempty"`
-	Stateless   bool   `json:"stateless"`
-	Trigger     bool   `json:"trigger"`
+	Type          string            `json:"type"`
+	DisplayName   string            `json:"display_name"`
+	Description   string            `json:"description,omitempty"`
+	Documentation map[string]string `json:"documentation,omitempty"`
+	Inputs        []Port            `json:"inputs"`
+	Outputs       []Port            `json:"outputs"`
+	Variables     []Port            `json:"variables,omitempty"`
+	Secrets       []Port            `json:"secrets,omitempty"`
+	Stateless     bool              `json:"stateless"`
+	Trigger       bool              `json:"trigger"`
 }
 
 type Port struct {
@@ -23,6 +28,18 @@ type Port struct {
 type Node interface {
 	Info() NodeInfo
 	Run(ctx context.Context, input map[string]any, info RuntimeInfo) (map[string]any, error)
+}
+
+type TriggerNode interface {
+	Node
+	RunTrigger(ctx context.Context, params map[string]any, event TriggerEvent, info RuntimeInfo) (map[string]any, bool, error)
+}
+
+type TriggerEvent struct {
+	Kind        string
+	HistoryKey  string
+	RowChange   history.RowChange
+	ScheduledAt int64
 }
 
 type RuntimeInfo struct {

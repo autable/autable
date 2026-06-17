@@ -79,6 +79,7 @@ export type WorkflowNodeInfo = {
   type: string;
   display_name: string;
   description?: string;
+  documentation?: Record<string, string>;
   inputs: WorkflowPort[];
   outputs: WorkflowPort[];
   variables?: WorkflowPort[];

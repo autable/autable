@@ -80,6 +80,10 @@ const workflowNodeFixture = [
   {
     type: "dingtalk.robot.send",
     display_name: "DingTalk robot",
+    documentation: {
+      "en-US": "## DingTalk robot\n\n- `access_token` (`string`): DingTalk custom robot access token.",
+      "zh-CN": "## 钉钉机器人\n\n- `access_token` (`string`): 钉钉自定义机器人的 access token。"
+    },
     inputs: [{ name: "content", type: "string" }],
     outputs: [{ name: "status_code", type: "int" }],
     secrets: [{ name: "access_token", type: "string" }],
@@ -89,6 +93,10 @@ const workflowNodeFixture = [
   {
     type: "echo",
     display_name: "Echo",
+    documentation: {
+      "en-US": "## Echo\n\nReturns the node input unchanged.",
+      "zh-CN": "## Echo\n\n原样返回输入。"
+    },
     inputs: [{ name: "value", type: "any" }],
     outputs: [{ name: "value", type: "any" }],
     stateless: true,
@@ -97,8 +105,12 @@ const workflowNodeFixture = [
   {
     type: "table.record.changed",
     display_name: "Record changed",
-    inputs: [{ name: "history_key", type: "string" }],
-    outputs: [{ name: "record", type: "TriggerRecord" }],
+    documentation: {
+      "en-US": "## Record changed\n\nThe node output becomes `run(info).inputs`.\n\n- `table` (`string`): Optional table name.",
+      "zh-CN": "## 记录变更\n\n节点输出会成为 `run(info).inputs`。\n\n- `table` (`string`): 可选表名。"
+    },
+    inputs: [{ name: "table", type: "string" }],
+    outputs: [{ name: "history_key", type: "string" }],
     stateless: true,
     trigger: true
   }
@@ -403,8 +415,19 @@ describe("App", () => {
     expect((screen.getByLabelText("Workflow JavaScript") as HTMLTextAreaElement).value).toContain(
       'info.instance("review_echo").exec'
     );
-    expect(screen.getByText("dingtalk.robot.send")).toBeInTheDocument();
-    expect(screen.getByText("secrets access_token:string")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Workflow nodes" }));
+    expect(screen.getByRole("dialog", { name: "Workflow node catalog" })).toBeInTheDocument();
+    expect(screen.getAllByText("dingtalk.robot.send").length).toBeGreaterThan(0);
+    expect(screen.getByText("钉钉机器人")).toBeInTheDocument();
+    expect(screen.getByText(/钉钉自定义机器人的 access token/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /table\.record\.changed/ }));
+    expect(screen.getByText("记录变更")).toBeInTheDocument();
+    expect(screen.getByText(/run\(info\)\.inputs/)).toBeInTheDocument();
+    await userEvent.keyboard("{Escape}");
+    await userEvent.click(screen.getByRole("button", { name: "Switch language" }));
+    await userEvent.click(screen.getByRole("button", { name: "Workflow nodes" }));
+    expect(screen.getAllByText("DingTalk robot").length).toBeGreaterThan(0);
+    await userEvent.keyboard("{Escape}");
     await userEvent.click(screen.getByRole("button", { name: "Edit config review_echo" }));
     expect(screen.getByLabelText("Variable review_echo.CHANNEL")).toHaveValue("ops");
     expect(screen.getByLabelText("Secret review_echo.TOKEN")).toHaveValue("x".repeat(12));
@@ -415,8 +438,6 @@ describe("App", () => {
     await userEvent.click(screen.getByRole("button", { name: "Save config" }));
     expect(screen.getAllByText("echo").length).toBeGreaterThan(0);
     expect(screen.getAllByText("review_echo").length).toBeGreaterThan(0);
-    expect(screen.getByText("table.record.changed")).toBeInTheDocument();
-    expect(screen.getByText(/history_key:string/)).toBeInTheDocument();
     expect(screen.getByText("No runs yet")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Workflow JavaScript"), {
       target: {

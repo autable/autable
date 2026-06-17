@@ -29,10 +29,12 @@ import {
 } from "./api";
 
 type View = WorkspaceView;
+type AppLanguage = "en-US" | "zh-CN";
 
 const emptyDatabase: DatabaseMetadata = { name: "", sqlite_path: "", tables: [] };
 const emptyTable: TableMetadata = { name: "", display_name: "", fields: [], views: [] };
 const emptyCatalog: Catalog = { databases: [] };
+const appLanguages: AppLanguage[] = ["en-US", "zh-CN"];
 
 export function App() {
   const publishedFormToken = publishedFormTokenFromPath();
@@ -55,6 +57,7 @@ function WorkspaceApp() {
   const [newDatabaseName, setNewDatabaseName] = useState("");
   const [newTableName, setNewTableName] = useState("");
   const [status, setStatus] = useState("Ready");
+  const [language, setLanguage] = useState<AppLanguage>("zh-CN");
 
   const database =
     catalog.databases.find((item) => item.name === selectedDatabaseName) ?? catalog.databases[0] ?? emptyDatabase;
@@ -314,6 +317,11 @@ function WorkspaceApp() {
     window.location.assign(oidcStartURL(providerName));
   }
 
+  function cycleLanguage() {
+    const currentIndex = appLanguages.indexOf(language);
+    setLanguage(appLanguages[(currentIndex + 1) % appLanguages.length]);
+  }
+
   function selectDatabaseSection(databaseName: string, nextView: View) {
     const nextDatabase = catalog.databases.find((item) => item.name === databaseName);
     if (!nextDatabase) {
@@ -398,6 +406,9 @@ function WorkspaceApp() {
             </Text>
           </div>
           <Toolbar aria-label="Workspace actions">
+            <ToolbarButton aria-label="Switch language" onClick={cycleLanguage}>
+              {language === "zh-CN" ? "中文" : "EN"}
+            </ToolbarButton>
             <Tooltip content="Refresh metadata" relationship="label">
               <ToolbarButton
                 aria-label="Refresh metadata"
@@ -464,6 +475,7 @@ function WorkspaceApp() {
               onUpdateInputsJSON={workflowFormWorkspace.updateWorkflowInputsJSON}
               onUpdateScript={workflowFormWorkspace.updateSelectedWorkflowScript}
               inputsText={workflowInputsText}
+              language={language}
               workflowInstances={workflowInstances}
               selectedRun={selectedWorkflowRun}
               workflow={selectedWorkflow}

@@ -1882,8 +1882,12 @@ func TestWorkflowNodesAPI(t *testing.T) {
 		byType[node.Type] = node
 	}
 	for _, expectedType := range expectedTypes {
-		if _, ok := byType[expectedType]; !ok {
+		node, ok := byType[expectedType]
+		if !ok {
 			t.Fatalf("expected node %q in %#v", expectedType, nodes)
+		}
+		if node.Documentation["en-US"] == "" || node.Documentation["zh-CN"] == "" {
+			t.Fatalf("expected bilingual docs for node %q: %#v", expectedType, node.Documentation)
 		}
 	}
 	dingtalk := byType["dingtalk.robot.send"]
@@ -1964,7 +1968,7 @@ func TestRowCreateAutomaticallyRunsMatchingWorkflowTrigger(t *testing.T) {
 
 	workflowRequest := httptest.NewRequest(http.MethodPost, "/api/databases/db/workflows", bytes.NewBufferString(`{
 		"name":"auto-contact",
-		"script":"function instances(info) { return { row_change: \"table.record.changed\" }; }\nfunction trigger(info) { return { instance: \"row_change\", params: { table: \"contacts\", operations: [\"create\"], fields: [\"name\"] } }; }\nfunction run(info) { const changed = info.instance(\"row_change\").exec({ history_key: info.inputs.history_key }); return { operation: info.inputs.operation, record_id: changed.record.record_id, name: changed.diff.name.new }; }"
+		"script":"function instances(info) { return { row_change: \"table.record.changed\" }; }\nfunction trigger(info) { return { instance: \"row_change\", params: { table: \"contacts\", operations: [\"create\"], fields: [\"name\"] } }; }\nfunction run(info) { return { operation: info.inputs.operation, record_id: info.inputs.record.record_id, name: info.inputs.diff.name.new }; }"
 	}`))
 	workflowRequest.AddCookie(testSessionCookie(t, system, "u1"))
 	workflowRecorder := httptest.NewRecorder()
@@ -1998,6 +2002,9 @@ func TestRowCreateAutomaticallyRunsMatchingWorkflowTrigger(t *testing.T) {
 	if runs[0].Run.Inputs["operation"] != "create" || runs[0].Run.Outputs["name"] != "Ada" || runs[0].Run.Outputs["record_id"] != float64(1) {
 		t.Fatalf("unexpected automatic workflow run: %#v", runs[0].Run)
 	}
+	if len(runs[0].Run.Steps) != 0 {
+		t.Fatalf("trigger node should feed run inputs without being executed in run steps: %#v", runs[0].Run.Steps)
+	}
 }
 
 func TestWorkflowWorkersConsumeRowChangeEvents(t *testing.T) {
@@ -2017,7 +2024,7 @@ func TestWorkflowWorkersConsumeRowChangeEvents(t *testing.T) {
 
 	workflowRequest := httptest.NewRequest(http.MethodPost, "/api/databases/db/workflows", bytes.NewBufferString(`{
 		"name":"worker-contact",
-		"script":"function instances(info) { return { row_change: \"table.record.changed\" }; }\nfunction trigger(info) { return { instance: \"row_change\", params: { table: \"contacts\", operations: [\"create\"], fields: [\"name\"] } }; }\nfunction run(info) { const changed = info.instance(\"row_change\").exec({ history_key: info.inputs.history_key }); return { name: changed.diff.name.new }; }"
+		"script":"function instances(info) { return { row_change: \"table.record.changed\" }; }\nfunction trigger(info) { return { instance: \"row_change\", params: { table: \"contacts\", operations: [\"create\"], fields: [\"name\"] } }; }\nfunction run(info) { return { name: info.inputs.diff.name.new }; }"
 	}`))
 	workflowRequest.AddCookie(testSessionCookie(t, system, "u1"))
 	workflowRecorder := httptest.NewRecorder()
@@ -2037,6 +2044,9 @@ func TestWorkflowWorkersConsumeRowChangeEvents(t *testing.T) {
 	runs := waitWorkflowRunCount(t, server, system, 1, "u1", 1)
 	if runs[0].Run.Outputs["name"] != "Ada" {
 		t.Fatalf("unexpected worker workflow run: %#v", runs[0].Run)
+	}
+	if len(runs[0].Run.Steps) != 0 {
+		t.Fatalf("trigger node should not be called from run: %#v", runs[0].Run.Steps)
 	}
 }
 

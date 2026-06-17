@@ -586,6 +586,135 @@ select {
   line-height: 1.45;
 }
 
+.workflow-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.node-catalog-dialog {
+  width: min(920px, calc(100vw - 48px));
+  max-width: min(920px, calc(100vw - 48px));
+}
+
+.node-catalog-dialog-content {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  gap: 16px;
+  height: min(680px, calc(100vh - 180px));
+  min-height: 0;
+}
+
+.node-catalog-menu,
+.node-doc-panel {
+  min-height: 0;
+  overflow: auto;
+}
+
+.node-catalog-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-right: 12px;
+  border-right: 1px solid var(--colorNeutralStroke2);
+}
+
+.node-catalog-menu-item {
+  justify-content: flex-start;
+  width: 100%;
+  min-height: 48px;
+}
+
+.node-catalog-menu-item .fui-Button__content {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+}
+
+.node-catalog-menu-item .fui-Button__content span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.node-catalog-menu-item .fui-Button__content span:first-child {
+  font-weight: 600;
+}
+
+.node-catalog-menu-item .fui-Button__content span:last-child {
+  color: var(--colorNeutralForeground3);
+  font-size: 12px;
+}
+
+.node-catalog-menu-item.trigger {
+  border-left: 3px solid var(--colorPaletteMarigoldBorderActive);
+}
+
+.node-doc-panel {
+  padding-right: 4px;
+}
+
+.node-doc-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--colorNeutralStroke2);
+}
+
+.markdown-doc {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 12px;
+  line-height: 1.5;
+}
+
+.markdown-doc h2,
+.markdown-doc h3,
+.markdown-doc p,
+.markdown-doc ul {
+  margin: 0;
+}
+
+.markdown-doc h2 {
+  font-size: 20px;
+}
+
+.markdown-doc h3 {
+  margin-top: 6px;
+  font-size: 15px;
+}
+
+.markdown-doc ul {
+  padding-left: 20px;
+}
+
+.markdown-doc code {
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: var(--colorNeutralBackground3);
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+}
+
+.markdown-doc pre {
+  margin: 0;
+  padding: 12px;
+  overflow: auto;
+  border: 1px solid var(--colorNeutralStroke2);
+  border-radius: 6px;
+  background: var(--colorNeutralBackground3);
+}
+
+.markdown-doc pre code {
+  padding: 0;
+  background: transparent;
+}
+
 .node-list {
   display: flex;
   flex-direction: column;
