@@ -10,6 +10,7 @@ import {
   Field,
   Input
 } from "@fluentui/react-components";
+import { useTranslation } from "react-i18next";
 import type { OIDCProvider } from "../api";
 
 type AuthDialogProps = {
@@ -37,6 +38,7 @@ export function AuthDialog({
   password,
   providers
 }: AuthDialogProps) {
+  const { t } = useTranslation();
   return (
     <Dialog open={open} onOpenChange={(_, data) => onOpenChange(data.open)}>
       <DialogSurface>
@@ -48,10 +50,10 @@ export function AuthDialog({
           }}
         >
           <DialogBody>
-            <DialogTitle>Login</DialogTitle>
+            <DialogTitle>{t("auth.loginTitle")}</DialogTitle>
             <DialogContent>
               <div className="auth-modal">
-                <Field label="Email">
+                <Field label={t("auth.email")}>
                   <Input
                     type="email"
                     autoComplete="email"
@@ -59,7 +61,7 @@ export function AuthDialog({
                     onChange={(_, data) => onEmailChange(data.value)}
                   />
                 </Field>
-                <Field label="Password">
+                <Field label={t("auth.password")}>
                   <Input
                     type="password"
                     autoComplete="current-password"
@@ -69,11 +71,11 @@ export function AuthDialog({
                 </Field>
                 {providers.length > 0 && (
                   <>
-                    <Divider>or</Divider>
+                    <Divider>{t("auth.or")}</Divider>
                     <div className="oidc-actions">
                       {providers.map((provider) => (
                         <Button key={provider.name} onClick={() => onOIDCLogin(provider.name)}>
-                          Continue with {provider.name}
+                          {t("auth.continueWith", { provider: provider.name })}
                         </Button>
                       ))}
                     </div>
@@ -89,10 +91,10 @@ export function AuthDialog({
                   onOpenChange(false);
                 }}
               >
-                Register
+                {t("common.register")}
               </Button>
               <Button type="submit" appearance="primary">
-                Login
+                {t("common.login")}
               </Button>
             </DialogActions>
           </DialogBody>

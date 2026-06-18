@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { compactMembers, replaceRole } from "../appState";
 import {
   createRole,
@@ -20,6 +21,7 @@ type UsePermissionWorkspaceOptions = {
 };
 
 export function usePermissionWorkspace({ currentUserID, database, onStatus }: UsePermissionWorkspaceOptions) {
+  const { t } = useTranslation();
   const [roles, setRoles] = useState<RoleDefinition[]>([]);
   const [selectedRoleName, setSelectedRoleName] = useState("");
   const [newRoleName, setNewRoleName] = useState("");
@@ -114,12 +116,12 @@ export function usePermissionWorkspace({ currentUserID, database, onStatus }: Us
 
   async function createRoleFromSidebar() {
     if (!database.name) {
-      onStatus("Select a database before creating a role");
+      onStatus(t("status.selectDatabaseBeforeRole"));
       return;
     }
     const name = newRoleName.trim();
     if (!name) {
-      onStatus("Role name is required");
+      onStatus(t("status.roleNameRequired"));
       return;
     }
     try {
@@ -127,15 +129,15 @@ export function usePermissionWorkspace({ currentUserID, database, onStatus }: Us
       setRoles((current) => replaceRole(current, saved));
       setSelectedRoleName(saved.name);
       setNewRoleName("");
-      onStatus(`Created role ${saved.name}`);
+      onStatus(t("status.createdRole", { name: saved.name }));
     } catch (error) {
-      onStatus(error instanceof Error ? error.message : "Role creation failed");
+      onStatus(error instanceof Error ? error.message : t("status.roleCreationFailed"));
     }
   }
 
   async function persistRoleGrants() {
     if (!database.name || !selectedRole) {
-      onStatus("Select a role before saving permissions");
+      onStatus(t("status.selectRoleBeforePermissions"));
       return;
     }
     try {
@@ -145,9 +147,9 @@ export function usePermissionWorkspace({ currentUserID, database, onStatus }: Us
       setSelectedRoleName(saved.name);
       setRoleDraftMembers(saved.members ?? []);
       setRoleDraftMemberUsers(saved.member_users ?? []);
-      onStatus(`Saved role ${saved.name}`);
+      onStatus(t("status.savedRole", { name: saved.name }));
     } catch (error) {
-      onStatus(error instanceof Error ? error.message : "Role save failed");
+      onStatus(error instanceof Error ? error.message : t("status.roleSaveFailed"));
     }
   }
 
@@ -177,7 +179,7 @@ export function usePermissionWorkspace({ currentUserID, database, onStatus }: Us
     const member =
       user ?? memberSearchResults.find((item) => item.email.toLowerCase() === newRoleMemberEmail.trim().toLowerCase());
     if (!member) {
-      onStatus("Select a user email from the member suggestions");
+      onStatus(t("status.selectUserSuggestion"));
       return;
     }
     setRoleDraftMembers((current) => compactMembers([...current, member.id]));

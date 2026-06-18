@@ -1,5 +1,6 @@
 import { type FormEvent, useEffect, useMemo, useState } from "react";
 import { Button, Input, Select, Text } from "@fluentui/react-components";
+import { useTranslation } from "react-i18next";
 import {
   listOIDCProviders,
   loadCurrentUser,
@@ -20,6 +21,7 @@ type PublishedFormPageProps = {
 };
 
 export function PublishedFormPage({ token }: PublishedFormPageProps) {
+  const { t } = useTranslation();
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
@@ -28,7 +30,7 @@ export function PublishedFormPage({ token }: PublishedFormPageProps) {
   const [oidcProviders, setOIDCProviders] = useState<OIDCProvider[]>([]);
   const [form, setForm] = useState<FormDefinition | null>(null);
   const [formValues, setFormValues] = useState<Record<string, string>>({});
-  const [status, setStatus] = useState("Loading form");
+  const [status, setStatus] = useState(t("status.loadingForm"));
   const renderedForm = useMemo(() => renderFormScript(form?.script ?? ""), [form?.script]);
 
   useEffect(() => {
@@ -38,15 +40,15 @@ export function PublishedFormPage({ token }: PublishedFormPageProps) {
         if (cancelled) {
           return;
         }
-        setCurrentUser(user);
+          setCurrentUser(user);
         if (!user) {
           setAuthDialogOpen(true);
-          setStatus("Login to open this form");
+          setStatus(t("status.loginToOpenForm"));
         }
       })
       .catch((error) => {
         if (!cancelled) {
-          setStatus(error instanceof Error ? error.message : "Current user load failed");
+          setStatus(error instanceof Error ? error.message : t("status.currentUserLoadFailed"));
         }
       })
       .finally(() => {
@@ -80,12 +82,12 @@ export function PublishedFormPage({ token }: PublishedFormPageProps) {
         }
         setForm(loadedForm);
         setFormValues({});
-        setStatus(`Opened ${loadedForm.name}`);
+        setStatus(t("status.openedForm", { name: loadedForm.name }));
       })
       .catch((error) => {
         if (!cancelled) {
           setForm(null);
-          setStatus(error instanceof Error ? error.message : "Published form load failed");
+          setStatus(error instanceof Error ? error.message : t("status.publishedFormLoadFailed"));
         }
       });
     return () => {
@@ -98,9 +100,9 @@ export function PublishedFormPage({ token }: PublishedFormPageProps) {
       const user = await register(authEmail, authPassword);
       setCurrentUser(user);
       setAuthDialogOpen(false);
-      setStatus(`Signed in as ${user.email}`);
+      setStatus(t("status.signedInAs", { email: user.email }));
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Registration failed");
+      setStatus(error instanceof Error ? error.message : t("status.registrationFailed"));
     }
   }
 
@@ -109,9 +111,9 @@ export function PublishedFormPage({ token }: PublishedFormPageProps) {
       const user = await login(authEmail, authPassword);
       setCurrentUser(user);
       setAuthDialogOpen(false);
-      setStatus(`Signed in as ${user.email}`);
+      setStatus(t("status.signedInAs", { email: user.email }));
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Login failed");
+      setStatus(error instanceof Error ? error.message : t("status.loginFailed"));
     }
   }
 
@@ -128,7 +130,7 @@ export function PublishedFormPage({ token }: PublishedFormPageProps) {
       return;
     }
     if (!renderedForm.table || !renderedForm.fields || Object.keys(renderedForm.fields).length === 0) {
-      setStatus("Published form definition is required");
+      setStatus(t("status.publishedFormDefinitionRequired"));
       return;
     }
     const values = Object.fromEntries(
@@ -145,9 +147,9 @@ export function PublishedFormPage({ token }: PublishedFormPageProps) {
     try {
       const saved = await submitPublishedForm(token, values);
       setFormValues({});
-      setStatus(`Form submitted as record ${saved.record_id}`);
+      setStatus(t("status.publishedFormSubmitted", { id: saved.record_id }));
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Published form submit failed");
+      setStatus(error instanceof Error ? error.message : t("status.publishedFormSubmitFailed"));
     }
   }
 
@@ -156,12 +158,12 @@ export function PublishedFormPage({ token }: PublishedFormPageProps) {
       <main className="published-form-main">
         <div className="section-header">
           <div>
-            <Text weight="semibold">{form?.name ?? "Published form"}</Text>
-            <Text size={200}>{currentUser ? currentUser.email : "Login required"}</Text>
+            <Text weight="semibold">{form?.name ?? t("form.publishedForm")}</Text>
+            <Text size={200}>{currentUser ? currentUser.email : t("status.loginRequired")}</Text>
           </div>
           {!currentUser && (
             <Button appearance="primary" onClick={() => setAuthDialogOpen(true)}>
-              Login
+              {t("common.login")}
             </Button>
           )}
         </div>

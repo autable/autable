@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Text, Toolbar, ToolbarButton, Tooltip } from "@fluentui/react-components";
 import { ArrowClockwiseRegular } from "@fluentui/react-icons";
+import { useTranslation } from "react-i18next";
 import { AuthDialog } from "./components/AuthDialog";
 import { FormWorkspace } from "./components/FormWorkspace";
 import { PermissionPanel } from "./components/PermissionPanel";
@@ -27,14 +28,13 @@ import {
   type OIDCProvider,
   type TableMetadata,
 } from "./api";
+import { appLanguages, normalizeLanguage, type AppLanguage } from "./i18n";
 
 type View = WorkspaceView;
-type AppLanguage = "en-US" | "zh-CN";
 
 const emptyDatabase: DatabaseMetadata = { name: "", sqlite_path: "", tables: [] };
 const emptyTable: TableMetadata = { name: "", display_name: "", fields: [], views: [] };
 const emptyCatalog: Catalog = { databases: [] };
-const appLanguages: AppLanguage[] = ["en-US", "zh-CN"];
 
 export function App() {
   const publishedFormToken = publishedFormTokenFromPath();
@@ -42,6 +42,7 @@ export function App() {
 }
 
 function WorkspaceApp() {
+  const { i18n, t } = useTranslation();
   const [catalog, setCatalog] = useState<Catalog>(emptyCatalog);
   const [view, setView] = useState<View>("table");
   const [selectedDatabaseName, setSelectedDatabaseName] = useState("");
@@ -56,8 +57,8 @@ function WorkspaceApp() {
   const [authDialogOpen, setAuthDialogOpen] = useState(false);
   const [newDatabaseName, setNewDatabaseName] = useState("");
   const [newTableName, setNewTableName] = useState("");
-  const [status, setStatus] = useState("Ready");
-  const [language, setLanguage] = useState<AppLanguage>("zh-CN");
+  const [status, setStatus] = useState(t("status.ready"));
+  const language = normalizeLanguage(i18n.resolvedLanguage ?? i18n.language);
 
   const database =
     catalog.databases.find((item) => item.name === selectedDatabaseName) ?? catalog.databases[0] ?? emptyDatabase;
@@ -133,12 +134,12 @@ function WorkspaceApp() {
         }
         setCurrentUser(user);
         if (user) {
-          setStatus(`Signed in as ${user.email}`);
+          setStatus(t("status.signedInAs", { email: user.email }));
         }
       })
       .catch((error) => {
         if (!cancelled) {
-          setStatus(error instanceof Error ? error.message : "Current user load failed");
+          setStatus(error instanceof Error ? error.message : t("status.currentUserLoadFailed"));
         }
       })
       .finally(() => {
@@ -181,7 +182,7 @@ function WorkspaceApp() {
       })
       .catch((error) => {
         if (!cancelled) {
-          setStatus(error instanceof Error ? error.message : "Metadata load failed");
+          setStatus(error instanceof Error ? error.message : t("status.metadataLoadFailed"));
         }
       });
     return () => {
@@ -191,7 +192,7 @@ function WorkspaceApp() {
 
   async function refreshMetadata() {
     if (!currentUser) {
-      setStatus("Login before refreshing workspace metadata");
+      setStatus(t("status.loginBeforeRefresh"));
       return;
     }
     try {
@@ -203,9 +204,9 @@ function WorkspaceApp() {
           workflowFormWorkspace.refreshResources(dbName)
         ]);
       }
-      setStatus("Metadata and db-level resources refreshed");
+      setStatus(t("status.metadataRefreshed"));
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Metadata refresh failed");
+      setStatus(error instanceof Error ? error.message : t("status.metadataRefreshFailed"));
     }
   }
 
@@ -230,7 +231,7 @@ function WorkspaceApp() {
   async function createDatabaseFromSidebar() {
     const name = newDatabaseName.trim();
     if (!name) {
-      setStatus("Database name is required");
+      setStatus(t("status.databaseNameRequired"));
       return;
     }
     try {
@@ -242,20 +243,20 @@ function WorkspaceApp() {
       setSelectedTableView("all");
       tableWorkspace.resetRows("all");
       setNewDatabaseName("");
-      setStatus(`Created database ${saved.name}`);
+      setStatus(t("status.createdDatabase", { name: saved.name }));
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Database creation failed");
+      setStatus(error instanceof Error ? error.message : t("status.databaseCreationFailed"));
     }
   }
 
   async function createTableFromSidebar() {
     if (!database.name) {
-      setStatus("Select a database before creating a table");
+      setStatus(t("status.selectDatabaseBeforeTable"));
       return;
     }
     const name = newTableName.trim();
     if (!name) {
-      setStatus("Table name is required");
+      setStatus(t("status.tableNameRequired"));
       return;
     }
     try {
@@ -274,9 +275,9 @@ function WorkspaceApp() {
       setSelectedTableView("all");
       tableWorkspace.resetRows("all");
       setNewTableName("");
-      setStatus(`Created table ${database.name}.${saved.name}`);
+      setStatus(t("status.createdTable", { database: database.name, table: saved.name }));
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Table creation failed");
+      setStatus(error instanceof Error ? error.message : t("status.tableCreationFailed"));
     }
   }
 
@@ -286,9 +287,9 @@ function WorkspaceApp() {
       setCurrentUser(user);
       setAuthReady(true);
       await refreshCatalogAfterAuth();
-      setStatus(`Signed in as ${user.email}`);
+      setStatus(t("status.signedInAs", { email: user.email }));
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Registration failed");
+      setStatus(error instanceof Error ? error.message : t("status.registrationFailed"));
     }
   }
 
@@ -298,9 +299,9 @@ function WorkspaceApp() {
       setCurrentUser(user);
       setAuthReady(true);
       await refreshCatalogAfterAuth();
-      setStatus(`Signed in as ${user.email}`);
+      setStatus(t("status.signedInAs", { email: user.email }));
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Login failed");
+      setStatus(error instanceof Error ? error.message : t("status.loginFailed"));
     }
   }
 
@@ -310,9 +311,9 @@ function WorkspaceApp() {
       setCurrentUser(null);
       setAuthReady(true);
       applyCatalogSelection(emptyCatalog, "");
-      setStatus("Signed out");
+      setStatus(t("status.signedOut"));
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Logout failed");
+      setStatus(error instanceof Error ? error.message : t("status.logoutFailed"));
     }
   }
 
@@ -322,7 +323,7 @@ function WorkspaceApp() {
 
   function cycleLanguage() {
     const currentIndex = appLanguages.indexOf(language);
-    setLanguage(appLanguages[(currentIndex + 1) % appLanguages.length]);
+    void i18n.changeLanguage(appLanguages[(currentIndex + 1) % appLanguages.length] as AppLanguage);
   }
 
   function selectDatabaseSection(databaseName: string, nextView: View) {
@@ -344,7 +345,7 @@ function WorkspaceApp() {
     setOpenViewPanelRequest((current) => current + 1);
     if (tableName !== table.name) {
       setSelectedTableView("all");
-      setStatus("Select the table before adding a view");
+      setStatus(t("status.selectTableBeforeView"));
       return;
     }
     await tableWorkspace.createDefaultViewFromSidebar();
@@ -399,20 +400,20 @@ function WorkspaceApp() {
         <header className="topbar">
           <div className="workspace-title">
             <Text weight="semibold">
-              {database.name || "No database"}
+              {database.name || t("common.noDatabase")}
               {view === "table" && table.name ? ` / ${table.display_name || table.name}` : ""}
               {view === "workflow" && selectedWorkflow ? ` / ${selectedWorkflow.name}` : ""}
               {view === "form" && selectedForm ? ` / ${selectedForm.name}` : ""}
-              {view === "permission" ? " / permissions" : ""}
+              {view === "permission" ? ` / ${t("common.permission").toLowerCase()}` : ""}
             </Text>
           </div>
-          <Toolbar aria-label="Workspace actions">
-            <ToolbarButton aria-label="Switch language" onClick={cycleLanguage}>
-              {language === "zh-CN" ? "中文" : "EN"}
+          <Toolbar aria-label={t("common.workspaceActions")}>
+            <ToolbarButton aria-label={t("language.switch")} onClick={cycleLanguage}>
+              {t("language.toggleLabel")}
             </ToolbarButton>
-            <Tooltip content="Refresh metadata" relationship="label">
+            <Tooltip content={t("common.refreshMetadata")} relationship="label">
               <ToolbarButton
-                aria-label="Refresh metadata"
+                aria-label={t("common.refreshMetadata")}
                 icon={<ArrowClockwiseRegular />}
                 onClick={refreshMetadata}
                 disabled={!currentUser}

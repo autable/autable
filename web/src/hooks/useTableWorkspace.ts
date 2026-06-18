@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { CellSelectArgs, RowsChangeData } from "react-data-grid";
+import { useTranslation } from "react-i18next";
 import {
   createRow,
   deleteRow,
@@ -39,6 +40,7 @@ export function useTableWorkspace({
   onCatalogChanged,
   onStatus
 }: UseTableWorkspaceOptions) {
+  const { t } = useTranslation();
   const [rows, setRows] = useState<TableGridRow[]>([]);
   const [rowsViewName, setRowsViewName] = useState("all");
   const [selectedRecordID, setSelectedRecordID] = useState(0);
@@ -239,15 +241,15 @@ export function useTableWorkspace({
       setRowsViewName("local");
       setSelectedRecordID(saved.record_id);
       setRowHistory([]);
-      onStatus(`Updated record ${saved.record_id}`);
+      onStatus(t("status.updatedRecord", { id: saved.record_id }));
     } catch (error) {
-      onStatus(error instanceof Error ? error.message : "Row update failed");
+      onStatus(error instanceof Error ? error.message : t("status.rowUpdateFailed"));
     }
   }
 
   async function persistTableMetadata(nextTable: TableMetadata, successMessage: string, nextViewName = selectedTableView) {
     if (!databaseName || !table.name) {
-      onStatus("Select a table before updating metadata");
+      onStatus(t("status.selectTableBeforeMetadata"));
       return;
     }
     try {
@@ -260,27 +262,27 @@ export function useTableWorkspace({
       setRowHistory([]);
       onStatus(successMessage);
     } catch (error) {
-      onStatus(error instanceof Error ? error.message : "Table metadata update failed");
+      onStatus(error instanceof Error ? error.message : t("status.tableMetadataUpdateFailed"));
     }
   }
 
   async function addFieldFromCanvas() {
     const name = newFieldName.trim();
     if (!name) {
-      onStatus("Field name is required");
+      onStatus(t("status.fieldNameRequired"));
       return;
     }
     if (name === "record_id" || table.fields.some((field) => field.name === name && !field.deleted)) {
-      onStatus(`Field ${name} already exists`);
+      onStatus(t("status.fieldAlreadyExists", { name }));
       return;
     }
     const formula = newFieldFormula.trim();
     if (newFieldType === "formula" && !formula) {
-      onStatus("Formula is required");
+      onStatus(t("status.formulaRequired"));
       return;
     }
     if (newFieldType === "relation" && !newRelationTable) {
-      onStatus("Relation target table is required");
+      onStatus(t("status.relationTargetRequired"));
       return;
     }
     const nextTable = {
@@ -297,7 +299,7 @@ export function useTableWorkspace({
         }
       ]
     };
-    await persistTableMetadata(nextTable, `Added field ${name}`);
+    await persistTableMetadata(nextTable, t("status.createdField", { name }));
     setNewFieldName("");
     setNewFieldType("string");
     setNewFormulaValueType("string");
@@ -310,25 +312,25 @@ export function useTableWorkspace({
       ...table,
       fields: table.fields.map((field) => (field.name === fieldName ? { ...field, deleted: true } : field))
     };
-    await persistTableMetadata(nextTable, `Deleted field ${fieldName}`);
+    await persistTableMetadata(nextTable, t("status.deletedField", { name: fieldName }));
   }
 
   async function updateFieldFormulaFromCanvas(fieldName: string, formula: string) {
     const trimmedFormula = formula.trim();
     if (!trimmedFormula) {
-      onStatus("Formula is required");
+      onStatus(t("status.formulaRequired"));
       return;
     }
     const field = table.fields.find((item) => item.name === fieldName);
     if (!field || field.type !== "formula") {
-      onStatus(`Field ${fieldName} is not a formula field`);
+      onStatus(t("status.fieldNotFormula", { name: fieldName }));
       return;
     }
     const nextTable = {
       ...table,
       fields: table.fields.map((item) => (item.name === fieldName ? { ...item, formula: trimmedFormula } : item))
     };
-    await persistTableMetadata(nextTable, `Updated formula ${fieldName}`);
+    await persistTableMetadata(nextTable, t("status.updatedFormula", { name: fieldName }));
   }
 
   function viewFiltersFromDraft(): TableViewFilter[] {
@@ -349,7 +351,7 @@ export function useTableWorkspace({
 
   async function createDefaultViewFromSidebar() {
     if (!databaseName || !table.name) {
-      onStatus("Select a table before adding a view");
+      onStatus(t("status.selectTableBeforeView"));
       return;
     }
     const existingNames = new Set(["all", ...(table.views ?? []).map((viewDef) => viewDef.name)]);
@@ -366,7 +368,7 @@ export function useTableWorkspace({
       sorts: []
     };
     const nextTable = { ...table, views: [...(table.views ?? []), nextView] };
-    await persistTableMetadata(nextTable, `Created view ${displayName}`, name);
+    await persistTableMetadata(nextTable, t("status.createdView", { name: displayName }), name);
     setNewViewBase("all");
     setNewViewFilterField("");
     setNewViewFilterOp("eq");
@@ -378,7 +380,7 @@ export function useTableWorkspace({
   async function updateSelectedViewFromCanvas() {
     const selectedView = table.views.find((viewDef) => viewDef.name === selectedTableView);
     if (!selectedView) {
-      onStatus("All records is the base view");
+      onStatus(t("status.allRecordsBaseView"));
       return;
     }
     const nextView: TableView = {
@@ -391,12 +393,16 @@ export function useTableWorkspace({
       ...table,
       views: table.views.map((viewDef) => (viewDef.name === selectedView.name ? nextView : viewDef))
     };
-    await persistTableMetadata(nextTable, `Updated view ${selectedView.display_name || selectedView.name}`, selectedView.name);
+    await persistTableMetadata(
+      nextTable,
+      t("status.updatedView", { name: selectedView.display_name || selectedView.name }),
+      selectedView.name
+    );
   }
 
   async function addDraftRow() {
     if (!databaseName || !table.name) {
-      onStatus("Create a table before adding rows");
+      onStatus(t("status.selectTableBeforeRows"));
       return;
     }
     const writableFields = activeFields.filter((field) => field.type !== "formula");
@@ -408,9 +414,9 @@ export function useTableWorkspace({
       setRowsViewName("local");
       setSelectedRecordID(saved.record_id);
       setRowHistory([]);
-      onStatus(`Created record ${saved.record_id}`);
+      onStatus(t("status.createdRecord", { id: saved.record_id }));
     } catch (error) {
-      onStatus(error instanceof Error ? error.message : "Row creation failed");
+      onStatus(error instanceof Error ? error.message : t("status.rowCreationFailed"));
     }
   }
 
@@ -420,7 +426,7 @@ export function useTableWorkspace({
 
   async function updateSelectedRowFromEditor() {
     if (!selectedRecordID) {
-      onStatus("Select a row before saving changes");
+      onStatus(t("status.selectRowBeforeSave"));
       return;
     }
     try {
@@ -435,15 +441,15 @@ export function useTableWorkspace({
       setRowsViewName("local");
       setSelectedRecordID(saved.record_id);
       setRowHistory([]);
-      onStatus(`Updated record ${saved.record_id}`);
+      onStatus(t("status.updatedRecord", { id: saved.record_id }));
     } catch (error) {
-      onStatus(error instanceof Error ? error.message : "Row update failed");
+      onStatus(error instanceof Error ? error.message : t("status.rowUpdateFailed"));
     }
   }
 
   async function deleteSelectedRow(recordID = selectedRecordID) {
     if (!recordID) {
-      onStatus("Select a row before deleting");
+      onStatus(t("status.selectRowBeforeDelete"));
       return;
     }
     try {
@@ -452,24 +458,24 @@ export function useTableWorkspace({
       setRowsViewName("local");
       setSelectedRecordID(0);
       setRowHistory([]);
-      onStatus(`Deleted record ${deleted.record_id}`);
+      onStatus(t("status.deletedRecord", { id: deleted.record_id }));
     } catch (error) {
-      onStatus(error instanceof Error ? error.message : "Row deletion failed");
+      onStatus(error instanceof Error ? error.message : t("status.rowDeletionFailed"));
     }
   }
 
   async function loadSelectedRowHistory() {
     if (!selectedRecordID) {
-      onStatus("Select a row before loading history");
+      onStatus(t("status.selectRowBeforeHistory"));
       return;
     }
     try {
       const changes = await listRowHistory(databaseName, table.name, selectedRecordID);
       setRowHistory(changes);
-      onStatus(`Loaded ${changes.length} history entries for record ${selectedRecordID}`);
+      onStatus(t("status.loadedHistory", { count: changes.length, id: selectedRecordID }));
     } catch (error) {
       setRowHistory([]);
-      onStatus(error instanceof Error ? error.message : "Row history failed");
+      onStatus(error instanceof Error ? error.message : t("status.rowHistoryFailed"));
     }
   }
 

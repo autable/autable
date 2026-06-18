@@ -8,6 +8,7 @@ import {
   Text
 } from "@fluentui/react-components";
 import { AddRegular, DismissRegular, SaveRegular } from "@fluentui/react-icons";
+import { useTranslation } from "react-i18next";
 import {
   type DatabaseMetadata,
   type FormDefinition,
@@ -18,11 +19,7 @@ import {
 } from "../api";
 export { compactRoleGrants } from "../permissionState";
 
-const permissionLevels = [
-  { value: 0, label: "None" },
-  { value: 1, label: "Read" },
-  { value: 2, label: "Write" }
-] as const;
+const permissionLevels = [0, 1, 2] as const;
 
 type PermissionPanelProps = {
   database: DatabaseMetadata;
@@ -62,16 +59,17 @@ export function PermissionPanel({
   role,
   workflows
 }: PermissionPanelProps) {
+  const { t } = useTranslation();
   return (
     <div className="permission-view">
       <div className="section-header">
         <div>
-          <Text weight="semibold">{role?.name ?? "No role selected"}</Text>
-          <Text size={200}>{database.name} role access matrix</Text>
+          <Text weight="semibold">{role?.name ?? t("permission.noRoleSelected")}</Text>
+          <Text size={200}>{t("permission.roleAccessMatrix", { database: database.name })}</Text>
         </div>
         {role && (
           <Button icon={<SaveRegular />} appearance="primary" onClick={onSave}>
-            Save
+            {t("common.save")}
           </Button>
         )}
       </div>
@@ -92,7 +90,7 @@ export function PermissionPanel({
         />
       ) : (
         <div className="empty-state">
-          <Text>Create a role to configure table, field, workflow, and form permissions.</Text>
+          <Text>{t("permission.empty")}</Text>
         </div>
       )}
     </div>
@@ -113,6 +111,7 @@ function PermissionMatrix({
   onNewMemberEmailChange,
   workflows
 }: Omit<PermissionPanelProps, "onSave" | "role">) {
+  const { t } = useTranslation();
   const memberByID = new Map(memberUsers.map((member) => [member.id, member]));
   const memberItems = members.map((memberID) => ({
     id: memberID,
@@ -121,11 +120,11 @@ function PermissionMatrix({
   return (
     <div className="permission-grid">
       <div className="permission-card">
-        <Text weight="semibold">Members</Text>
+        <Text weight="semibold">{t("permission.members")}</Text>
         <div className="create-rowline">
           <Combobox
-            aria-label="Role member email"
-            placeholder="Search email"
+            aria-label={t("permission.roleMemberEmail")}
+            placeholder={t("permission.searchEmail")}
             open={newMemberEmail.trim().length >= 2 && memberOptions.length > 0}
             value={newMemberEmail}
             onChange={(event) => onNewMemberEmailChange(event.currentTarget.value)}
@@ -142,12 +141,12 @@ function PermissionMatrix({
               </Option>
             ))}
           </Combobox>
-          <Button icon={<AddRegular />} aria-label="Add role member" onClick={() => onAddMember()} />
+          <Button icon={<AddRegular />} aria-label={t("permission.addRoleMember")} onClick={() => onAddMember()} />
         </div>
         {members.length === 0 ? (
-          <Text size={200}>No members</Text>
+          <Text size={200}>{t("permission.noMembers")}</Text>
         ) : (
-          <List navigationMode="items" aria-label="Role members">
+          <List navigationMode="items" aria-label={t("permission.members")}>
             {memberItems.map((member) => (
               <ListItem key={member.id}>
                 <div className="member-list-item">
@@ -155,7 +154,7 @@ function PermissionMatrix({
                   <Button
                     appearance="subtle"
                     icon={<DismissRegular />}
-                    aria-label={`Remove ${member.email}`}
+                    aria-label={t("permission.removeMember", { email: member.email })}
                     onClick={() => onMemberRemove(member.id)}
                   />
                 </div>
@@ -165,7 +164,7 @@ function PermissionMatrix({
         )}
       </div>
       <div className="permission-card">
-        <Text weight="semibold">Tables</Text>
+        <Text weight="semibold">{t("permission.tables")}</Text>
         {database.tables.map((table) => (
           <div key={table.name} className="permission-resource">
             <PermissionLevelSelect
@@ -189,7 +188,7 @@ function PermissionMatrix({
         ))}
       </div>
       <div className="permission-card">
-        <Text weight="semibold">Workflows</Text>
+        <Text weight="semibold">{t("permission.workflows")}</Text>
         {workflows.map((workflow) => (
           <PermissionLevelSelect
             key={workflow.id ?? workflow.name}
@@ -200,7 +199,7 @@ function PermissionMatrix({
         ))}
       </div>
       <div className="permission-card">
-        <Text weight="semibold">Forms</Text>
+        <Text weight="semibold">{t("permission.forms")}</Text>
         {forms.map((form) => (
           <PermissionLevelSelect
             key={form.id ?? form.name}
@@ -228,6 +227,12 @@ function PermissionLevelSelect(props: {
   value: PermissionGrant["level"];
   onChange: (level: PermissionGrant["level"]) => void;
 }) {
+  const { t } = useTranslation();
+  const permissionLevelLabels: Record<(typeof permissionLevels)[number], string> = {
+    0: t("permission.levels.none"),
+    1: t("permission.levels.read"),
+    2: t("permission.levels.write")
+  };
   return (
     <label className="permission-row">
       <span>{props.label}</span>
@@ -237,8 +242,8 @@ function PermissionLevelSelect(props: {
         onChange={(_, data) => props.onChange(Number(data.value) as PermissionGrant["level"])}
       >
         {permissionLevels.map((level) => (
-          <option key={level.value} value={level.value}>
-            {level.label}
+          <option key={level} value={level}>
+            {permissionLevelLabels[level]}
           </option>
         ))}
       </Select>

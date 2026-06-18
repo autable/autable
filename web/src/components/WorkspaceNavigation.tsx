@@ -44,6 +44,7 @@ import {
   PersonRegular
 } from "@fluentui/react-icons";
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import type {
   AuthUser,
   Catalog,
@@ -141,32 +142,33 @@ export function WorkspaceNavigation({
   view,
   workflows
 }: WorkspaceNavigationProps) {
+  const { t } = useTranslation();
   const isAuthenticated = Boolean(currentUser);
   return (
     <>
       <NavDrawer className="primary-sidebar" type="inline" open>
         <NavDrawerHeader>
-          <AppItemStatic icon={<DatabaseRegular />}>codetable</AppItemStatic>
+          <AppItemStatic icon={<DatabaseRegular />}>{t("nav.codetable")}</AppItemStatic>
         </NavDrawerHeader>
         <NavDrawerBody>
           <div className="sidebar-heading">
             <Text size={200} weight="semibold">
-              Databases
+              {t("nav.databases")}
             </Text>
             <CreateNamePopover
-              ariaLabel="Create DB"
-              buttonLabel="Create DB"
+              ariaLabel={t("nav.createDb")}
+              buttonLabel={t("nav.createDb")}
               disabled={!isAuthenticated}
-              inputLabel="New database name"
+              inputLabel={t("nav.newDatabaseName")}
               name={newDatabaseName}
               onNameChange={onNewDatabaseNameChange}
               onSave={onCreateDatabase}
-              placeholder="database name"
+              placeholder={t("nav.placeholderDatabase")}
             />
           </div>
           <Nav
             className="database-nav"
-            aria-label="Database list"
+            aria-label={t("nav.databaseList")}
             selectedValue={`${database.name}:${view}`}
             selectedCategoryValue={database.name}
             openCategories={database.name ? [database.name] : []}
@@ -186,12 +188,12 @@ export function WorkspaceNavigation({
           >
             {catalog.databases.map((item) => (
               <NavCategory key={item.name} value={item.name}>
-                <NavCategoryItem icon={<DatabaseRegular />}>{item.name}</NavCategoryItem>
-                <NavSubItemGroup>
-                  <NavSubItem value={`${item.name}:table`}>Table</NavSubItem>
-                  <NavSubItem value={`${item.name}:workflow`}>Workflow</NavSubItem>
-                  <NavSubItem value={`${item.name}:form`}>Form</NavSubItem>
-                  <NavSubItem value={`${item.name}:permission`}>Permission</NavSubItem>
+                  <NavCategoryItem icon={<DatabaseRegular />}>{item.name}</NavCategoryItem>
+                  <NavSubItemGroup>
+                  <NavSubItem value={`${item.name}:table`}>{t("common.table")}</NavSubItem>
+                  <NavSubItem value={`${item.name}:workflow`}>{t("common.workflow")}</NavSubItem>
+                  <NavSubItem value={`${item.name}:form`}>{t("common.form")}</NavSubItem>
+                  <NavSubItem value={`${item.name}:permission`}>{t("common.permission")}</NavSubItem>
                 </NavSubItemGroup>
               </NavCategory>
             ))}
@@ -204,7 +206,7 @@ export function WorkspaceNavigation({
               </Button>
             ) : (
               <Button icon={<PersonRegular />} appearance="primary" onClick={onOpenLogin}>
-                Login
+                {t("common.login")}
               </Button>
             )}
           </div>
@@ -214,9 +216,9 @@ export function WorkspaceNavigation({
       <NavDrawer className="secondary-sidebar" type="inline" open>
         <NavDrawerHeader>
           <div className="secondary-title">
-            <Text size={200}>Database</Text>
+            <Text size={200}>{t("nav.database")}</Text>
             <Text weight="semibold" className="secondary-db-name" title={database.name || undefined}>
-              {database.name || "No database"}
+              {database.name || t("common.noDatabase")}
             </Text>
           </div>
         </NavDrawerHeader>
@@ -238,8 +240,8 @@ export function WorkspaceNavigation({
           )}
           {view === "workflow" && (
             <ResourceNav
-              ariaLabel="Workflow list"
-              createLabel="Create Workflow"
+              ariaLabel={t("nav.workflowList")}
+              createLabel={t("nav.createWorkflow")}
               databaseName={database.name}
               icon="workflow"
               items={workflows.map((item) => ({ id: item.id ?? 0, name: item.name, enabled: item.enabled ?? true }))}
@@ -249,15 +251,15 @@ export function WorkspaceNavigation({
               onNewNameChange={onNewWorkflowNameChange}
               onRename={onRenameWorkflow}
               onSelect={onSelectWorkflowID}
-              placeholder="new workflow"
+              placeholder={t("nav.placeholderWorkflow")}
               selectedID={selectedWorkflow?.id ?? 0}
-              title="Workflows"
+              title={t("nav.workflows")}
             />
           )}
           {view === "form" && (
             <ResourceNav
-              ariaLabel="Form list"
-              createLabel="Create Form"
+              ariaLabel={t("nav.formList")}
+              createLabel={t("nav.createForm")}
               databaseName={database.name}
               icon="form"
               items={forms.map((item) => ({ id: item.id ?? 0, name: item.name }))}
@@ -267,20 +269,20 @@ export function WorkspaceNavigation({
               onNewNameChange={onNewFormNameChange}
               onRename={onRenameForm}
               onSelect={onSelectFormID}
-              placeholder="new form"
+              placeholder={t("nav.placeholderForm")}
               selectedID={selectedForm?.id ?? 0}
-              title="Forms"
+              title={t("nav.forms")}
             />
           )}
           {view === "permission" && (
             <>
               <Nav
                 className="resource-nav"
-                aria-label="Role list"
+                aria-label={t("nav.roleList")}
                 selectedValue={selectedRole?.name ?? ""}
                 onNavItemSelect={(_, data) => onSelectRoleName(data.value)}
               >
-                <NavSectionHeader>Roles</NavSectionHeader>
+                <NavSectionHeader>{t("nav.roles")}</NavSectionHeader>
                 {roles.map((role) => (
                   <NavItem key={role.name} value={role.name} icon={<PeopleRegular />}>
                     {role.name}
@@ -289,13 +291,13 @@ export function WorkspaceNavigation({
               </Nav>
               <div className="create-rowline">
                 <Input
-                  aria-label="New role name"
-                  placeholder="new role"
+                  aria-label={t("nav.newRoleName")}
+                  placeholder={t("nav.placeholderRole")}
                   value={newRoleName}
                   onChange={(_, data) => onNewRoleNameChange(data.value)}
                   disabled={!database.name}
                 />
-                <Button icon={<AddRegular />} aria-label="Create Role" onClick={onCreateRole} disabled={!database.name} />
+                <Button icon={<AddRegular />} aria-label={t("nav.createRole")} onClick={onCreateRole} disabled={!database.name} />
               </div>
             </>
           )}
@@ -321,6 +323,7 @@ function ResourceNav(props: {
   selectedID: number;
   title: string;
 }) {
+  const { t } = useTranslation();
   const Icon = props.icon === "workflow" ? DocumentFlowchartRegular : FormRegular;
   const [renameOpen, setRenameOpen] = useState(false);
   const [renameDraft, setRenameDraft] = useState("");
@@ -333,7 +336,7 @@ function ResourceNav(props: {
           ariaLabel={props.createLabel}
           buttonLabel={props.createLabel}
           disabled={!props.databaseName}
-          inputLabel={`New ${props.icon} name`}
+          inputLabel={props.icon === "workflow" ? t("nav.newWorkflowName") : t("nav.newFormName")}
           name={props.newName}
           onNameChange={props.onNewNameChange}
           onSave={props.onCreate}
@@ -361,7 +364,11 @@ function ResourceNav(props: {
                     role="button"
                     tabIndex={0}
                     className="resource-nav-menu-button"
-                    aria-label={`${props.icon} actions ${item.id}`}
+                    aria-label={
+                      props.icon === "workflow"
+                        ? t("nav.workflowActions", { id: item.id })
+                        : t("nav.formActions", { id: item.id })
+                    }
                     onClick={(event) => event.stopPropagation()}
                   >
                     <MoreHorizontalRegular />
@@ -378,7 +385,7 @@ function ResourceNav(props: {
                         setRenameOpen(true);
                       }}
                     >
-                      Rename
+                      {t("common.rename")}
                     </MenuItem>
                     <MenuItem
                       icon={<DeleteRegular />}
@@ -386,7 +393,7 @@ function ResourceNav(props: {
                         props.onDelete(item.id);
                       }}
                     >
-                      Delete
+                      {t("common.delete")}
                     </MenuItem>
                   </MenuList>
                 </MenuPopover>
@@ -397,7 +404,7 @@ function ResourceNav(props: {
       </Nav>
       <RenameDialog
         open={renameOpen}
-        title={`Rename ${props.icon}`}
+        title={props.icon === "workflow" ? t("nav.renameWorkflow") : t("nav.renameForm")}
         value={renameDraft}
         onOpenChange={setRenameOpen}
         onValueChange={setRenameDraft}
@@ -421,24 +428,25 @@ function TableNav(props: {
   selectedTableView: string;
   table: TableMetadata;
 }) {
+  const { t } = useTranslation();
   return (
     <>
       <div className="list-heading">
-        <Text size={200} weight="semibold">Tables</Text>
+        <Text size={200} weight="semibold">{t("nav.tables")}</Text>
         <CreateNamePopover
-          ariaLabel="Create Table"
-          buttonLabel="Create Table"
+          ariaLabel={t("nav.createTable")}
+          buttonLabel={t("nav.createTable")}
           disabled={!props.database.name}
-          inputLabel="New table name"
+          inputLabel={t("nav.newTableName")}
           name={props.newTableName}
           onNameChange={props.onNewTableNameChange}
           onSave={props.onCreateTable}
-          placeholder="table name"
+          placeholder={t("nav.placeholderTable")}
         />
       </div>
       <Nav
         className="resource-nav"
-        aria-label="Table list"
+        aria-label={t("nav.tableList")}
         selectedValue={props.table.name ? `${props.table.name}:view:${props.selectedTableView}` : ""}
         selectedCategoryValue={props.table.name}
         openCategories={props.table.name ? [props.table.name] : []}
@@ -468,13 +476,13 @@ function TableNav(props: {
           <NavCategory key={item.name} value={item.name}>
             <NavCategoryItem icon={<DocumentTableRegular />}>{item.display_name || item.name}</NavCategoryItem>
             <NavSubItemGroup>
-              <NavSubItem value={`${item.name}:view:all`}>All records</NavSubItem>
+              <NavSubItem value={`${item.name}:view:all`}>{t("common.allRecords")}</NavSubItem>
               {(item.views ?? []).map((viewDef) => (
                 <NavSubItem key={viewDef.name} value={`${item.name}:view:${viewDef.name}`}>
                   {viewDef.display_name || viewDef.name}
                 </NavSubItem>
               ))}
-              <NavSubItem value={`${item.name}:add-view`}>+ View</NavSubItem>
+              <NavSubItem value={`${item.name}:add-view`}>{t("nav.view")}</NavSubItem>
             </NavSubItemGroup>
           </NavCategory>
         ))}
@@ -502,6 +510,7 @@ function CreateNamePopover({
   onSave: () => void;
   placeholder: string;
 }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   return (
     <Popover open={open} onOpenChange={(_, data) => setOpen(data.open)} positioning="below-end" withArrow>
@@ -518,7 +527,7 @@ function CreateNamePopover({
           />
         </FluentField>
         <div className="popover-actions">
-          <Button onClick={() => setOpen(false)}>Cancel</Button>
+          <Button onClick={() => setOpen(false)}>{t("common.cancel")}</Button>
           <Button
             appearance="primary"
             icon={<AddRegular />}
@@ -527,7 +536,7 @@ function CreateNamePopover({
               setOpen(false);
             }}
           >
-            Save
+            {t("common.save")}
           </Button>
         </div>
       </PopoverSurface>
@@ -550,19 +559,20 @@ function RenameDialog({
   onValueChange: (value: string) => void;
   onSave: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <Dialog open={open} onOpenChange={(_, data) => onOpenChange(data.open)}>
       <DialogSurface aria-label={title}>
         <DialogBody>
           <DialogTitle>{title}</DialogTitle>
           <DialogContent>
-            <FluentField label="Name">
-              <Input aria-label="Rename resource" value={value} onChange={(_, data) => onValueChange(data.value)} />
+            <FluentField label={t("nav.name")}>
+              <Input aria-label={t("nav.renameResource")} value={value} onChange={(_, data) => onValueChange(data.value)} />
             </FluentField>
           </DialogContent>
           <DialogActions>
-            <Button onClick={() => onOpenChange(false)}>Cancel</Button>
-            <Button appearance="primary" onClick={onSave}>Save</Button>
+            <Button onClick={() => onOpenChange(false)}>{t("common.cancel")}</Button>
+            <Button appearance="primary" onClick={onSave}>{t("common.save")}</Button>
           </DialogActions>
         </DialogBody>
       </DialogSurface>

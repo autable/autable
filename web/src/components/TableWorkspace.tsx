@@ -31,6 +31,7 @@ import {
 } from "@fluentui/react-icons";
 import DataGrid, { type CellSelectArgs, type Column, type RowsChangeData } from "react-data-grid";
 import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { Field, RowChange, TableMetadata, TableViewFilter, TableViewSort } from "../api";
 import type { TableGridRow } from "../tableGrid";
 
@@ -131,6 +132,7 @@ export function TableWorkspace({
   table,
   tables
 }: TableWorkspaceProps) {
+  const { t } = useTranslation();
   const activeFields = table.fields.filter((field) => !field.deleted);
   const hasTable = Boolean(table.name);
   const canWriteTable = hasTable && (table.permission_level ?? 2) >= 2;
@@ -210,7 +212,7 @@ export function TableWorkspace({
           <button
             type="button"
             className="add-field-header-button"
-            aria-label="Add field"
+            aria-label={t("table.addField")}
             disabled={!canWriteTable}
             onClick={(event) => {
               event.stopPropagation();
@@ -272,17 +274,17 @@ export function TableWorkspace({
         <div>
           <Text weight="semibold">{table.display_name || table.name}</Text>
           <Text size={200}>
-            {displayedRows.length} of {rows.length} records
+            {t("table.recordCount", { shown: displayedRows.length, total: rows.length })}
           </Text>
         </div>
-        <Toolbar aria-label="Table canvas actions" className="table-actions">
+        <Toolbar aria-label={t("table.tableActions")} className="table-actions">
           <Popover open={filterOpen} onOpenChange={(_, data) => setFilterOpen(data.open)} positioning="below-start" withArrow>
             <PopoverTrigger disableButtonEnhancement>
               <ToolbarButton icon={<FilterRegular />} disabled={!canWriteTable}>
-                Filter
+                {t("table.filter")}
               </ToolbarButton>
             </PopoverTrigger>
-            <PopoverSurface className="view-filter-popover" aria-label="View filters">
+            <PopoverSurface className="view-filter-popover" aria-label={t("table.viewFilters")}>
               <ViewFilterPopover
                 activeFields={activeFields}
                 canWriteTable={canWriteTable}
@@ -305,10 +307,10 @@ export function TableWorkspace({
             </PopoverSurface>
           </Popover>
           <ToolbarButton icon={<EditRegular />} onClick={() => openRecordPanel()} disabled={!selectedRecordID || !hasWritableFields}>
-            Edit Row
+            {t("table.editRow")}
           </ToolbarButton>
           <ToolbarButton icon={<HistoryRegular />} onClick={() => openHistoryPanel()} disabled={!selectedRecordID}>
-            History
+            {t("common.history")}
           </ToolbarButton>
           <ToolbarButton
             icon={<AddRegular />}
@@ -316,13 +318,13 @@ export function TableWorkspace({
             onClick={onAddRow}
             disabled={!canCreateRow}
           >
-            Row
+            {t("table.row")}
           </ToolbarButton>
         </Toolbar>
       </div>
       <div className="grid-host">
         <DataGrid
-          aria-label="Table records"
+          aria-label={t("table.tableRecords")}
           className="codetable-grid rdg-light"
           columns={gridColumns}
           rows={displayedRows}
@@ -364,7 +366,7 @@ export function TableWorkspace({
                   setRecordMenu(null);
                 }}
               >
-                View details
+                {t("table.viewDetails")}
               </MenuItem>
               <MenuItem
                 icon={<HistoryRegular />}
@@ -375,7 +377,7 @@ export function TableWorkspace({
                   setRecordMenu(null);
                 }}
               >
-                View history
+                {t("table.viewHistory")}
               </MenuItem>
               <MenuDivider />
               <MenuItem
@@ -388,7 +390,7 @@ export function TableWorkspace({
                   setRecordMenu(null);
                 }}
               >
-                Delete record
+                {t("table.deleteRecord")}
               </MenuItem>
             </MenuList>
           </MenuPopover>
@@ -403,19 +405,19 @@ export function TableWorkspace({
           positioning={fieldCreatorTarget ? { target: fieldCreatorTarget } : undefined}
           withArrow
         >
-          <PopoverSurface className="field-editor-popover" aria-label="Add field">
+          <PopoverSurface className="field-editor-popover" aria-label={t("table.addField")}>
             <div className="field-editor">
-              <Text weight="semibold">Add field</Text>
-              <FluentField label="Field name">
+              <Text weight="semibold">{t("table.addField")}</Text>
+              <FluentField label={t("table.fieldName")}>
                 <Input
-                  aria-label="Field name"
+                  aria-label={t("table.fieldName")}
                   value={newFieldName}
                   onChange={(_, data) => onNewFieldNameChange(data.value)}
                 />
               </FluentField>
-              <FluentField label="Field type">
+              <FluentField label={t("table.fieldType")}>
                 <Select
-                  aria-label="New field type"
+                  aria-label={t("table.fieldType")}
                   value={newFieldType}
                   onChange={(_, data) => {
                     onNewFieldTypeChange(data.value);
@@ -432,9 +434,9 @@ export function TableWorkspace({
                 </Select>
               </FluentField>
               {newFieldType === "relation" && (
-                <FluentField label="Target table">
+                <FluentField label={t("table.targetTable")}>
                   <Select
-                    aria-label="Relation target table"
+                    aria-label={t("table.targetTable")}
                     value={newRelationTable}
                     onChange={(_, data) => onNewRelationTableChange(data.value)}
                   >
@@ -448,9 +450,9 @@ export function TableWorkspace({
               )}
               {newFieldType === "formula" && (
                 <>
-                  <FluentField label="Formula value type">
+                  <FluentField label={t("table.formulaValueType")}>
                     <Select
-                      aria-label="Formula value type"
+                      aria-label={t("table.formulaValueType")}
                       value={newFormulaValueType}
                       onChange={(_, data) => onNewFormulaValueTypeChange(data.value)}
                     >
@@ -459,9 +461,9 @@ export function TableWorkspace({
                       <option value="float">float</option>
                     </Select>
                   </FluentField>
-                  <FluentField label="Formula">
+                  <FluentField label={t("table.formula")}>
                     <Textarea
-                      aria-label="New field formula"
+                      aria-label={t("table.formula")}
                       value={newFieldFormula}
                       onChange={(_, data) => onNewFieldFormulaChange(data.value)}
                       placeholder="field_score + 1"
@@ -471,7 +473,7 @@ export function TableWorkspace({
                 </>
               )}
               <div className="field-editor-actions">
-                <Button onClick={() => setFieldCreator(null)}>Cancel</Button>
+                <Button onClick={() => setFieldCreator(null)}>{t("common.cancel")}</Button>
                 <Button
                   appearance="primary"
                   icon={<AddRegular />}
@@ -480,7 +482,7 @@ export function TableWorkspace({
                     setFieldCreator(null);
                   }}
                 >
-                  Add
+                  {t("common.add")}
                 </Button>
               </div>
             </div>
@@ -496,12 +498,12 @@ export function TableWorkspace({
           positioning={formulaEditorTarget ? { target: formulaEditorTarget } : undefined}
           withArrow
         >
-          <PopoverSurface className="field-editor-popover" aria-label="Edit formula">
+          <PopoverSurface className="field-editor-popover" aria-label={t("table.editFormula")}>
             <div className="field-editor formula-field-editor">
               <Text weight="semibold">{formulaEditor?.fieldName}</Text>
-              <FluentField label="Formula">
+              <FluentField label={t("table.formula")}>
                 <Textarea
-                  aria-label="Field formula"
+                  aria-label={t("table.fieldFormula")}
                   value={formulaEditor?.formula ?? ""}
                   onChange={(_, data) =>
                     setFormulaEditor((current) => (current ? { ...current, formula: data.value } : current))
@@ -511,7 +513,7 @@ export function TableWorkspace({
                 />
               </FluentField>
               <div className="field-editor-actions">
-                <Button onClick={() => setFormulaEditor(null)}>Cancel</Button>
+                <Button onClick={() => setFormulaEditor(null)}>{t("common.cancel")}</Button>
                 <Button
                   appearance="primary"
                   icon={<SaveRegular />}
@@ -522,7 +524,7 @@ export function TableWorkspace({
                     setFormulaEditor(null);
                   }}
                 >
-                  Save
+                  {t("common.save")}
                 </Button>
               </div>
             </div>
@@ -567,27 +569,28 @@ function RelationDrawer({
   relation: { field: Field; table: TableMetadata; row: TableGridRow };
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   const fields = relation.table.fields.filter((field) => !field.deleted);
   return (
-    <aside className="record-drawer relation-drawer" aria-label="Relation record detail">
+    <aside className="record-drawer relation-drawer" aria-label={t("table.relationRecordDetail")}>
       <div className="record-drawer-header">
         <div>
           <Text weight="semibold">{relation.table.display_name || relation.table.name}</Text>
           <Text size={200}>
-            {relation.field.name} {"->"} record {relation.row.record_id}
+            {relation.field.name} {"->"} {t("table.record")} {relation.row.record_id}
           </Text>
         </div>
-        <Button icon={<DismissRegular />} appearance="subtle" aria-label="Close relation detail" onClick={onClose} />
+        <Button icon={<DismissRegular />} appearance="subtle" aria-label={t("common.close")} onClick={onClose} />
       </div>
       <div className="record-detail-list">
         <label className="field-stack">
           <span>record_id</span>
-          <Input aria-label="record_id value" readOnly value={String(relation.row.record_id)} />
+          <Input aria-label={t("table.valueLabel", { name: "record_id" })} readOnly value={String(relation.row.record_id)} />
         </label>
         {fields.map((field) => (
           <label key={field.name} className="field-stack">
             <span>{field.name}</span>
-            <Input aria-label={`${field.name} value`} readOnly value={String(relation.row[field.name] ?? "")} />
+            <Input aria-label={t("table.valueLabel", { name: field.name })} readOnly value={String(relation.row[field.name] ?? "")} />
           </label>
         ))}
       </div>
@@ -606,6 +609,7 @@ function FieldHeader({
   onDeleteField: (fieldName: string) => void;
   onEditFormula: (field: Field, point: { x: number; y: number }) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="field-header">
       <span className="field-header-name">{field.name}</span>
@@ -614,7 +618,7 @@ function FieldHeader({
           <button
             type="button"
             className="field-header-menu-button"
-            aria-label={`Field actions ${field.name}`}
+            aria-label={t("table.fieldActions", { name: field.name })}
             disabled={!canWriteTable}
             onClick={(event) => event.stopPropagation()}
           >
@@ -631,11 +635,11 @@ function FieldHeader({
                   onEditFormula(field, { x: rect.left, y: rect.bottom });
                 }}
               >
-                Edit formula
+                {t("table.editFormula")}
               </MenuItem>
             )}
             <MenuItem icon={<DeleteRegular />} onClick={() => onDeleteField(field.name)}>
-              Delete field
+              {t("table.deleteField")}
             </MenuItem>
           </MenuList>
         </MenuPopover>
@@ -681,23 +685,28 @@ function ViewFilterPopover({
   selectedView?: NonNullable<TableMetadata["views"]>[number];
   views: NonNullable<TableMetadata["views"]>;
 }) {
+  const { t } = useTranslation();
   const canEditView = canWriteTable && Boolean(selectedView);
   return (
     <div className="view-filter-editor">
       <div className="view-filter-header">
-        <Text weight="semibold">{selectedView?.display_name || selectedView?.name || "All records"}</Text>
+        <Text weight="semibold">{selectedView?.display_name || selectedView?.name || t("common.allRecords")}</Text>
         <Text size={200}>
-          {selectedView?.base_view ? `based on ${selectedView.base_view}` : selectedView ? "table view" : "base table"}
+          {selectedView?.base_view
+            ? t("table.basedOn", { view: selectedView.base_view })
+            : selectedView
+              ? t("table.tableView")
+              : t("common.baseTable")}
         </Text>
       </div>
-      <FluentField label="Base view">
+      <FluentField label={t("table.baseView")}>
         <Select
-          aria-label="Base view"
+          aria-label={t("table.baseView")}
           value={newViewBase}
           onChange={(_, data) => onNewViewBaseChange(data.value)}
           disabled={!canEditView}
         >
-          <option value="all">All records</option>
+          <option value="all">{t("common.allRecords")}</option>
           {views.filter((item) => item.name !== selectedView?.name).map((item) => (
             <option key={item.name} value={item.name}>
               {item.display_name || item.name}
@@ -706,14 +715,14 @@ function ViewFilterPopover({
         </Select>
       </FluentField>
       <div className="view-filter-grid">
-        <FluentField label="Filter field">
+        <FluentField label={t("table.filterField")}>
           <Select
-            aria-label="View filter field"
+            aria-label={t("table.viewFilterField")}
             value={newViewFilterField}
             onChange={(_, data) => onNewViewFilterFieldChange(data.value)}
             disabled={!canEditView}
           >
-            <option value="">No filter</option>
+            <option value="">{t("table.noFilter")}</option>
             {activeFields.map((field) => (
               <option key={field.name} value={field.name}>
                 {field.name}
@@ -721,36 +730,36 @@ function ViewFilterPopover({
             ))}
           </Select>
         </FluentField>
-        <FluentField label="Filter operator">
+        <FluentField label={t("table.filterOperator")}>
           <Select
-            aria-label="View filter operator"
+            aria-label={t("table.viewFilterOperator")}
             value={newViewFilterOp}
             onChange={(_, data) => onNewViewFilterOpChange(data.value as TableViewFilter["op"])}
             disabled={!canEditView || !newViewFilterField}
           >
-            <option value="eq">equals</option>
-            <option value="contains">contains</option>
-            <option value="not_empty">not empty</option>
+            <option value="eq">{t("table.operators.eq")}</option>
+            <option value="contains">{t("table.operators.contains")}</option>
+            <option value="not_empty">{t("table.operators.notEmpty")}</option>
           </Select>
         </FluentField>
       </div>
-      <FluentField label="Filter value">
+      <FluentField label={t("table.filterValue")}>
         <Input
-          aria-label="View filter value"
+          aria-label={t("table.viewFilterValue")}
           value={newViewFilterValue}
           onChange={(_, data) => onNewViewFilterValueChange(data.value)}
           disabled={!canEditView || !newViewFilterField || newViewFilterOp === "not_empty"}
         />
       </FluentField>
       <div className="view-filter-grid">
-        <FluentField label="Sort field">
+        <FluentField label={t("table.sortField")}>
           <Select
-            aria-label="View sort field"
+            aria-label={t("table.viewSortField")}
             value={newViewSortField}
             onChange={(_, data) => onNewViewSortFieldChange(data.value)}
             disabled={!canEditView}
           >
-            <option value="">No sort</option>
+            <option value="">{t("table.noSort")}</option>
             <option value="record_id">record_id</option>
             {activeFields.map((field) => (
               <option key={field.name} value={field.name}>
@@ -759,20 +768,20 @@ function ViewFilterPopover({
             ))}
           </Select>
         </FluentField>
-        <FluentField label="Sort direction">
+        <FluentField label={t("table.sortDirection")}>
           <Select
-            aria-label="View sort direction"
+            aria-label={t("table.viewSortDirection")}
             value={newViewSortDirection}
             onChange={(_, data) => onNewViewSortDirectionChange(data.value as TableViewSort["direction"])}
             disabled={!canEditView || !newViewSortField}
           >
-            <option value="asc">ascending</option>
-            <option value="desc">descending</option>
+            <option value="asc">{t("table.ascending")}</option>
+            <option value="desc">{t("table.descending")}</option>
           </Select>
         </FluentField>
       </div>
       <Button appearance="primary" icon={<SaveRegular />} onClick={onSaveView} disabled={!canEditView}>
-        Save View
+        {t("table.saveView")}
       </Button>
     </div>
   );
@@ -803,30 +812,33 @@ function RecordDrawer({
   tab: "details" | "history";
   values: Record<string, string>;
 }) {
+  const { t } = useTranslation();
   return (
-    <aside className="record-drawer" aria-label="Record panel">
+    <aside className="record-drawer" aria-label={t("table.recordPanel")}>
       <div className="record-drawer-header">
         <div>
-          <Text weight="semibold">{selectedRecordID ? `record #${selectedRecordID}` : "No record selected"}</Text>
-          <Text size={200}>{hasWritableFields ? "Writable fields" : "Read only"}</Text>
+          <Text weight="semibold">
+            {selectedRecordID ? t("table.recordTitle", { id: selectedRecordID }) : t("table.noRecordSelected")}
+          </Text>
+          <Text size={200}>{hasWritableFields ? t("table.writableFields") : t("table.readOnly")}</Text>
         </div>
-        <Button appearance="subtle" icon={<DismissRegular />} aria-label="Close record panel" onClick={onClose} />
+        <Button appearance="subtle" icon={<DismissRegular />} aria-label={t("common.close")} onClick={onClose} />
       </div>
       <TabList
-        aria-label="Record tabs"
+        aria-label={t("table.recordTabs")}
         appearance="subtle"
         selectedValue={tab}
         onTabSelect={(_, data) => onTabChange(data.value as "details" | "history")}
       >
-        <Tab value="details">Details</Tab>
-        <Tab value="history">History</Tab>
+        <Tab value="details">{t("common.details")}</Tab>
+        <Tab value="history">{t("common.history")}</Tab>
       </TabList>
       {tab === "details" ? (
         <div className="record-detail-list">
           {fields.map((field) => (
             <FluentField key={field.name} label={field.name}>
               <Input
-                aria-label={`${field.name} value`}
+                aria-label={t("table.valueLabel", { name: field.name })}
                 value={values[field.name] ?? ""}
                 onChange={(_, data) => onChange(field.name, data.value)}
                 disabled={!selectedRecordID || !canWriteField(field)}
@@ -834,15 +846,17 @@ function RecordDrawer({
             </FluentField>
           ))}
           <Button appearance="primary" icon={<SaveRegular />} onClick={onSave} disabled={!selectedRecordID || !hasWritableFields}>
-            Save Row
+            {t("table.saveRow")}
           </Button>
         </div>
       ) : (
-        <div className="record-history-pane" aria-label="Row history">
+        <div className="record-history-pane" aria-label={t("table.rowHistory")}>
           <div className="record-history-toolbar">
-            <Text size={200}>{selectedRecordID ? `record #${selectedRecordID}` : "No record selected"}</Text>
+            <Text size={200}>
+              {selectedRecordID ? t("table.recordTitle", { id: selectedRecordID }) : t("table.noRecordSelected")}
+            </Text>
             <Button onClick={onLoadHistory} disabled={!selectedRecordID}>
-              Refresh
+              {t("common.refresh")}
             </Button>
           </div>
           <RowHistoryList rowHistory={rowHistory} />
@@ -853,17 +867,18 @@ function RecordDrawer({
 }
 
 function RowHistoryList({ rowHistory }: { rowHistory: RowChange[] }) {
+  const { t } = useTranslation();
   if (rowHistory.length === 0) {
-    return <Text size={200}>No row history loaded</Text>;
+    return <Text size={200}>{t("table.noRowHistoryLoaded")}</Text>;
   }
   return (
     <div className="row-history-list">
       {rowHistory.map((change) => (
         <div key={change.history_key} className="row-history-entry">
           <div>
-            <Text weight="semibold">{friendlyHistoryOperation(change.operation)}</Text>
+            <Text weight="semibold">{friendlyHistoryOperation(change.operation, t)}</Text>
             <Text size={200}>
-              {[formatHistoryTime(change.timestamp), change.actor_id ? `by ${change.actor_id}` : ""].filter(Boolean).join(" · ")}
+              {[formatHistoryTime(change.timestamp), change.actor_id ? t("table.byActor", { actor: change.actor_id }) : ""].filter(Boolean).join(" · ")}
             </Text>
           </div>
           <pre>{JSON.stringify(change.values, null, 2)}</pre>
@@ -873,17 +888,17 @@ function RowHistoryList({ rowHistory }: { rowHistory: RowChange[] }) {
   );
 }
 
-function friendlyHistoryOperation(operation?: string): string {
+function friendlyHistoryOperation(operation: string | undefined, t: ReturnType<typeof useTranslation>["t"]): string {
   if (operation === "create") {
-    return "Created";
+    return t("table.operations.created");
   }
   if (operation === "update") {
-    return "Updated";
+    return t("table.operations.updated");
   }
   if (operation === "delete") {
-    return "Deleted";
+    return t("table.operations.deleted");
   }
-  return "Record change";
+  return t("table.recordChange");
 }
 
 function formatHistoryTime(timestamp: number): string {

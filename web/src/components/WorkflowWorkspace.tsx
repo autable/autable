@@ -19,6 +19,7 @@ import {
 } from "@fluentui/react-components";
 import { EditRegular, InfoRegular, PlayRegular, SaveRegular } from "@fluentui/react-icons";
 import { Background, Controls, ReactFlow, type Edge, type Node } from "@xyflow/react";
+import { useTranslation } from "react-i18next";
 import type {
   WorkflowDefinition,
   WorkflowInstanceDeclaration,
@@ -82,6 +83,7 @@ export function WorkflowWorkspace({
   workflowNodes,
   workflowRuns
 }: WorkflowWorkspaceProps) {
+  const { t } = useTranslation();
   const canWriteWorkflow = (workflow?.permission_level ?? 2) >= 2;
   const workflowNodesByType = new Map(workflowNodes.map((node) => [node.type, node]));
   const [activeTab, setActiveTab] = useState<WorkflowTab>("editor");
@@ -99,22 +101,22 @@ export function WorkflowWorkspace({
     <div className="workflow-workspace">
       <div className="section-header workflow-section-header">
         <div>
-          <Text weight="semibold">{workflow?.name ?? "workflow"}.js</Text>
-          <Text size={200}>{databaseName} workflow</Text>
+          <Text weight="semibold">{workflow?.name ?? t("common.workflow")}.js</Text>
+          <Text size={200}>{t("workflow.workflowLabel", { database: databaseName })}</Text>
         </div>
         <div className="workflow-header-actions">
           <NodeCatalogDialog language={language} workflowNodes={workflowNodes} />
           <Switch
             checked={workflow?.enabled ?? true}
-            label="Enabled"
+            label={t("common.enabled")}
             onChange={(_, data) => onToggleEnabled(Boolean(data.checked))}
             disabled={!workflow?.id || !canWriteWorkflow}
           />
           <Button icon={<PlayRegular />} onClick={onExecute} disabled={!workflow?.id || !canWriteWorkflow}>
-            Run
+            {t("common.run")}
           </Button>
           <Button icon={<SaveRegular />} appearance="primary" onClick={onSave} disabled={!canWriteWorkflow}>
-            Save
+            {t("common.save")}
           </Button>
         </div>
       </div>
@@ -122,10 +124,10 @@ export function WorkflowWorkspace({
       <TabList
         selectedValue={activeTab}
         onTabSelect={(_, data) => setActiveTab(data.value as WorkflowTab)}
-        aria-label="Workflow workspace tabs"
+        aria-label={t("workflow.workspaceTabs")}
       >
-        <Tab value="editor">Editor</Tab>
-        <Tab value="history">History</Tab>
+        <Tab value="editor">{t("workflow.editor")}</Tab>
+        <Tab value="history">{t("common.history")}</Tab>
       </TabList>
 
       {activeTab === "editor" ? (
@@ -134,7 +136,7 @@ export function WorkflowWorkspace({
             <JavaScriptEditor
               canWrite={canWriteWorkflow}
               extraLibs={editorExtraLibs}
-              label="Workflow JavaScript"
+              label={t("workflow.workflowScriptLabel")}
               onChange={onUpdateScript}
               path={`workflow-${workflow?.id || "new"}.js`}
               testID="workflow-js-editor"
@@ -142,8 +144,8 @@ export function WorkflowWorkspace({
             />
           </div>
           <div className="history-pane">
-            <Text weight="semibold">Instances</Text>
-            <div className="node-list" aria-label="Workflow instances">
+            <Text weight="semibold">{t("workflow.instances")}</Text>
+            <div className="node-list" aria-label={t("workflow.instances")}>
               {workflowInstances.ok ? (
                 Object.entries(workflowInstances.value).map(([instanceID, instance]) => {
                   const ports = effectiveInstancePorts(instance, workflowNodesByType);
@@ -154,8 +156,8 @@ export function WorkflowWorkspace({
                         <span>{instance.node}</span>
                       </div>
                       <div className="node-ports">
-                        <span>vars {formatPorts(ports.variables)}</span>
-                        <span>secrets {formatPorts(ports.secrets)}</span>
+                        <span>{t("workflow.vars", { ports: formatPorts(ports.variables, t) })}</span>
+                        <span>{t("workflow.secrets", { ports: formatPorts(ports.secrets, t) })}</span>
                       </div>
                       {(ports.variables.length > 0 || ports.secrets.length > 0) && (
                         <InstanceConfigPopover
@@ -196,13 +198,14 @@ function WorkflowHistoryView({
   selectedRun: WorkflowRunResponse | null;
   workflowRuns: WorkflowRunResponse[];
 }) {
+  const { t } = useTranslation();
   const [selectedNodeID, setSelectedNodeID] = useState("run-input");
-  const { nodes, edges } = useMemo(() => runFlowElements(selectedRun), [selectedRun]);
+  const { nodes, edges } = useMemo(() => runFlowElements(selectedRun, t), [selectedRun, t]);
   const selectedNode = nodes.find((node) => node.id === selectedNodeID) ?? nodes[0];
 
   return (
     <div className="workflow-history-tab">
-      <div className="run-history-list" aria-label="Workflow run history">
+      <div className="run-history-list" aria-label={t("workflow.historyList")}>
         {workflowRuns.length > 0 ? (
           workflowRuns.map((run) => (
             <button
@@ -219,11 +222,11 @@ function WorkflowHistoryView({
             </button>
           ))
         ) : (
-          <span className="flow-empty">No runs yet</span>
+          <span className="flow-empty">{t("workflow.noRunsYet")}</span>
         )}
       </div>
       <div className="workflow-run-flow-shell">
-        <div className="workflow-run-flow" aria-label="Workflow run flow">
+        <div className="workflow-run-flow" aria-label={t("workflow.flow")}>
           {selectedRun ? (
             <ReactFlow
               nodes={nodes}
@@ -238,10 +241,10 @@ function WorkflowHistoryView({
               <Controls showInteractive={false} />
             </ReactFlow>
           ) : (
-            <span className="flow-empty">No runs yet</span>
+            <span className="flow-empty">{t("workflow.noRunsYet")}</span>
           )}
         </div>
-        <div className="workflow-run-inspector" aria-label="Workflow node inspector">
+        <div className="workflow-run-inspector" aria-label={t("workflow.inspector")}>
           {selectedNode ? (
             <>
               <div className="workflow-run-inspector-header">
@@ -250,12 +253,12 @@ function WorkflowHistoryView({
                 {selectedNode.data.error && <Text size={200}>{selectedNode.data.error}</Text>}
               </div>
               <div className="flow-step-payloads">
-                {selectedNode.data.input && <RunPayload title="Input" value={selectedNode.data.input} />}
-                {selectedNode.data.output && <RunPayload title="Output" value={selectedNode.data.output} />}
+                {selectedNode.data.input && <RunPayload title={t("common.input")} value={selectedNode.data.input} />}
+                {selectedNode.data.output && <RunPayload title={t("common.output")} value={selectedNode.data.output} />}
               </div>
             </>
           ) : (
-            <Text size={200}>Select a node</Text>
+            <Text size={200}>{t("workflow.selectNode")}</Text>
           )}
         </div>
       </div>
@@ -264,6 +267,7 @@ function WorkflowHistoryView({
 }
 
 function NodeCatalogDialog({ language, workflowNodes }: { language: string; workflowNodes: WorkflowNodeInfo[] }) {
+  const { t } = useTranslation();
   const [selectedType, setSelectedType] = useState(workflowNodes[0]?.type ?? "");
   const selectedNode = workflowNodes.find((node) => node.type === selectedType) ?? workflowNodes[0];
   const documentation = selectedNode ? nodeDocumentation(selectedNode, language) : "";
@@ -271,22 +275,22 @@ function NodeCatalogDialog({ language, workflowNodes }: { language: string; work
   return (
     <Dialog>
       <DialogTrigger disableButtonEnhancement>
-        <Button icon={<InfoRegular />} aria-label="Workflow nodes">
-          Nodes
+        <Button icon={<InfoRegular />} aria-label={t("workflow.nodesButton")}>
+          {t("workflow.nodes")}
         </Button>
       </DialogTrigger>
       <DialogSurface
         className="node-catalog-dialog"
-        aria-label="Workflow node catalog"
+        aria-label={t("workflow.nodeCatalog")}
         style={{
           width: "calc(100vw - 24px)",
           maxWidth: "none"
         }}
       >
         <DialogBody>
-          <DialogTitle>Workflow nodes</DialogTitle>
+          <DialogTitle>{t("workflow.nodeCatalog")}</DialogTitle>
           <DialogContent className="node-catalog-dialog-content">
-            <div className="node-catalog-menu" aria-label="Workflow node catalog list">
+            <div className="node-catalog-menu" aria-label={t("workflow.nodeCatalogList")}>
               {workflowNodes.map((node) => (
                 <Button
                   key={node.type}
@@ -298,17 +302,23 @@ function NodeCatalogDialog({ language, workflowNodes }: { language: string; work
                 </Button>
               ))}
             </div>
-            <div className="node-doc-panel" aria-label="Workflow node documentation">
+            <div className="node-doc-panel" aria-label={t("workflow.nodeDocumentation")}>
               {selectedNode ? (
                 <>
                   <div className="node-doc-heading">
                     <Text weight="semibold">{selectedNode.type}</Text>
-                    <Text size={200}>{selectedNode.trigger ? "trigger" : selectedNode.stateless ? "stateless" : "stateful"}</Text>
+                    <Text size={200}>
+                      {selectedNode.trigger
+                        ? t("workflow.nodeKinds.trigger")
+                        : selectedNode.stateless
+                          ? t("workflow.nodeKinds.stateless")
+                          : t("workflow.nodeKinds.stateful")}
+                    </Text>
                   </div>
                   <MarkdownDocument content={documentation} />
                 </>
               ) : (
-                <Text size={200}>No workflow nodes available</Text>
+                <Text size={200}>{t("workflow.noNodesAvailable")}</Text>
               )}
             </div>
           </DialogContent>
@@ -318,19 +328,24 @@ function NodeCatalogDialog({ language, workflowNodes }: { language: string; work
   );
 }
 
-function runFlowElements(runResponse: WorkflowRunResponse | null): { nodes: WorkflowFlowNode[]; edges: Edge[] } {
+function runFlowElements(
+  runResponse: WorkflowRunResponse | null,
+  t: ReturnType<typeof useTranslation>["t"]
+): { nodes: WorkflowFlowNode[]; edges: Edge[] } {
   if (!runResponse) {
     return { nodes: [], edges: [] };
   }
+  const runInputTitle = t("workflow.runInput");
+  const runOutputTitle = t("workflow.runOutput");
   const nodes: WorkflowFlowNode[] = [
     {
       id: "run-input",
       type: "input",
       position: { x: 0, y: 0 },
       data: {
-        title: "Run input",
+        title: runInputTitle,
         input: runResponse.run.inputs ?? {},
-        label: <FlowNodeLabel title="Run input" subtitle={runResponse.history_key} />
+        label: <FlowNodeLabel title={runInputTitle} subtitle={runResponse.history_key} />
       }
     },
     ...runResponse.run.steps.map((step, index): WorkflowFlowNode => {
@@ -355,10 +370,10 @@ function runFlowElements(runResponse: WorkflowRunResponse | null): { nodes: Work
       position: { x: 260 * (runResponse.run.steps.length + 1), y: 0 },
       className: runResponse.run.error ? "workflow-flow-node-error" : undefined,
       data: {
-        title: "Run output",
+        title: runOutputTitle,
         output: runResponse.run.outputs ?? {},
         error: runResponse.run.error,
-        label: <FlowNodeLabel title="Run output" subtitle={runResponse.run.error} error={runResponse.run.error} />
+        label: <FlowNodeLabel title={runOutputTitle} subtitle={runResponse.run.error} error={runResponse.run.error} />
       }
     }
   ];
@@ -490,6 +505,7 @@ function InstanceConfigPopover({
   ports: { variables: WorkflowPort[]; secrets: WorkflowPort[] };
   workflow?: WorkflowDefinition;
 }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [variableDrafts, setVariableDrafts] = useState<Record<string, string>>({});
   const [secretDrafts, setSecretDrafts] = useState<Record<string, string>>({});
@@ -531,9 +547,9 @@ function InstanceConfigPopover({
       }}
     >
       <PopoverTrigger disableButtonEnhancement>
-        <Button icon={<EditRegular />} aria-label={`Edit config ${instanceID}`} disabled={!canWriteWorkflow} />
+        <Button icon={<EditRegular />} aria-label={t("workflow.editConfig", { id: instanceID })} disabled={!canWriteWorkflow} />
       </PopoverTrigger>
-      <PopoverSurface className="instance-config-popover" aria-label={`Instance config ${instanceID}`}>
+      <PopoverSurface className="instance-config-popover" aria-label={t("workflow.instanceConfig", { id: instanceID })}>
         <div className="instance-config-popover-header">
           <div>
             <span>{instanceID}</span>
@@ -543,7 +559,7 @@ function InstanceConfigPopover({
         {ports.variables.map((port) => (
           <FluentField key={`variable-${instanceID}-${port.name}`} label={port.name}>
             <Input
-              aria-label={`Variable ${instanceID}.${port.name}`}
+              aria-label={t("workflow.variableLabel", { instance: instanceID, name: port.name })}
               value={variableDrafts[port.name] ?? ""}
               onChange={(_, data) => setVariableDrafts((current) => ({ ...current, [port.name]: data.value }))}
               disabled={!canWriteWorkflow}
@@ -555,9 +571,9 @@ function InstanceConfigPopover({
           return (
             <FluentField key={`secret-${instanceID}-${port.name}`} label={port.name}>
               <Input
-                aria-label={`Secret ${instanceID}.${port.name}`}
+                aria-label={t("workflow.secretLabel", { instance: instanceID, name: port.name })}
                 type="password"
-                placeholder="Enter secret value"
+                placeholder={t("workflow.enterSecretValue")}
                 value={secretDrafts[port.name] ?? ""}
                 onFocus={() => {
                   if (!dirtySecrets[port.name] && length > 0) {
@@ -575,7 +591,7 @@ function InstanceConfigPopover({
         })}
         <div className="instance-config-actions">
           <Button appearance="primary" icon={<SaveRegular />} onClick={saveDrafts} disabled={!canWriteWorkflow}>
-            Save config
+            {t("workflow.saveConfig")}
           </Button>
         </div>
       </PopoverSurface>
@@ -604,9 +620,9 @@ function mergePorts(defaultPorts: WorkflowPort[], instancePorts: WorkflowPort[])
   return [...portsByName.values()];
 }
 
-function formatPorts(ports: Array<{ name: string; type: string }>): string {
+function formatPorts(ports: Array<{ name: string; type: string }>, t: ReturnType<typeof useTranslation>["t"]): string {
   if (ports.length === 0) {
-    return "none";
+    return t("common.none");
   }
   return ports.map((port) => `${port.name}:${port.type}`).join(", ");
 }

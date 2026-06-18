@@ -1,6 +1,7 @@
 import { useMemo, type FormEvent } from "react";
 import { Button, Input, Select, Text } from "@fluentui/react-components";
 import { DismissRegular, SaveRegular, TabDesktopLinkRegular } from "@fluentui/react-icons";
+import { useTranslation } from "react-i18next";
 import type { FormDefinition } from "../api";
 import { formEditorExtraLibs } from "../editorTypes";
 import type { FormElement, FormRenderResult } from "../formRuntime";
@@ -31,6 +32,7 @@ export function FormWorkspace({
   onUpdateScript,
   renderedForm
 }: FormWorkspaceProps) {
+  const { t } = useTranslation();
   const canWriteForm = (form?.permission_level ?? 2) >= 2;
   const publishedLink = form?.published_token ? `${window.location.origin}/forms/${form.published_token}` : "";
   const editorExtraLibs = useMemo(() => formEditorExtraLibs(), []);
@@ -40,32 +42,32 @@ export function FormWorkspace({
       <div className="editor-pane form-editor-pane">
         <div className="section-header form-section-header">
           <div>
-            <Text weight="semibold">{form?.name ?? "form"}.js</Text>
-            <Text size={200}>{databaseName} form</Text>
+            <Text weight="semibold">{form?.name ?? t("common.form")}.js</Text>
+            <Text size={200}>{databaseName} {t("common.form").toLowerCase()}</Text>
           </div>
           <div className="form-actions">
             {publishedLink ? (
               <Button icon={<DismissRegular />} onClick={onUnpublish} disabled={!canWriteForm || !form?.id}>
-                Unpublish
+                {t("form.unpublish")}
               </Button>
             ) : (
               <Button icon={<TabDesktopLinkRegular />} onClick={onPublish} disabled={!canWriteForm || !form?.id}>
-                Publish
+                {t("form.publish")}
               </Button>
             )}
             <Button icon={<SaveRegular />} appearance="primary" onClick={onSave} disabled={!canWriteForm}>
-              Save
+              {t("common.save")}
             </Button>
           </div>
         </div>
         <div className="form-editor-body">
           {publishedLink && (
-            <Input aria-label="Published form link" readOnly value={publishedLink} />
+            <Input aria-label={t("form.publishedFormLink")} readOnly value={publishedLink} />
           )}
           <JavaScriptEditor
             canWrite={canWriteForm}
             extraLibs={editorExtraLibs}
-            label="Form JavaScript"
+            label={t("form.formScriptLabel")}
             onChange={onUpdateScript}
             path={`form-${form?.id || "new"}.js`}
             testID="form-js-editor"
@@ -74,7 +76,7 @@ export function FormWorkspace({
         </div>
       </div>
       <form className="form-preview" onSubmit={(event) => onSubmit(undefined, event)}>
-        <Text weight="semibold">Preview</Text>
+        <Text weight="semibold">{t("common.preview")}</Text>
         {renderedForm.error && <Text className="form-error">{renderedForm.error}</Text>}
         {renderedForm.elements.map((element) => {
           if (element.kind === "input") {

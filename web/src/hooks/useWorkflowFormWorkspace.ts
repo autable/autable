@@ -1,4 +1,5 @@
 import { type FormEvent, useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { replaceResource } from "../appState";
 import {
   createRow,
@@ -36,7 +37,6 @@ type UseWorkflowFormWorkspaceOptions = {
 };
 
 const workflowEvaluationDelayMs = 5000;
-const emptyWorkflowInstances: WorkflowInstanceResult = { ok: false, error: "No workflow selected" };
 
 export function useWorkflowFormWorkspace({
   currentUserID,
@@ -45,6 +45,8 @@ export function useWorkflowFormWorkspace({
   onStatus,
   onSubmittedRow
 }: UseWorkflowFormWorkspaceOptions) {
+  const { t } = useTranslation();
+  const emptyWorkflowInstances: WorkflowInstanceResult = { ok: false, error: t("workflow.noWorkflowSelected") };
   const [workflows, setWorkflows] = useState<WorkflowDefinition[]>([]);
   const [workflowNodes, setWorkflowNodes] = useState<WorkflowNodeInfo[]>([]);
   const [forms, setForms] = useState<FormDefinition[]>([]);
@@ -194,20 +196,20 @@ export function useWorkflowFormWorkspace({
       const saved = await saveWorkflow(databaseName, selectedWorkflow);
       setWorkflows((current) => replaceResource(current, saved));
       setSelectedWorkflowID(saved.id ?? 0);
-      onStatus(`Workflow saved as #${saved.id}`);
+      onStatus(t("status.savedWorkflow", { id: saved.id }));
     } catch (error) {
-      onStatus(error instanceof Error ? error.message : "Workflow save failed");
+      onStatus(error instanceof Error ? error.message : t("status.workflowSaveFailed"));
     }
   }
 
   async function createWorkflow() {
     const name = newWorkflowName.trim();
     if (!databaseName) {
-      onStatus("Select a database before creating a workflow");
+      onStatus(t("status.selectDatabaseBeforeWorkflow"));
       return;
     }
     if (!name) {
-      onStatus("Workflow name is required");
+      onStatus(t("status.workflowNameRequired"));
       return;
     }
     try {
@@ -225,15 +227,15 @@ export function useWorkflowFormWorkspace({
       setWorkflowRuns([]);
       setSelectedWorkflowRunKey("");
       setNewWorkflowName("");
-      onStatus(`Created workflow ${saved.name}`);
+      onStatus(t("status.createdWorkflow", { name: saved.name }));
     } catch (error) {
-      onStatus(error instanceof Error ? error.message : "Workflow creation failed");
+      onStatus(error instanceof Error ? error.message : t("status.workflowCreationFailed"));
     }
   }
 
   async function executeWorkflow() {
     if (!selectedWorkflow?.id) {
-      onStatus("Save workflow before running");
+      onStatus(t("status.saveWorkflowBeforeRunning"));
       return;
     }
     try {
@@ -241,12 +243,12 @@ export function useWorkflowFormWorkspace({
       setWorkflowRuns((current) => [response, ...current.filter((run) => run.history_key !== response.history_key)]);
       setSelectedWorkflowRunKey(response.history_key);
       if (response.run.error) {
-        onStatus(`Workflow failed: ${response.run.error}`);
+        onStatus(t("status.workflowFailed", { error: response.run.error }));
         return;
       }
-      onStatus(`Workflow run saved: ${response.history_key}`);
+      onStatus(t("status.workflowRunSaved", { key: response.history_key }));
     } catch (error) {
-      onStatus(error instanceof Error ? error.message : "Workflow run failed");
+      onStatus(error instanceof Error ? error.message : t("status.workflowRunFailed"));
     }
   }
 
@@ -258,9 +260,9 @@ export function useWorkflowFormWorkspace({
       const saved = await saveWorkflow(databaseName, { ...selectedWorkflow, enabled });
       setWorkflows((current) => replaceResource(current, saved));
       setSelectedWorkflowID(saved.id ?? 0);
-      onStatus(`${saved.name} ${enabled ? "enabled" : "disabled"}`);
+      onStatus(t("status.workflowStatus", { name: saved.name, status: enabled ? t("common.enabled") : t("common.disabled") }));
     } catch (error) {
-      onStatus(error instanceof Error ? error.message : "Workflow status update failed");
+      onStatus(error instanceof Error ? error.message : t("status.workflowStatusUpdateFailed"));
     }
   }
 
@@ -268,16 +270,16 @@ export function useWorkflowFormWorkspace({
     const trimmed = name.trim();
     const workflow = workflows.find((item) => item.id === workflowID) ?? selectedWorkflow;
     if (!workflow || !trimmed) {
-      onStatus("Workflow name is required");
+      onStatus(t("status.workflowNameRequired"));
       return;
     }
     try {
       const saved = await saveWorkflow(databaseName, { ...workflow, name: trimmed });
       setWorkflows((current) => replaceResource(current, saved));
       setSelectedWorkflowID(saved.id ?? 0);
-      onStatus(`Renamed workflow ${saved.name}`);
+      onStatus(t("status.renamedWorkflow", { name: saved.name }));
     } catch (error) {
-      onStatus(error instanceof Error ? error.message : "Workflow rename failed");
+      onStatus(error instanceof Error ? error.message : t("status.workflowRenameFailed"));
     }
   }
 
@@ -292,9 +294,9 @@ export function useWorkflowFormWorkspace({
       setSelectedWorkflowID(workflows.find((item) => item.id !== workflow.id)?.id ?? 0);
       setWorkflowRuns([]);
       setSelectedWorkflowRunKey("");
-      onStatus(`Deleted workflow ${workflow.name}`);
+      onStatus(t("status.deletedWorkflow", { name: workflow.name }));
     } catch (error) {
-      onStatus(error instanceof Error ? error.message : "Workflow delete failed");
+      onStatus(error instanceof Error ? error.message : t("status.workflowDeleteFailed"));
     }
   }
 
@@ -306,39 +308,39 @@ export function useWorkflowFormWorkspace({
       const saved = await saveForm(databaseName, selectedForm);
       setForms((current) => replaceResource(current, saved));
       setSelectedFormID(saved.id ?? 0);
-      onStatus(`Form saved as #${saved.id}`);
+      onStatus(t("status.savedForm", { id: saved.id }));
     } catch (error) {
-      onStatus(error instanceof Error ? error.message : "Form save failed");
+      onStatus(error instanceof Error ? error.message : t("status.formSaveFailed"));
     }
   }
 
   async function publishSelectedForm() {
     if (!selectedForm?.id) {
-      onStatus("Save form before publishing");
+      onStatus(t("status.saveFormBeforePublishing"));
       return;
     }
     try {
       const saved = await publishForm(selectedForm.id);
       setForms((current) => replaceResource(current, saved));
       setSelectedFormID(saved.id ?? 0);
-      onStatus(`Published form ${saved.name}`);
+      onStatus(t("status.publishedForm", { name: saved.name }));
     } catch (error) {
-      onStatus(error instanceof Error ? error.message : "Form publish failed");
+      onStatus(error instanceof Error ? error.message : t("status.formPublishFailed"));
     }
   }
 
   async function unpublishSelectedForm() {
     if (!selectedForm?.id) {
-      onStatus("Save form before unpublishing");
+      onStatus(t("status.saveFormBeforeUnpublishing"));
       return;
     }
     try {
       const saved = await unpublishForm(selectedForm.id);
       setForms((current) => replaceResource(current, saved));
       setSelectedFormID(saved.id ?? 0);
-      onStatus(`Unpublished form ${saved.name}`);
+      onStatus(t("status.unpublishedForm", { name: saved.name }));
     } catch (error) {
-      onStatus(error instanceof Error ? error.message : "Form unpublish failed");
+      onStatus(error instanceof Error ? error.message : t("status.formUnpublishFailed"));
     }
   }
 
@@ -346,16 +348,16 @@ export function useWorkflowFormWorkspace({
     const trimmed = name.trim();
     const form = forms.find((item) => item.id === formID) ?? selectedForm;
     if (!form || !trimmed) {
-      onStatus("Form name is required");
+      onStatus(t("status.formNameRequired"));
       return;
     }
     try {
       const saved = await saveForm(databaseName, { ...form, name: trimmed });
       setForms((current) => replaceResource(current, saved));
       setSelectedFormID(saved.id ?? 0);
-      onStatus(`Renamed form ${saved.name}`);
+      onStatus(t("status.renamedForm", { name: saved.name }));
     } catch (error) {
-      onStatus(error instanceof Error ? error.message : "Form rename failed");
+      onStatus(error instanceof Error ? error.message : t("status.formRenameFailed"));
     }
   }
 
@@ -369,20 +371,20 @@ export function useWorkflowFormWorkspace({
       setForms((current) => current.filter((item) => item.id !== form.id));
       setSelectedFormID(forms.find((item) => item.id !== form.id)?.id ?? 0);
       setFormValues({});
-      onStatus(`Deleted form ${form.name}`);
+      onStatus(t("status.deletedForm", { name: form.name }));
     } catch (error) {
-      onStatus(error instanceof Error ? error.message : "Form delete failed");
+      onStatus(error instanceof Error ? error.message : t("status.formDeleteFailed"));
     }
   }
 
   async function createForm() {
     const name = newFormName.trim();
     if (!databaseName) {
-      onStatus("Select a database before creating a form");
+      onStatus(t("status.selectDatabaseBeforeForm"));
       return;
     }
     if (!name) {
-      onStatus("Form name is required");
+      onStatus(t("status.formNameRequired"));
       return;
     }
     try {
@@ -396,9 +398,9 @@ export function useWorkflowFormWorkspace({
       setSelectedFormID(saved.id ?? 0);
       setFormValues({});
       setNewFormName("");
-      onStatus(`Created form ${saved.name}`);
+      onStatus(t("status.createdForm", { name: saved.name }));
     } catch (error) {
-      onStatus(error instanceof Error ? error.message : "Form creation failed");
+      onStatus(error instanceof Error ? error.message : t("status.formCreationFailed"));
     }
   }
 
@@ -408,7 +410,7 @@ export function useWorkflowFormWorkspace({
       return;
     }
     if (!databaseName || !renderedForm.table || !renderedForm.fields) {
-      onStatus("Form render must return a target table and fields");
+      onStatus(t("status.formRenderTargetRequired"));
       return;
     }
     const inputValues = Object.fromEntries(
@@ -428,9 +430,9 @@ export function useWorkflowFormWorkspace({
     try {
       const saved = await createRow(databaseName, renderedForm.table, values);
       onSubmittedRow(renderedForm.table, rowRecordToValues(saved));
-      onStatus(`Form created ${renderedForm.table} record ${saved.record_id}`);
+      onStatus(t("status.formCreatedRecord", { table: renderedForm.table, id: saved.record_id }));
     } catch (error) {
-      onStatus(error instanceof Error ? error.message : "Form submit failed");
+      onStatus(error instanceof Error ? error.message : t("status.formSubmitFailed"));
     }
   }
 
@@ -467,9 +469,9 @@ export function useWorkflowFormWorkspace({
       });
       setWorkflows((current) => replaceResource(current, saved));
       setSelectedWorkflowID(saved.id ?? 0);
-      onStatus(`Saved instance config ${instanceID}`);
+      onStatus(t("status.savedInstanceConfig", { id: instanceID }));
     } catch (error) {
-      onStatus(error instanceof Error ? error.message : "Workflow config save failed");
+      onStatus(error instanceof Error ? error.message : t("status.workflowConfigSaveFailed"));
     }
   }
 

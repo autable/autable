@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo } from "react";
 import MonacoEditor, { useMonaco, type Monaco } from "@monaco-editor/react";
+import { useTranslation } from "react-i18next";
 import type { EditorExtraLib } from "../editorTypes";
 
 type JavaScriptEditorProps = {
@@ -20,6 +21,7 @@ const configuredMonacos = new WeakSet<object>();
 const extraLibDisposables = new Map<string, { content: string; disposable: Disposable }>();
 
 export function JavaScriptEditor({ canWrite, extraLibs = [], label, onChange, path, testID, value }: JavaScriptEditorProps) {
+  const { t } = useTranslation();
   const monaco = useMonaco();
   const normalizedExtraLibs = useMemo(
     () => [...extraLibs].sort((left, right) => left.filePath.localeCompare(right.filePath)),
@@ -47,7 +49,7 @@ export function JavaScriptEditor({ canWrite, extraLibs = [], label, onChange, pa
         defaultLanguage="javascript"
         height="100%"
         language="javascript"
-        loading={<span className="flow-empty">Loading editor</span>}
+        loading={<span className="flow-empty">{t("common.loadingEditor")}</span>}
         onChange={(nextValue) => onChange(nextValue ?? "")}
         options={{
           ariaLabel: label,
