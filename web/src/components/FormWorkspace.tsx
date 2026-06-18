@@ -2,7 +2,7 @@ import { useMemo, type FormEvent } from "react";
 import { Button, Input, Text } from "@fluentui/react-components";
 import { DismissRegular, SaveRegular, TabDesktopLinkRegular } from "@fluentui/react-icons";
 import { useTranslation } from "react-i18next";
-import type { FormDefinition } from "../api";
+import type { FormDefinition, TableMetadata } from "../api";
 import { formEditorExtraLibs } from "../editorTypes";
 import type { FormElement, FormRenderResult } from "../formRuntime";
 import { FormPreviewFields } from "./FormPreviewFields";
@@ -19,6 +19,7 @@ type FormWorkspaceProps = {
   onUnpublish: () => void;
   onUpdateScript: (script: string) => void;
   renderedForm: FormRenderResult;
+  tables: TableMetadata[];
 };
 
 export function FormWorkspace({
@@ -31,7 +32,8 @@ export function FormWorkspace({
   onSubmit,
   onUnpublish,
   onUpdateScript,
-  renderedForm
+  renderedForm,
+  tables
 }: FormWorkspaceProps) {
   const { t } = useTranslation();
   const canWriteForm = (form?.permission_level ?? 2) >= 2;
@@ -85,6 +87,7 @@ export function FormWorkspace({
           formValues={formValues}
           onFormValueChange={onFormValueChange}
           onSubmit={onSubmit}
+          tables={tables}
         />
       </form>
     </div>

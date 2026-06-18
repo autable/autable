@@ -41,6 +41,7 @@
   },
   "form": {
     "chooseRelation": "选择",
+    "databaseMetadataMissing": "数据库元数据缺失：{{database}}",
     "formScriptLabel": "表单 JavaScript",
     "loadingRelationRecords": "正在加载记录",
     "noRelationRecords": "没有记录",
@@ -50,8 +51,12 @@
     "publish": "发布",
     "relationDialogTitle": "选择 {{table}} 记录",
     "relationLoadFailed": "关联记录加载失败",
+    "relationMetadataMissing": "关联表元数据缺失：{{table}}",
     "relationRecords": "关联记录",
+    "relationSearch": "搜索关联记录",
+    "relationSearchPlaceholder": "搜索记录",
     "relationView": "视图：{{view}}",
+    "noRelationSearchResults": "没有匹配的记录",
     "selectedRecord": "记录 {{id}}",
     "unpublish": "取消发布"
   },

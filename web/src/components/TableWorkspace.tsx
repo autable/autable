@@ -29,11 +29,12 @@ import {
   MoreHorizontalRegular,
   SaveRegular,
 } from "@fluentui/react-icons";
-import DataGrid, { type CellSelectArgs, type Column, type RowsChangeData } from "react-data-grid";
+import { type CellSelectArgs, type Column, type RowsChangeData } from "react-data-grid";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { Field, RowChange, TableMetadata, TableViewFilter, TableViewSort } from "../api";
 import type { TableGridRow } from "../tableGrid";
+import { RecordDataGrid } from "./RecordDataGrid";
 
 type TableWorkspaceProps = {
   columns: Column<TableGridRow>[];
@@ -323,9 +324,8 @@ export function TableWorkspace({
         </Toolbar>
       </div>
       <div className="grid-host">
-        <DataGrid
+        <RecordDataGrid
           aria-label={t("table.tableRecords")}
-          className="codetable-grid rdg-light"
           columns={gridColumns}
           rows={displayedRows}
           rowKeyGetter={(row) => row.ct_record_id}
@@ -344,7 +344,6 @@ export function TableWorkspace({
               setRecordMenu({ x: event.clientX, y: event.clientY, recordID });
             }
           }}
-          defaultColumnOptions={{ resizable: true }}
         />
         <Menu
           open={Boolean(recordMenu)}

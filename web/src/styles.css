@@ -680,63 +680,21 @@ select {
 }
 
 .relation-picker-dialog {
-  width: min(720px, calc(100vw - 32px));
+  width: min(1280px, calc(100vw - 32px));
+  max-width: calc(100vw - 32px);
 }
 
 .relation-picker-content {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  max-height: min(520px, calc(100vh - 220px));
+  max-height: min(760px, calc(100vh - 180px));
   min-height: 0;
 }
 
-.relation-picker-list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  min-height: 0;
-  overflow: auto;
-}
-
-.relation-picker-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 12px;
-  align-items: center;
-  min-height: 36px;
-  padding: 7px 10px;
-  border: 1px solid var(--colorNeutralStroke2);
-  border-radius: 6px;
-  background: var(--colorNeutralBackground1);
-  color: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-
-.relation-picker-row:hover,
-.relation-picker-row.selected {
-  border-color: var(--colorBrandStroke1);
-  background: var(--colorBrandBackground2);
-}
-
-.relation-picker-row-main {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-.relation-picker-row-main > strong,
-.relation-picker-row-main > small {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.relation-picker-row-main > small {
-  color: var(--colorNeutralForeground3);
+.relation-picker-grid {
+  height: min(640px, calc(100vh - 260px));
+  min-height: 360px;
 }
 
 .workflow-workspace {

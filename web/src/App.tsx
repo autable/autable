@@ -505,6 +505,7 @@ function WorkspaceApp() {
               onUnpublish={workflowFormWorkspace.unpublishSelectedForm}
               onUpdateScript={workflowFormWorkspace.updateSelectedFormScript}
               renderedForm={renderedForm}
+              tables={database.tables}
             />
           )}
 

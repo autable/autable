@@ -41,6 +41,7 @@
   },
   "form": {
     "chooseRelation": "Choose",
+    "databaseMetadataMissing": "Database metadata is missing: {{database}}",
     "formScriptLabel": "Form JavaScript",
     "loadingRelationRecords": "Loading records",
     "noRelationRecords": "No records",
@@ -50,8 +51,12 @@
     "publish": "Publish",
     "relationDialogTitle": "Choose {{table}} record",
     "relationLoadFailed": "Relation records failed to load",
+    "relationMetadataMissing": "Relation table metadata is missing: {{table}}",
     "relationRecords": "Relation records",
+    "relationSearch": "Search relation records",
+    "relationSearchPlaceholder": "Search records",
     "relationView": "View: {{view}}",
+    "noRelationSearchResults": "No matching records",
     "selectedRecord": "Record {{id}}",
     "unpublish": "Unpublish"
   },

@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import {
   listOIDCProviders,
   loadCurrentUser,
+  loadMetadata,
   loadPublishedForm,
   login,
   oidcStartURL,
@@ -11,7 +12,8 @@ import {
   submitPublishedForm,
   type AuthUser,
   type FormDefinition,
-  type OIDCProvider
+  type OIDCProvider,
+  type TableMetadata
 } from "../api";
 import { renderFormScript, type FormElement } from "../formRuntime";
 import { AuthDialog } from "./AuthDialog";
@@ -31,6 +33,7 @@ export function PublishedFormPage({ token }: PublishedFormPageProps) {
   const [oidcProviders, setOIDCProviders] = useState<OIDCProvider[]>([]);
   const [form, setForm] = useState<FormDefinition | null>(null);
   const [formValues, setFormValues] = useState<Record<string, string>>({});
+  const [tables, setTables] = useState<TableMetadata[]>([]);
   const [status, setStatus] = useState(t("status.loadingForm"));
   const renderedForm = useMemo(() => renderFormScript(form?.script ?? ""), [form?.script]);
 
@@ -77,17 +80,27 @@ export function PublishedFormPage({ token }: PublishedFormPageProps) {
       };
     }
     void loadPublishedForm(token)
-      .then((loadedForm) => {
+      .then(async (loadedForm) => {
+        const catalog = await loadMetadata();
+        const database = catalog.databases.find((item) => item.name === loadedForm.database_name);
+        if (!database) {
+          throw new Error(t("form.databaseMetadataMissing", { database: loadedForm.database_name }));
+        }
+        return { loadedForm, tables: database?.tables ?? [] };
+      })
+      .then(({ loadedForm, tables: loadedTables }) => {
         if (cancelled) {
           return;
         }
         setForm(loadedForm);
+        setTables(loadedTables);
         setFormValues({});
         setStatus(t("status.openedForm", { name: loadedForm.name }));
       })
       .catch((error) => {
         if (!cancelled) {
           setForm(null);
+          setTables([]);
           setStatus(error instanceof Error ? error.message : t("status.publishedFormLoadFailed"));
         }
       });
@@ -177,6 +190,7 @@ export function PublishedFormPage({ token }: PublishedFormPageProps) {
               formValues={formValues}
               onFormValueChange={(name, value) => setFormValues((current) => ({ ...current, [name]: value }))}
               onSubmit={submitForm}
+              tables={tables}
             />
           </form>
         ) : (

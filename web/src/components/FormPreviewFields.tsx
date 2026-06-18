@@ -11,9 +11,12 @@ import {
   Select,
   Text
 } from "@fluentui/react-components";
+import type { Column } from "react-data-grid";
 import { useTranslation } from "react-i18next";
-import { listRows, type RowRecord } from "../api";
+import { listRows, type RowRecord, type TableMetadata } from "../api";
 import type { FormElement } from "../formRuntime";
+import { rowRecordToValues, type TableGridRow } from "../tableGrid";
+import { RecordDataGrid } from "./RecordDataGrid";
 
 type FormPreviewFieldsProps = {
   databaseName: string;
@@ -21,6 +24,7 @@ type FormPreviewFieldsProps = {
   formValues: Record<string, string>;
   onFormValueChange: (name: string, value: string) => void;
   onSubmit: (submitElement?: Extract<FormElement, { kind: "submit" }>, event?: FormEvent<HTMLFormElement>) => void | Promise<void>;
+  tables?: TableMetadata[];
 };
 
 export function FormPreviewFields({
@@ -28,7 +32,8 @@ export function FormPreviewFields({
   elements,
   formValues,
   onFormValueChange,
-  onSubmit
+  onSubmit,
+  tables = []
 }: FormPreviewFieldsProps) {
   return (
     <>
@@ -61,12 +66,14 @@ export function FormPreviewFields({
           );
         }
         if (element.kind === "relation") {
+          const relationTable = tables.find((table) => table.name === element.table);
           return (
             <RelationInput
               key={element.field}
               databaseName={databaseName}
               element={element}
               onChange={(value) => onFormValueChange(element.field, value)}
+              relationTable={relationTable}
               value={formValues[element.field] ?? ""}
             />
           );
@@ -88,11 +95,13 @@ function RelationInput({
   databaseName,
   element,
   onChange,
+  relationTable,
   value
 }: {
   databaseName: string;
   element: Extract<FormElement, { kind: "relation" }>;
   onChange: (value: string) => void;
+  relationTable?: TableMetadata;
   value: string;
 }) {
   const { t } = useTranslation();
@@ -100,10 +109,24 @@ function RelationInput({
   const [rows, setRows] = useState<RowRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
+  const filteredRows = useMemo(() => filterRelationRows(rows, searchQuery), [rows, searchQuery]);
+  const gridRows = useMemo(() => filteredRows.map(rowRecordToValues), [filteredRows]);
+  const gridColumns = useMemo(
+    () => buildRelationGridColumns(relationTable, value, onChange, setOpen, t),
+    [onChange, relationTable, t, value]
+  );
 
   useEffect(() => {
     let cancelled = false;
     if (!open || !databaseName || !element.table) {
+      return () => {
+        cancelled = true;
+      };
+    }
+    if (!relationTable) {
+      setRows([]);
+      setError(t("form.relationMetadataMissing", { table: element.table }));
       return () => {
         cancelled = true;
       };
@@ -130,10 +153,16 @@ function RelationInput({
     return () => {
       cancelled = true;
     };
-  }, [databaseName, element.table, element.view, open, t]);
+  }, [databaseName, element.table, element.view, open, relationTable, t]);
+
+  useEffect(() => {
+    if (!open) {
+      setSearchQuery("");
+    }
+  }, [open]);
 
   const selectedRow = useMemo(() => rows.find((row) => String(row.record_id) === value), [rows, value]);
-  const selectedLabel = selectedRow ? relationRowLabel(selectedRow) : value ? t("form.selectedRecord", { id: value }) : "";
+  const selectedLabel = selectedRow ? relationRowLabel(selectedRow, relationTable) : value ? t("form.selectedRecord", { id: value }) : "";
 
   return (
     <div className="field-stack">
@@ -150,7 +179,7 @@ function RelationInput({
         </Button>
       </div>
       <Dialog open={open} onOpenChange={(_, data) => setOpen(data.open)}>
-        <DialogSurface className="relation-picker-dialog">
+        <DialogSurface className="relation-picker-dialog" style={{ width: "min(1280px, calc(100vw - 48px))", maxWidth: "none" }}>
           <DialogBody>
             <DialogTitle>{t("form.relationDialogTitle", { table: element.table })}</DialogTitle>
             <DialogContent className="relation-picker-content">
@@ -158,25 +187,31 @@ function RelationInput({
               {loading && <Text>{t("form.loadingRelationRecords")}</Text>}
               {error && <Text className="form-error">{error}</Text>}
               {!loading && !error && rows.length === 0 && <Text>{t("form.noRelationRecords")}</Text>}
-              <div className="relation-picker-list" aria-label={t("form.relationRecords")}>
-                {rows.map((row) => (
-                  <button
-                    key={row.record_id}
-                    className={String(row.record_id) === value ? "relation-picker-row selected" : "relation-picker-row"}
-                    type="button"
-                    onClick={() => {
-                      onChange(String(row.record_id));
+              {rows.length > 0 && (
+                <Input
+                  aria-label={t("form.relationSearch")}
+                  className="relation-picker-search"
+                  type="search"
+                  value={searchQuery}
+                  placeholder={t("form.relationSearchPlaceholder")}
+                  onChange={(_, data) => setSearchQuery(data.value)}
+                />
+              )}
+              {!loading && !error && rows.length > 0 && filteredRows.length === 0 && <Text>{t("form.noRelationSearchResults")}</Text>}
+              {filteredRows.length > 0 && (
+                <div className="grid-host relation-picker-grid">
+                  <RecordDataGrid
+                    aria-label={t("form.relationRecords")}
+                    columns={gridColumns}
+                    rows={gridRows}
+                    rowKeyGetter={(row) => row.ct_record_id}
+                    onCellClick={({ row }) => {
+                      onChange(String(row.ct_record_id));
                       setOpen(false);
                     }}
-                  >
-                    <span className="relation-picker-row-main">
-                      <strong>{relationRowLabel(row)}</strong>
-                      <small>{relationRowSummary(row)}</small>
-                    </span>
-                    <span>{t("form.selectedRecord", { id: row.record_id })}</span>
-                  </button>
-                ))}
-              </div>
+                  />
+                </div>
+              )}
             </DialogContent>
             <DialogActions>
               <Button type="button" onClick={() => setOpen(false)}>{t("common.cancel")}</Button>
@@ -188,15 +223,64 @@ function RelationInput({
   );
 }
 
-function relationRowLabel(row: RowRecord): string {
-  const firstValue = Object.values(row.values).find((value) => value !== undefined && value !== null && String(value).trim() !== "");
-  return firstValue === undefined ? `#${row.record_id}` : String(firstValue);
+function filterRelationRows(rows: RowRecord[], searchQuery: string): RowRecord[] {
+  const query = searchQuery.trim().toLocaleLowerCase();
+  if (!query) {
+    return rows;
+  }
+  return rows.filter((row) =>
+    [row.record_id, ...Object.keys(row.values), ...Object.values(row.values)].some((value) =>
+      String(value ?? "").toLocaleLowerCase().includes(query)
+    )
+  );
 }
 
-function relationRowSummary(row: RowRecord): string {
-  return Object.entries(row.values)
-    .filter(([, value]) => value !== undefined && value !== null && String(value).trim() !== "")
-    .slice(0, 4)
-    .map(([field, value]) => `${field}: ${String(value)}`)
-    .join(" / ");
+function buildRelationGridColumns(
+  relationTable: TableMetadata | undefined,
+  value: string,
+  onChange: (value: string) => void,
+  setOpen: (open: boolean) => void,
+  t: ReturnType<typeof useTranslation>["t"]
+): Column<TableGridRow>[] {
+  const metadataFieldNames = relationTable?.fields.filter((field) => !field.deleted).map((field) => field.name) ?? [];
+  const fieldNames = metadataFieldNames;
+  const selectColumn: Column<TableGridRow> = {
+    key: "__select__",
+    name: "",
+    width: 44,
+    minWidth: 44,
+    maxWidth: 44,
+    frozen: true,
+    resizable: false,
+    renderCell: ({ row }) => (
+      <input
+        type="radio"
+        aria-label={t("form.selectedRecord", { id: row.ct_record_id })}
+        checked={String(row.ct_record_id) === value}
+        onChange={() => {
+          onChange(String(row.ct_record_id));
+          setOpen(false);
+        }}
+        onClick={(event) => event.stopPropagation()}
+      />
+    )
+  };
+  return [
+    selectColumn,
+    ...fieldNames.map((fieldName) => ({
+      key: fieldName,
+      name: fieldName,
+      minWidth: Math.max(128, fieldName.length * 14),
+      resizable: true,
+      renderCell: ({ row }) => String(row[fieldName] ?? "")
+    } satisfies Column<TableGridRow>))
+  ];
+}
+
+function relationRowLabel(row: RowRecord, relationTable?: TableMetadata): string {
+  const fieldNames = relationTable?.fields.filter((field) => !field.deleted).map((field) => field.name) ?? [];
+  const firstValue = fieldNames
+    .map((fieldName) => row.values[fieldName])
+    .find((value) => value !== undefined && value !== null && String(value).trim() !== "");
+  return firstValue === undefined ? `#${row.record_id}` : String(firstValue);
 }
