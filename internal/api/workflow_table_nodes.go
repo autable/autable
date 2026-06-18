@@ -127,19 +127,107 @@ func workflowRecordIDInput(input map[string]any) (int64, error) {
 }
 
 func (server *Server) upsertWorkflowTableRow(ctx context.Context, catalog metadata.Catalog, perms permission.Set, actorID string, dbName string, tableName string, matchField string, values map[string]any) (table.Row, string, error) {
-	matchValue := values[matchField]
+	tableMeta, ok := catalog.Table(dbName, tableName)
+	if !ok {
+		return table.Row{}, "", fmt.Errorf("table %s.%s not found", dbName, tableName)
+	}
+	matchFieldMeta, ok := tableMeta.Field(matchField)
+	if !ok {
+		return table.Row{}, "", fmt.Errorf("%w: %s", metadata.ErrUnknownField, matchField)
+	}
+	matchValue, err := workflowNormalizeComparableValue(matchFieldMeta, values[matchField])
+	if err != nil {
+		return table.Row{}, "", err
+	}
 	rows, err := server.tables.Rows(ctx, catalog, perms, actorID, dbName, tableName, "")
 	if err != nil {
 		return table.Row{}, "", err
 	}
 	for _, row := range rows {
 		if workflowValuesEqual(row.Values[matchField], matchValue) {
+			changed, err := workflowRowValuesChanged(tableMeta, row.Values, values)
+			if err != nil {
+				return table.Row{}, "", err
+			}
+			if !changed {
+				return row, "noop", nil
+			}
 			updated, err := server.tables.UpdateRow(ctx, catalog, perms, actorID, dbName, tableName, row.RecordID, values)
 			return updated, "update", err
 		}
 	}
 	created, err := server.tables.CreateRow(ctx, catalog, perms, actorID, dbName, tableName, values)
 	return created, "create", err
+}
+
+func workflowRowValuesChanged(tableMeta metadata.Table, existing map[string]any, values map[string]any) (bool, error) {
+	for fieldName, nextValue := range values {
+		field, ok := tableMeta.Field(fieldName)
+		if !ok {
+			return false, fmt.Errorf("%w: %s", metadata.ErrUnknownField, fieldName)
+		}
+		normalizedValue, err := workflowNormalizeComparableValue(field, nextValue)
+		if err != nil {
+			return false, err
+		}
+		if !workflowValuesEqual(existing[fieldName], normalizedValue) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func workflowNormalizeComparableValue(field metadata.Field, value any) (any, error) {
+	if value == nil {
+		return nil, nil
+	}
+	switch field.StorageType() {
+	case "string":
+		return fmt.Sprint(value), nil
+	case "int":
+		switch typed := value.(type) {
+		case int:
+			return int64(typed), nil
+		case int64:
+			return typed, nil
+		case float64:
+			if float64(int64(typed)) != typed {
+				return nil, fmt.Errorf("expected integer, got %v", value)
+			}
+			return int64(typed), nil
+		case json.Number:
+			return typed.Int64()
+		case string:
+			parsed, err := json.Number(typed).Int64()
+			if err != nil {
+				return nil, err
+			}
+			return parsed, nil
+		default:
+			return nil, fmt.Errorf("expected integer, got %T", value)
+		}
+	case "float":
+		switch typed := value.(type) {
+		case int:
+			return float64(typed), nil
+		case int64:
+			return float64(typed), nil
+		case float64:
+			return typed, nil
+		case json.Number:
+			return typed.Float64()
+		case string:
+			parsed, err := json.Number(typed).Float64()
+			if err != nil {
+				return nil, err
+			}
+			return parsed, nil
+		default:
+			return nil, fmt.Errorf("expected number, got %T", value)
+		}
+	default:
+		return nil, fmt.Errorf("unsupported field type %q", field.StorageType())
+	}
 }
 
 func workflowValuesEqual(left any, right any) bool {

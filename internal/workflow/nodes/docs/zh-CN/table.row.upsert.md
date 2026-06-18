@@ -1,6 +1,6 @@
 ## 更新或创建记录
 
-用 `match_field` 和 `values[match_field]` 查找第一条匹配记录。找到则更新，找不到则新建。
+用 `match_field` 和 `values[match_field]` 查找第一条匹配记录。找到则更新，找不到则新建。如果匹配记录的字段值已经一致，会返回 `noop`，不会写入 row history。
 
 ### 输入
 
@@ -12,7 +12,7 @@
 ### 输出
 
 - `record` (`RowRecord`): 更新或创建后的记录。
-- `operation` (`string`): `update` 或 `create`。
+- `operation` (`string`): `update`、`create` 或 `noop`。
 
 ### 示例
 

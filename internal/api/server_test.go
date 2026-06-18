@@ -902,6 +902,104 @@ func TestWorkflowFieldCreateNodeAddsMissingFields(t *testing.T) {
 	if len(output["created"].([]map[string]any)) != 0 || len(output["existing"].([]map[string]any)) != 2 {
 		t.Fatalf("expected idempotent second call, got %#v", output)
 	}
+	beforeNoopWrite, err := os.ReadFile(metadataPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	output, err = server.RunWorkflowTableFieldNode(ctx, map[string]any{
+		"table":  "contacts",
+		"fields": []any{"email"},
+	}, workflow.RuntimeInfo{DatabaseName: "workspace", CreatorID: "owner"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	afterNoopWrite, err := os.ReadFile(metadataPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(beforeNoopWrite, afterNoopWrite) {
+		t.Fatal("idempotent field create should not rewrite metadata")
+	}
+}
+
+func TestWorkflowFieldCreateNodeAddsExternalCreatedFieldsOnFirstRun(t *testing.T) {
+	ctx := context.Background()
+	sqlitePath := filepath.Join(t.TempDir(), "workspace.sqlite")
+	catalog := metadata.Catalog{Databases: []metadata.Database{{
+		Name:       "workspace",
+		SQLitePath: sqlitePath,
+		Tables: []metadata.Table{{
+			Name: "b表",
+			Fields: []metadata.Field{
+				{Name: "name", Type: "string", Deleted: true},
+			},
+		}},
+	}}}
+	server, system, metadataPath := newTestServerWithMetadataFile(t, catalog)
+	if err := system.SaveGrant(ctx, permission.Grant{
+		SubjectID: "owner",
+		Scope:     permission.ScopeTable,
+		Resource:  "workspace.b表",
+		Level:     permission.Write,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	output, err := server.RunWorkflowTableFieldNode(ctx, map[string]any{
+		"table": "b表",
+		"fields": map[string]any{
+			"Assignees":                   "string",
+			"Created":                     "string",
+			"Created By":                  "string",
+			"Description":                 "string",
+			"Done":                        "string",
+			"Done At":                     "string",
+			"Identifier":                  "string",
+			"Percent Done":                "string",
+			"Priority":                    "string",
+			"Project ID":                  "string",
+			"Task ID":                     "string",
+			"Title":                       "string",
+			"Updated":                     "string",
+			"dingtalk_created_time":       "string",
+			"dingtalk_last_modified_time": "string",
+			"dingtalk_record_id":          "string",
+			"工单总结":                        "string",
+		},
+	}, workflow.RuntimeInfo{DatabaseName: "workspace", CreatorID: "owner"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(output["created"].([]map[string]any)) != 17 {
+		t.Fatalf("unexpected created fields: %#v", output)
+	}
+	loaded, err := metadata.Load(metadataPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tableMeta, ok := loaded.Table("workspace", "b表")
+	if !ok {
+		t.Fatal("expected b表 metadata")
+	}
+	if _, ok := tableMeta.Field("Created"); !ok {
+		t.Fatalf("expected Created in metadata, got %#v", tableMeta.Fields)
+	}
+	repository, err := recorddb.OpenCatalog(ctx, loaded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := repository.Close(); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if _, err := repository.CreateRow(ctx, "workspace", tableMeta, map[string]any{
+		"Created": "1780493834000",
+		"Updated": "1780620092000",
+		"Title":   "问卷提交 [indask]",
+	}); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestWorkflowFieldCreateNodeRequiresTableWrite(t *testing.T) {
@@ -963,6 +1061,30 @@ func TestWorkflowRowUpsertUpdatesFirstMatchOrCreates(t *testing.T) {
 	updatedValues := updatedRecord["values"].(map[string]any)
 	if updatedValues["name"] != "Updated" || updatedValues["status"] != "done" {
 		t.Fatalf("unexpected updated values: %#v", updatedValues)
+	}
+	recordID := updatedRecord["record_id"].(int64)
+	historyBefore, err := server.history.GetPrefix(ctx, history.RowPrefix("db", "contacts", recordID))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	nooped, err := server.RunWorkflowTableNode(ctx, "upsert", map[string]any{
+		"table":       "contacts",
+		"match_field": "email",
+		"values":      map[string]any{"name": "Updated", "email": "remote-1", "status": "done"},
+	}, workflow.RuntimeInfo{DatabaseName: "db", CreatorID: "owner"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if nooped["operation"] != "noop" {
+		t.Fatalf("expected noop operation, got %#v", nooped)
+	}
+	historyAfter, err := server.history.GetPrefix(ctx, history.RowPrefix("db", "contacts", recordID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(historyAfter) != len(historyBefore) {
+		t.Fatalf("noop upsert should not create row history: before=%d after=%d", len(historyBefore), len(historyAfter))
 	}
 
 	upserted, err := server.RunWorkflowTableNode(ctx, "upsert", map[string]any{

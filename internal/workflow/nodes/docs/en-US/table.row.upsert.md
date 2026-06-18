@@ -1,6 +1,6 @@
 ## Update or create row
 
-Updates the first row whose `match_field` value equals `values[match_field]`. If no row matches, creates a new row.
+Updates the first row whose `match_field` value equals `values[match_field]`. If no row matches, creates a new row. If the matched row already has the same values, it returns `noop` without writing row history.
 
 ### Inputs
 
@@ -12,7 +12,7 @@ Updates the first row whose `match_field` value equals `values[match_field]`. If
 ### Outputs
 
 - `record` (`RowRecord`): The updated or created record.
-- `operation` (`string`): `update` or `create`.
+- `operation` (`string`): `update`, `create`, or `noop`.
 
 ### Example
 

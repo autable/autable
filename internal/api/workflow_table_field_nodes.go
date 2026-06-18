@@ -137,7 +137,7 @@ func (server *Server) addTableFields(ctx context.Context, dbName string, tableNa
 		existingIndex := -1
 		var existing metadata.Field
 		for index, candidate := range tableMeta.Fields {
-			if candidate.Name == field.Name {
+			if strings.EqualFold(candidate.Name, field.Name) {
 				existingIndex = index
 				existing = candidate
 				break
@@ -159,18 +159,24 @@ func (server *Server) addTableFields(ctx context.Context, dbName string, tableNa
 		}
 		mutation.Existing = append(mutation.Existing, existing)
 	}
+	mutation.Fields = tableMeta.ActiveFields()
+	if len(mutation.Created) == 0 && len(mutation.Restored) == 0 {
+		if err := server.tables.EnsureTable(ctx, server.catalog, dbName, tableName); err != nil {
+			return workflowFieldMutation{}, err
+		}
+		return mutation, nil
+	}
 	next, err := server.catalog.UpdateTable(dbName, tableName, tableMeta)
 	if err != nil {
-		return workflowFieldMutation{}, err
-	}
-	if err := server.tables.SyncTable(ctx, next, dbName, tableName); err != nil {
 		return workflowFieldMutation{}, err
 	}
 	if err := metadata.Save(server.metadataPath, next); err != nil {
 		return workflowFieldMutation{}, err
 	}
 	server.catalog = next
-	mutation.Fields = tableMeta.ActiveFields()
+	if err := server.tables.EnsureTable(ctx, next, dbName, tableName); err != nil {
+		return workflowFieldMutation{}, err
+	}
 	return mutation, nil
 }
 

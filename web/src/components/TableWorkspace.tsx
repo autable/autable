@@ -881,9 +881,21 @@ function RowHistoryList({ rowHistory }: { rowHistory: RowChange[] }) {
               {[formatHistoryTime(change.timestamp), change.actor_id ? t("table.byActor", { actor: change.actor_id }) : ""].filter(Boolean).join(" · ")}
             </Text>
           </div>
-          <pre>{JSON.stringify(change.values, null, 2)}</pre>
+          <HistoryJSON title={t("table.diff")} value={change.diff ?? {}} />
+          <HistoryJSON title={t("table.values")} value={change.values} />
         </div>
       ))}
+    </div>
+  );
+}
+
+function HistoryJSON({ title, value }: { title: string; value: unknown }) {
+  return (
+    <div>
+      <Text size={200} weight="semibold">
+        {title}
+      </Text>
+      <pre>{JSON.stringify(value, null, 2)}</pre>
     </div>
   );
 }

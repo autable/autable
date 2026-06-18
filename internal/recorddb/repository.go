@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"sync"
 	"time"
 
@@ -63,7 +64,12 @@ func (repository *Repository) EnsureTable(ctx context.Context, dbName string, ta
 	if err != nil {
 		return err
 	}
-	return db.WithContext(ctx).Table(physicalTableName(tableMeta.Name)).AutoMigrate(dynamicModel(tableMeta))
+	tableName := physicalTableName(tableMeta.Name)
+	migrationMeta, err := migrationTableMetadata(db, tableName, tableMeta)
+	if err != nil {
+		return err
+	}
+	return db.WithContext(ctx).Table(tableName).AutoMigrate(dynamicModel(migrationMeta))
 }
 
 func (repository *Repository) CreateRow(ctx context.Context, dbName string, tableMeta metadata.Table, values map[string]any) (table.Row, error) {
@@ -275,6 +281,33 @@ func dynamicModel(tableMeta metadata.Table) any {
 	return reflect.New(modelType).Interface()
 }
 
+func migrationTableMetadata(db *gorm.DB, tableName string, tableMeta metadata.Table) (metadata.Table, error) {
+	if !db.Migrator().HasTable(tableName) {
+		return tableMeta, nil
+	}
+	columnTypes, err := db.Migrator().ColumnTypes(tableName)
+	if err != nil {
+		return metadata.Table{}, err
+	}
+	columns := map[string]struct{}{}
+	for _, columnType := range columnTypes {
+		columns[strings.ToLower(columnType.Name())] = struct{}{}
+	}
+	filtered := tableMeta
+	filtered.Fields = make([]metadata.Field, 0, len(tableMeta.Fields))
+	for _, field := range tableMeta.Fields {
+		if field.Deleted {
+			filtered.Fields = append(filtered.Fields, field)
+			continue
+		}
+		if _, ok := columns[strings.ToLower(field.Name)]; ok {
+			continue
+		}
+		filtered.Fields = append(filtered.Fields, field)
+	}
+	return filtered, nil
+}
+
 func goType(fieldType string) reflect.Type {
 	switch fieldType {
 	case "int":
@@ -319,9 +352,21 @@ func mapToRow(tableMeta metadata.Table, record map[string]any) table.Row {
 	recordID := int64Value(record["record_id"])
 	values := map[string]any{}
 	for _, field := range tableMeta.ActiveFields() {
-		values[field.Name] = record[field.Name]
+		values[field.Name] = recordValue(record, field.Name)
 	}
 	return table.Row{RecordID: recordID, Values: values}
+}
+
+func recordValue(record map[string]any, fieldName string) any {
+	if value, ok := record[fieldName]; ok {
+		return value
+	}
+	for key, value := range record {
+		if strings.EqualFold(key, fieldName) {
+			return value
+		}
+	}
+	return nil
 }
 
 func int64Value(value any) int64 {

@@ -139,6 +139,106 @@ func TestRepositorySupportsUnsafeLogicalTableNames(t *testing.T) {
 	}
 }
 
+func TestRepositorySupportsExternalFieldsNamedCreatedAndUpdated(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "workspace.sqlite")
+	catalog := metadata.Catalog{Databases: []metadata.Database{{Name: "workspace", SQLitePath: path}}}
+	tableMeta := metadata.Table{Name: "b表", Fields: []metadata.Field{
+		{Name: "Created", Type: "string"},
+		{Name: "Updated", Type: "string"},
+		{Name: "Created By", Type: "string"},
+	}}
+
+	repository, err := OpenCatalog(ctx, catalog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := repository.Close(); err != nil {
+			t.Fatal(err)
+		}
+	})
+	row, err := repository.CreateRow(ctx, "workspace", tableMeta, map[string]any{
+		"Created":    "remote-created",
+		"Updated":    "remote-updated",
+		"Created By": "robot",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row.Values["Created"] != "remote-created" || row.Values["Updated"] != "remote-updated" || row.Values["Created By"] != "robot" {
+		t.Fatalf("unexpected external field values: %#v", row.Values)
+	}
+}
+
+func TestRepositoryAutoMigrateHandlesExistingPhysicalExternalField(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "workspace.sqlite")
+	catalog := metadata.Catalog{Databases: []metadata.Database{{Name: "workspace", SQLitePath: path}}}
+
+	repository, err := OpenCatalog(ctx, catalog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := repository.Close(); err != nil {
+			t.Fatal(err)
+		}
+	})
+	db, err := repository.database("workspace")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tableName := physicalTableName("b表")
+	if err := db.Exec(`CREATE TABLE ` + tableName + ` (record_id integer primary key autoincrement, created_at integer not null, updated_at integer not null, Created text)`).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	tableMeta := metadata.Table{Name: "b表", Fields: []metadata.Field{{Name: "Created", Type: "string"}, {Name: "Title", Type: "string"}}}
+	if err := repository.EnsureTable(ctx, "workspace", tableMeta); err != nil {
+		t.Fatal(err)
+	}
+	if !db.Migrator().HasColumn(tableName, "Created") || !db.Migrator().HasColumn(tableName, "Title") {
+		t.Fatal("expected existing Created and new Title columns")
+	}
+}
+
+func TestRepositoryReadsExistingPhysicalColumnWithDifferentCase(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "workspace.sqlite")
+	catalog := metadata.Catalog{Databases: []metadata.Database{{Name: "workspace", SQLitePath: path}}}
+
+	repository, err := OpenCatalog(ctx, catalog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := repository.Close(); err != nil {
+			t.Fatal(err)
+		}
+	})
+	db, err := repository.database("workspace")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tableName := physicalTableName("b表")
+	if err := db.Exec(`CREATE TABLE ` + tableName + ` (record_id integer primary key autoincrement, created_at integer not null, updated_at integer not null, created text)`).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec(`INSERT INTO ` + tableName + ` (created_at, updated_at, created) VALUES (1, 1, 'remote-created')`).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	tableMeta := metadata.Table{Name: "b表", Fields: []metadata.Field{{Name: "Created", Type: "string"}}}
+	rows, err := repository.Rows(ctx, "workspace", tableMeta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].Values["Created"] != "remote-created" {
+		t.Fatalf("expected case-insensitive physical column read, got %#v", rows)
+	}
+}
+
 func TestRepositoryAllocatesRecordIDsPerTableAcrossReopen(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "workspace.sqlite")

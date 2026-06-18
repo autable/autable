@@ -255,6 +255,14 @@ func (service *Service) SyncTable(ctx context.Context, catalog metadata.Catalog,
 	return nil
 }
 
+func (service *Service) EnsureTable(ctx context.Context, catalog metadata.Catalog, dbName, tableName string) error {
+	tableMeta, ok := catalog.Table(dbName, tableName)
+	if !ok {
+		return fmt.Errorf("table %s.%s not found", dbName, tableName)
+	}
+	return service.rows.EnsureTable(ctx, dbName, tableMeta)
+}
+
 func viewFieldsReadable(perms permission.Set, actorID, resource string, filters []metadata.ViewFilter, sorts []metadata.ViewSort) bool {
 	for _, filter := range filters {
 		if !perms.CanReadField(actorID, resource, filter.Field) {
