@@ -209,7 +209,7 @@ function WorkflowHistoryView({
 
   return (
     <div className="workflow-history-tab">
-      <div className="workflow-run-left">
+      <div className="workflow-run-toolbar">
         <Menu>
           <MenuTrigger disableButtonEnhancement>
             <MenuButton
@@ -240,42 +240,46 @@ function WorkflowHistoryView({
             </MenuList>
           </MenuPopover>
         </Menu>
+      </div>
+      <div className="workflow-run-detail-shell">
         {workflowRuns.length > 0 ? (
-          <div className="workflow-run-node-list" aria-label={t("workflow.runList")}>
-            {runItems.map((item, index) => (
-              <button
-                key={item.id}
-                type="button"
-                className={runNodeItemClassName(item, item.id === selectedItem?.id)}
-                onClick={() => setSelectedRunItemID(item.id)}
-              >
-                <span className="workflow-run-node-index">{index + 1}</span>
-                <span className="workflow-run-node-main">
-                  <span>{item.title}</span>
-                  {item.subtitle && <span>{item.subtitle}</span>}
-                  {item.error && <span>{item.error}</span>}
-                </span>
-              </button>
-            ))}
-          </div>
+          <>
+            <div className="workflow-run-node-list" aria-label={t("workflow.runList")}>
+              {runItems.map((item, index) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  className={runNodeItemClassName(item, item.id === selectedItem?.id)}
+                  onClick={() => setSelectedRunItemID(item.id)}
+                >
+                  <span className="workflow-run-node-index">{index + 1}</span>
+                  <span className="workflow-run-node-main">
+                    <span>{item.title}</span>
+                    {item.subtitle && <span>{item.subtitle}</span>}
+                    {item.error && <span>{item.error}</span>}
+                  </span>
+                </button>
+              ))}
+            </div>
+            <div className="workflow-run-inspector" aria-label={t("workflow.inspector")}>
+              {selectedItem ? (
+                <>
+                  <div className="workflow-run-inspector-header">
+                    <Text weight="semibold">{selectedItem.title}</Text>
+                    {selectedItem.subtitle && <Text size={200}>{selectedItem.subtitle}</Text>}
+                    {selectedItem.error && <Text size={200}>{selectedItem.error}</Text>}
+                  </div>
+                  <RunPayloadTabs item={selectedItem} />
+                </>
+              ) : (
+                <Text size={200}>{t("workflow.selectRunItem")}</Text>
+              )}
+            </div>
+          </>
         ) : (
           <div className="workflow-run-empty">
             <span className="flow-empty">{t("workflow.noRunsYet")}</span>
           </div>
-        )}
-      </div>
-      <div className="workflow-run-inspector" aria-label={t("workflow.inspector")}>
-        {workflowRuns.length > 0 && selectedItem ? (
-          <>
-            <div className="workflow-run-inspector-header">
-              <Text weight="semibold">{selectedItem.title}</Text>
-              {selectedItem.subtitle && <Text size={200}>{selectedItem.subtitle}</Text>}
-              {selectedItem.error && <Text size={200}>{selectedItem.error}</Text>}
-            </div>
-            <RunPayloadTabs item={selectedItem} />
-          </>
-        ) : (
-          <Text size={200}>{t("workflow.selectRunItem")}</Text>
         )}
       </div>
     </div>
