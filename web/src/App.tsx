@@ -57,6 +57,7 @@ function WorkspaceApp() {
   const [authDialogOpen, setAuthDialogOpen] = useState(false);
   const [newDatabaseName, setNewDatabaseName] = useState("");
   const [newTableName, setNewTableName] = useState("");
+  const [primaryNavCollapsed, setPrimaryNavCollapsed] = useState(false);
   const [status, setStatus] = useState(t("status.ready"));
   const language = normalizeLanguage(i18n.resolvedLanguage ?? i18n.language);
 
@@ -352,9 +353,11 @@ function WorkspaceApp() {
   }
 
   return (
-    <div className="app-shell">
+    <div className={primaryNavCollapsed ? "app-shell primary-collapsed" : "app-shell"}>
       <WorkspaceNavigation
         catalog={catalog}
+        collapsed={primaryNavCollapsed}
+        onToggleCollapsed={() => setPrimaryNavCollapsed((value) => !value)}
         currentUser={currentUser}
         database={database}
         forms={forms}

@@ -39,6 +39,43 @@ select {
   background: var(--colorNeutralStroke2);
 }
 
+.app-shell.primary-collapsed {
+  grid-template-columns: 56px 260px minmax(0, 1fr);
+}
+
+.primary-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+}
+
+.primary-rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  background: var(--colorNeutralBackground3);
+}
+
+.primary-rail-divider {
+  width: 24px;
+  height: 1px;
+  background: var(--colorNeutralStroke2);
+}
+
+.primary-rail-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.rail-spacer {
+  flex: 1 1 auto;
+}
+
 .primary-sidebar,
 .secondary-sidebar {
   height: 100vh;

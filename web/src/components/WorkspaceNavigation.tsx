@@ -28,7 +28,8 @@ import {
   Popover,
   PopoverSurface,
   PopoverTrigger,
-  Text
+  Text,
+  Tooltip
 } from "@fluentui/react-components";
 import {
   AddRegular,
@@ -40,6 +41,8 @@ import {
   EditRegular,
   FormRegular,
   MoreHorizontalRegular,
+  PanelLeftContractRegular,
+  PanelLeftExpandRegular,
   PeopleRegular,
   PersonRegular
 } from "@fluentui/react-icons";
@@ -59,6 +62,8 @@ export type WorkspaceView = "table" | "workflow" | "form" | "permission";
 
 type WorkspaceNavigationProps = {
   catalog: Catalog;
+  collapsed: boolean;
+  onToggleCollapsed: () => void;
   currentUser: AuthUser | null;
   database: DatabaseMetadata;
   forms: FormDefinition[];
@@ -102,6 +107,8 @@ type WorkspaceNavigationProps = {
 
 export function WorkspaceNavigation({
   catalog,
+  collapsed,
+  onToggleCollapsed,
   currentUser,
   database,
   forms,
@@ -146,9 +153,31 @@ export function WorkspaceNavigation({
   const isAuthenticated = Boolean(currentUser);
   return (
     <>
+      {collapsed ? (
+        <PrimaryRail
+          catalog={catalog}
+          currentUser={currentUser}
+          database={database}
+          onLogout={onLogout}
+          onOpenLogin={onOpenLogin}
+          onSelectDatabaseSection={onSelectDatabaseSection}
+          onToggleCollapsed={onToggleCollapsed}
+          view={view}
+        />
+      ) : (
       <NavDrawer className="primary-sidebar" type="inline" open>
         <NavDrawerHeader>
-          <AppItemStatic icon={<DatabaseRegular />}>{t("nav.codetable")}</AppItemStatic>
+          <div className="primary-header">
+            <AppItemStatic icon={<DatabaseRegular />}>{t("nav.codetable")}</AppItemStatic>
+            <Tooltip content={t("nav.collapseSidebar", "Collapse")} relationship="label">
+              <Button
+                appearance="subtle"
+                icon={<PanelLeftContractRegular />}
+                aria-label={t("nav.collapseSidebar", "Collapse sidebar")}
+                onClick={onToggleCollapsed}
+              />
+            </Tooltip>
+          </div>
         </NavDrawerHeader>
         <NavDrawerBody>
           <div className="sidebar-heading">
@@ -212,6 +241,7 @@ export function WorkspaceNavigation({
           </div>
         </NavDrawerBody>
       </NavDrawer>
+      )}
 
       <NavDrawer className="secondary-sidebar" type="inline" open>
         <NavDrawerHeader>
@@ -304,6 +334,91 @@ export function WorkspaceNavigation({
         </NavDrawerBody>
       </NavDrawer>
     </>
+  );
+}
+
+function PrimaryRail({
+  catalog,
+  currentUser,
+  database,
+  onLogout,
+  onOpenLogin,
+  onSelectDatabaseSection,
+  onToggleCollapsed,
+  view
+}: {
+  catalog: Catalog;
+  currentUser: AuthUser | null;
+  database: DatabaseMetadata;
+  onLogout: () => void;
+  onOpenLogin: () => void;
+  onSelectDatabaseSection: (databaseName: string, view: WorkspaceView) => void;
+  onToggleCollapsed: () => void;
+  view: WorkspaceView;
+}) {
+  const { t } = useTranslation();
+  const hasDatabase = Boolean(database.name);
+  const sections = [
+    { key: "table" as WorkspaceView, label: t("common.table"), icon: <DocumentTableRegular /> },
+    { key: "workflow" as WorkspaceView, label: t("common.workflow"), icon: <DocumentFlowchartRegular /> },
+    { key: "form" as WorkspaceView, label: t("common.form"), icon: <FormRegular /> },
+    { key: "permission" as WorkspaceView, label: t("common.permission"), icon: <PeopleRegular /> }
+  ];
+  return (
+    <aside className="primary-sidebar primary-rail" aria-label={t("nav.databaseList")}>
+      <Tooltip content={t("nav.expandSidebar", "Expand")} relationship="label">
+        <Button
+          appearance="subtle"
+          icon={<PanelLeftExpandRegular />}
+          aria-label={t("nav.expandSidebar", "Expand sidebar")}
+          onClick={onToggleCollapsed}
+        />
+      </Tooltip>
+      <Menu>
+        <MenuTrigger disableButtonEnhancement>
+          <Tooltip content={database.name || t("common.noDatabase")} relationship="label">
+            <Button appearance="subtle" icon={<DatabaseRegular />} aria-label={t("nav.databaseList")} />
+          </Tooltip>
+        </MenuTrigger>
+        <MenuPopover>
+          <MenuList>
+            {catalog.databases.map((item) => (
+              <MenuItem
+                key={item.name}
+                icon={<DatabaseRegular />}
+                onClick={() => onSelectDatabaseSection(item.name, view)}
+              >
+                {item.name}
+              </MenuItem>
+            ))}
+          </MenuList>
+        </MenuPopover>
+      </Menu>
+      <div className="primary-rail-divider" />
+      <div className="primary-rail-sections">
+        {sections.map((section) => (
+          <Tooltip key={section.key} content={section.label} relationship="label">
+            <Button
+              appearance={view === section.key ? "primary" : "subtle"}
+              icon={section.icon}
+              aria-label={section.label}
+              disabled={!hasDatabase}
+              onClick={() => onSelectDatabaseSection(database.name, section.key)}
+            />
+          </Tooltip>
+        ))}
+      </div>
+      <div className="rail-spacer" />
+      {currentUser ? (
+        <Tooltip content={currentUser.email} relationship="label">
+          <Button appearance="subtle" icon={<PersonRegular />} aria-label={currentUser.email} onClick={onLogout} />
+        </Tooltip>
+      ) : (
+        <Tooltip content={t("common.login")} relationship="label">
+          <Button appearance="primary" icon={<PersonRegular />} aria-label={t("common.login")} onClick={onOpenLogin} />
+        </Tooltip>
+      )}
+    </aside>
   );
 }
 

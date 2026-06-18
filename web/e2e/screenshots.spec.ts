@@ -144,6 +144,15 @@ test("capture workspace screenshots", async ({ page }) => {
   await navShot(page, "nav-01-table");
   await page.screenshot({ path: join(shotsDir, "nav-zoom-primary.png"), clip: { x: 0, y: 0, width: 260, height: 300 } });
 
+  // Collapsed primary nav rail.
+  await capture(page, "nav-03-rail", async () => {
+    await page.getByRole("button", { name: /Collapse/ }).click(bestEffort);
+    await page.waitForTimeout(300);
+  });
+  await page.screenshot({ path: join(shotsDir, "nav-zoom-rail.png"), clip: { x: 0, y: 0, width: 320, height: 420 } });
+  await page.getByRole("button", { name: /Expand/ }).click(bestEffort).catch(() => undefined);
+  await page.waitForTimeout(200);
+
   // Filter popover (best-effort; never abort the whole capture run on one flaky step).
   await capture(page, "03-table-filter-popover", async () => {
     await page.getByRole("button", { name: "Active", exact: true }).click(bestEffort);
