@@ -630,7 +630,7 @@ function CreateNamePopover({
   return (
     <Popover open={open} onOpenChange={(_, data) => setOpen(data.open)} positioning="below-end" withArrow>
       <PopoverTrigger disableButtonEnhancement>
-        <Button size="small" icon={<AddRegular />} aria-label={ariaLabel} disabled={disabled} />
+        <Button appearance="subtle" icon={<AddRegular />} aria-label={ariaLabel} disabled={disabled} />
       </PopoverTrigger>
       <PopoverSurface className="create-name-popover" aria-label={buttonLabel}>
         <FluentField label={inputLabel}>
