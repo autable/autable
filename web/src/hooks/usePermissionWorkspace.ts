@@ -10,7 +10,9 @@ import {
   type AuthUser,
   type DatabaseMetadata,
   type PermissionGrant,
-  type RoleDefinition
+  type RoleDefinition,
+  type RoleMember,
+  type WorkflowDefinition
 } from "../api";
 import { compactRoleGrants } from "../permissionState";
 
@@ -26,8 +28,9 @@ export function usePermissionWorkspace({ currentUserID, database, onStatus }: Us
   const [selectedRoleName, setSelectedRoleName] = useState("");
   const [newRoleName, setNewRoleName] = useState("");
   const [roleDraftGrants, setRoleDraftGrants] = useState<PermissionGrant[]>([]);
-  const [roleDraftMembers, setRoleDraftMembers] = useState<string[]>([]);
+  const [roleDraftMembers, setRoleDraftMembers] = useState<RoleMember[]>([]);
   const [roleDraftMemberUsers, setRoleDraftMemberUsers] = useState<AuthUser[]>([]);
+  const [roleDraftMemberWorkflows, setRoleDraftMemberWorkflows] = useState<WorkflowDefinition[]>([]);
   const [newRoleMemberEmail, setNewRoleMemberEmail] = useState("");
   const [memberSearchResults, setMemberSearchResults] = useState<AuthUser[]>([]);
 
@@ -40,6 +43,7 @@ export function usePermissionWorkspace({ currentUserID, database, onStatus }: Us
     setRoleDraftGrants(selectedRole?.grants ?? []);
     setRoleDraftMembers(selectedRole?.members ?? []);
     setRoleDraftMemberUsers(selectedRole?.member_users ?? []);
+    setRoleDraftMemberWorkflows(selectedRole?.member_workflows ?? []);
     setNewRoleMemberEmail("");
     setMemberSearchResults([]);
   }, [selectedRole?.subject_id]);
@@ -147,6 +151,7 @@ export function usePermissionWorkspace({ currentUserID, database, onStatus }: Us
       setSelectedRoleName(saved.name);
       setRoleDraftMembers(saved.members ?? []);
       setRoleDraftMemberUsers(saved.member_users ?? []);
+      setRoleDraftMemberWorkflows(saved.member_workflows ?? []);
       onStatus(t("status.savedRole", { name: saved.name }));
     } catch (error) {
       onStatus(error instanceof Error ? error.message : t("status.roleSaveFailed"));
@@ -182,15 +187,27 @@ export function usePermissionWorkspace({ currentUserID, database, onStatus }: Us
       onStatus(t("status.selectUserSuggestion"));
       return;
     }
-    setRoleDraftMembers((current) => compactMembers([...current, member.id]));
+    setRoleDraftMembers((current) => compactMembers([...current, { type: "user", id: member.id }]));
     setRoleDraftMemberUsers((current) => compactMemberUsers([...current, member]));
     setNewRoleMemberEmail("");
     setMemberSearchResults([]);
   }
 
-  function removeRoleMember(memberID: string) {
-    setRoleDraftMembers((current) => current.filter((item) => item !== memberID));
-    setRoleDraftMemberUsers((current) => current.filter((item) => item.id !== memberID));
+  function addWorkflowMember(workflow: WorkflowDefinition) {
+    if (!workflow.id) {
+      return;
+    }
+    setRoleDraftMembers((current) => compactMembers([...current, { type: "workflow", id: String(workflow.id) }]));
+    setRoleDraftMemberWorkflows((current) => compactMemberWorkflows([...current, workflow]));
+  }
+
+  function removeRoleMember(member: RoleMember) {
+    setRoleDraftMembers((current) => current.filter((item) => item.type !== member.type || item.id !== member.id));
+    if (member.type === "user") {
+      setRoleDraftMemberUsers((current) => current.filter((item) => item.id !== member.id));
+      return;
+    }
+    setRoleDraftMemberWorkflows((current) => current.filter((item) => String(item.id) !== member.id));
   }
 
   return {
@@ -199,10 +216,12 @@ export function usePermissionWorkspace({ currentUserID, database, onStatus }: Us
     newRoleName,
     roleDraftGrants,
     roleDraftMemberUsers,
+    roleDraftMemberWorkflows,
     roleDraftMembers,
     roles,
     selectedRole,
     addRoleMember,
+    addWorkflowMember,
     clearRoles,
     createRoleFromSidebar,
     persistRoleGrants,
@@ -223,4 +242,14 @@ function compactMemberUsers(users: AuthUser[]): AuthUser[] {
     }
   }
   return [...byID.values()].sort((left, right) => left.email.localeCompare(right.email));
+}
+
+function compactMemberWorkflows(workflows: WorkflowDefinition[]): WorkflowDefinition[] {
+  const byID = new Map<number, WorkflowDefinition>();
+  for (const workflow of workflows) {
+    if (workflow.id) {
+      byID.set(workflow.id, workflow);
+    }
+  }
+  return [...byID.values()].sort((left, right) => left.name.localeCompare(right.name));
 }

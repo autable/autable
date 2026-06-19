@@ -391,6 +391,134 @@ func TestCreateRowAPIEnforcesPermissionsAndWritesHistory(t *testing.T) {
 	}
 }
 
+func TestCreateFieldsAPIUsesTablePermissions(t *testing.T) {
+	ctx := context.Background()
+	catalog := metadata.Catalog{Databases: []metadata.Database{{
+		Name:       "workspace",
+		SQLitePath: filepath.Join(t.TempDir(), "workspace.sqlite"),
+		Tables: []metadata.Table{{
+			Name:   "contacts",
+			Fields: []metadata.Field{{Name: "name", Type: "string"}},
+		}},
+	}}}
+	server, system, metadataPath := newTestServerWithMetadataFile(t, catalog)
+	if err := system.SaveGrant(ctx, permission.Grant{
+		SubjectID: "owner",
+		Scope:     permission.ScopeFieldSet,
+		Resource:  "workspace.contacts",
+		Level:     permission.Write,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	request := httptest.NewRequest(http.MethodPost, "/api/tables/workspace/contacts/fields", bytes.NewBufferString(`{
+		"fields":{"email":"string","score":"float"}
+	}`))
+	request.AddCookie(testSessionCookie(t, system, "owner"))
+	recorder := httptest.NewRecorder()
+	server.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected field create 200, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+	var response map[string][]map[string]any
+	if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
+		t.Fatal(err)
+	}
+	if len(response["created"]) != 2 {
+		t.Fatalf("expected created fields response, got %#v", response)
+	}
+	loaded, err := metadata.Load(metadataPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tableMeta, ok := loaded.Table("workspace", "contacts")
+	if !ok {
+		t.Fatal("expected contacts table")
+	}
+	if _, ok := tableMeta.Field("email"); !ok {
+		t.Fatalf("expected email field in metadata, got %#v", tableMeta.Fields)
+	}
+}
+
+func TestUpsertRowAPIUpdatesCreatesAndNoops(t *testing.T) {
+	ctx := context.Background()
+	server, system := newTestServer(t)
+	if err := system.SaveGrant(ctx, permission.Grant{
+		SubjectID: "owner",
+		Scope:     permission.ScopeFieldSet,
+		Resource:  "db.contacts",
+		Level:     permission.Write,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	saveTestRecordCreateGrant(t, system, "owner", "db.contacts")
+
+	create := httptest.NewRequest(http.MethodPost, "/api/tables/db/contacts/rows/upsert", bytes.NewBufferString(`{
+		"match_field":"email",
+		"values":{"name":"Ada","email":"remote-1","status":"todo"}
+	}`))
+	create.AddCookie(testSessionCookie(t, system, "owner"))
+	createRecorder := httptest.NewRecorder()
+	server.ServeHTTP(createRecorder, create)
+	if createRecorder.Code != http.StatusOK {
+		t.Fatalf("expected upsert create 200, got %d: %s", createRecorder.Code, createRecorder.Body.String())
+	}
+	var created rowMutationResponse
+	if err := json.NewDecoder(createRecorder.Body).Decode(&created); err != nil {
+		t.Fatal(err)
+	}
+	if created.Operation != "create" || created.RecordID != 1 {
+		t.Fatalf("unexpected upsert create response: %#v", created)
+	}
+
+	update := httptest.NewRequest(http.MethodPost, "/api/tables/db/contacts/rows/upsert", bytes.NewBufferString(`{
+		"match_field":"email",
+		"values":{"name":"Grace","email":"remote-1","status":"done"}
+	}`))
+	update.AddCookie(testSessionCookie(t, system, "owner"))
+	updateRecorder := httptest.NewRecorder()
+	server.ServeHTTP(updateRecorder, update)
+	if updateRecorder.Code != http.StatusOK {
+		t.Fatalf("expected upsert update 200, got %d: %s", updateRecorder.Code, updateRecorder.Body.String())
+	}
+	var updated rowMutationResponse
+	if err := json.NewDecoder(updateRecorder.Body).Decode(&updated); err != nil {
+		t.Fatal(err)
+	}
+	if updated.Operation != "update" || updated.RecordID != 1 || updated.Values["name"] != "Grace" {
+		t.Fatalf("unexpected upsert update response: %#v", updated)
+	}
+	historyBefore, err := server.history.GetPrefix(ctx, history.RowPrefix("db", "contacts", 1))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	noop := httptest.NewRequest(http.MethodPost, "/api/tables/db/contacts/rows/upsert", bytes.NewBufferString(`{
+		"match_field":"email",
+		"values":{"name":"Grace","email":"remote-1","status":"done"}
+	}`))
+	noop.AddCookie(testSessionCookie(t, system, "owner"))
+	noopRecorder := httptest.NewRecorder()
+	server.ServeHTTP(noopRecorder, noop)
+	if noopRecorder.Code != http.StatusOK {
+		t.Fatalf("expected upsert noop 200, got %d: %s", noopRecorder.Code, noopRecorder.Body.String())
+	}
+	var nooped rowMutationResponse
+	if err := json.NewDecoder(noopRecorder.Body).Decode(&nooped); err != nil {
+		t.Fatal(err)
+	}
+	if nooped.Operation != "noop" || nooped.RecordID != 1 {
+		t.Fatalf("unexpected upsert noop response: %#v", nooped)
+	}
+	historyAfter, err := server.history.GetPrefix(ctx, history.RowPrefix("db", "contacts", 1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(historyAfter) != len(historyBefore) {
+		t.Fatalf("noop upsert should not create row history: before=%d after=%d", len(historyBefore), len(historyAfter))
+	}
+}
+
 func TestUpdateRowAPIEnforcesPermissionsAndWritesHistory(t *testing.T) {
 	server, system := newTestServer(t)
 	saveTestDatabaseOwners(t, system, "db", "u1")
@@ -1510,6 +1638,7 @@ func TestWorkflowRowUpsertRequiresMatchValue(t *testing.T) {
 }
 
 func TestDatabaseOwnerCanManageRoles(t *testing.T) {
+	ctx := context.Background()
 	catalog := metadata.Catalog{Databases: []metadata.Database{{
 		Name:       "workspace",
 		SQLitePath: "./data/workspace.sqlite",
@@ -1550,8 +1679,17 @@ func TestDatabaseOwnerCanManageRoles(t *testing.T) {
 
 	_ = testSessionCookie(t, system, "u1")
 	_ = testSessionCookie(t, system, "u2")
+	workflow, err := system.SaveWorkflow(ctx, systemdb.WorkflowDefinition{
+		DatabaseName: "workspace",
+		Name:         "sync-contacts",
+		CreatorID:    "owner",
+		Script:       "function run() { return {}; }",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	updateMembers := httptest.NewRequest(http.MethodPut, "/api/databases/workspace/roles/editor/members", bytes.NewBufferString(`{
-		"members":["u1","u2","u1"]
+		"members":[{"type":"user","id":"u1"},{"type":"user","id":"u2"},{"type":"user","id":"u1"},{"type":"workflow","id":"`+strconv.FormatInt(workflow.ID, 10)+`"}]
 	}`))
 	updateMembers.AddCookie(testSessionCookie(t, system, "owner"))
 	recorder = httptest.NewRecorder()
@@ -1571,11 +1709,17 @@ func TestDatabaseOwnerCanManageRoles(t *testing.T) {
 	if err := json.Unmarshal(recorder.Body.Bytes(), &roles); err != nil {
 		t.Fatal(err)
 	}
-	if len(roles) != 1 || roles[0].SubjectID != "role:workspace:editor" || len(roles[0].Grants) != 2 || len(roles[0].Members) != 2 {
+	if len(roles) != 1 || roles[0].SubjectID != "role:workspace:editor" || len(roles[0].Grants) != 2 || len(roles[0].Members) != 3 {
 		t.Fatalf("unexpected roles response: %#v", roles)
+	}
+	if roles[0].Members[0] != (systemdb.RoleMember{Type: "user", ID: "u1"}) || roles[0].Members[1] != (systemdb.RoleMember{Type: "user", ID: "u2"}) {
+		t.Fatalf("expected typed role members, got %#v", roles[0].Members)
 	}
 	if len(roles[0].MemberUsers) != 2 || roles[0].MemberUsers[0].Email != "u1@example.com" || roles[0].MemberUsers[1].Email != "u2@example.com" {
 		t.Fatalf("expected member users in role response, got %#v", roles[0].MemberUsers)
+	}
+	if len(roles[0].MemberWorkflows) != 1 || roles[0].MemberWorkflows[0].Name != "sync-contacts" {
+		t.Fatalf("expected member workflows in role response, got %#v", roles[0].MemberWorkflows)
 	}
 }
 
@@ -1734,7 +1878,7 @@ func TestRoleMembershipGrantsEffectiveTableAccess(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := system.ReplaceRoleMembers(ctx, "db", "editor", []string{"u1"}); err != nil {
+	if _, err := system.ReplaceRoleMembers(ctx, "db", "editor", []systemdb.RoleMember{{Type: "user", ID: "u1"}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1780,7 +1924,7 @@ func TestRoleFieldGrantAllowsOnlyGrantedFields(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := system.ReplaceRoleMembers(ctx, "db", "editor", []string{"u1"}); err != nil {
+	if _, err := system.ReplaceRoleMembers(ctx, "db", "editor", []systemdb.RoleMember{{Type: "user", ID: "u1"}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2570,18 +2714,9 @@ func TestWorkflowRunAPI(t *testing.T) {
 	}
 }
 
-func TestWorkflowTableCreateNodeUsesCreatorPermissions(t *testing.T) {
+func TestWorkflowTableCreateNodeUsesWorkflowPermissions(t *testing.T) {
 	ctx := context.Background()
 	server, system := newTestServer(t)
-	if err := system.SaveGrant(ctx, permission.Grant{
-		SubjectID: "creator",
-		Scope:     permission.ScopeFieldSet,
-		Resource:  "db.contacts",
-		Level:     permission.Write,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	saveTestRecordCreateGrant(t, system, "creator", "db.contacts")
 	saveTestGrants(t, system, permission.Grant{SubjectID: "creator", Scope: permission.ScopeWorkflowSet, Resource: "db", Level: permission.Write})
 
 	workflowRequest := httptest.NewRequest(http.MethodPost, "/api/databases/db/workflows", bytes.NewBufferString(`{
@@ -2594,6 +2729,16 @@ func TestWorkflowTableCreateNodeUsesCreatorPermissions(t *testing.T) {
 	if workflowRecorder.Code != http.StatusCreated {
 		t.Fatalf("expected workflow 201, got %d: %s", workflowRecorder.Code, workflowRecorder.Body.String())
 	}
+	workflowSubject := systemdb.WorkflowSubjectID(1)
+	if err := system.SaveGrant(ctx, permission.Grant{
+		SubjectID: workflowSubject,
+		Scope:     permission.ScopeFieldSet,
+		Resource:  "db.contacts",
+		Level:     permission.Write,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	saveTestRecordCreateGrant(t, system, workflowSubject, "db.contacts")
 
 	runRequest := httptest.NewRequest(http.MethodPost, "/api/workflows/1/runs", bytes.NewBufferString(`{"inputs":{"name":"Ada"}}`))
 	runRequest.AddCookie(testSessionCookie(t, system, "creator"))
@@ -2650,7 +2795,7 @@ func TestWorkflowTableCreateNodeIgnoresRunnerPermissions(t *testing.T) {
 		t.Fatal(err)
 	}
 	if response.Run.Error == "" || len(response.Run.Steps) != 1 || response.Run.Steps[0].Error == "" {
-		t.Fatalf("expected creator permission failure in run history, got %#v", response.Run)
+		t.Fatalf("expected workflow subject permission failure in run history, got %#v", response.Run)
 	}
 }
 
@@ -2804,6 +2949,7 @@ func TestRowCreateAutomaticallyRunsMatchingWorkflowTrigger(t *testing.T) {
 	if workflowRecorder.Code != http.StatusCreated {
 		t.Fatalf("expected workflow 201, got %d: %s", workflowRecorder.Code, workflowRecorder.Body.String())
 	}
+	saveTestGrants(t, system, permission.Grant{SubjectID: systemdb.WorkflowSubjectID(1), Scope: permission.ScopeField, Resource: "db.contacts", Field: "name", Level: permission.Read})
 
 	createRow := httptest.NewRequest(http.MethodPost, "/api/tables/db/contacts/rows", bytes.NewBufferString(`{"values":{"name":"Ada"}}`))
 	createRow.AddCookie(testSessionCookie(t, system, "u1"))
@@ -2862,6 +3008,7 @@ func TestWorkflowWorkersConsumeRowChangeEvents(t *testing.T) {
 	if workflowRecorder.Code != http.StatusCreated {
 		t.Fatalf("expected workflow 201, got %d: %s", workflowRecorder.Code, workflowRecorder.Body.String())
 	}
+	saveTestGrants(t, system, permission.Grant{SubjectID: systemdb.WorkflowSubjectID(1), Scope: permission.ScopeField, Resource: "db.contacts", Field: "name", Level: permission.Read})
 
 	createRow := httptest.NewRequest(http.MethodPost, "/api/tables/db/contacts/rows", bytes.NewBufferString(`{"values":{"name":"Ada"}}`))
 	createRow.AddCookie(testSessionCookie(t, system, "u1"))
@@ -2904,6 +3051,7 @@ func TestRowCreateDoesNotRunWorkflowWhenTriggerFieldsDoNotMatch(t *testing.T) {
 	if workflowRecorder.Code != http.StatusCreated {
 		t.Fatalf("expected workflow 201, got %d: %s", workflowRecorder.Code, workflowRecorder.Body.String())
 	}
+	saveTestGrants(t, system, permission.Grant{SubjectID: systemdb.WorkflowSubjectID(1), Scope: permission.ScopeField, Resource: "db.contacts", Field: "name", Level: permission.Read})
 
 	createRow := httptest.NewRequest(http.MethodPost, "/api/tables/db/contacts/rows", bytes.NewBufferString(`{"values":{"name":"Ada"}}`))
 	createRow.AddCookie(testSessionCookie(t, system, "u1"))
@@ -2926,6 +3074,55 @@ func TestRowCreateDoesNotRunWorkflowWhenTriggerFieldsDoNotMatch(t *testing.T) {
 	}
 	if len(runs) != 0 {
 		t.Fatalf("expected no automatic workflow runs, got %#v", runs)
+	}
+}
+
+func TestRowCreateDoesNotExposeUnreadableFieldsToWorkflowTrigger(t *testing.T) {
+	ctx := context.Background()
+	server, system := newTestServer(t)
+	if err := system.SaveGrant(ctx, permission.Grant{
+		SubjectID: "u1",
+		Scope:     permission.ScopeFieldSet,
+		Resource:  "db.contacts",
+		Level:     permission.Write,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	saveTestRecordCreateGrant(t, system, "u1", "db.contacts")
+	saveTestGrants(t, system, permission.Grant{SubjectID: "u1", Scope: permission.ScopeWorkflowSet, Resource: "db", Level: permission.Write})
+
+	workflowRequest := httptest.NewRequest(http.MethodPost, "/api/databases/db/workflows", bytes.NewBufferString(`{
+		"name":"no-field-access",
+		"script":"function instances(info) { return { row_change: \"table.record.changed\" }; }\nfunction trigger(info) { return { instance: \"row_change\", params: { table: \"contacts\", operations: [\"create\"], fields: [\"name\"] } }; }\nfunction run(info) { return { unexpected: info.inputs.diff.name.new }; }"
+	}`))
+	workflowRequest.AddCookie(testSessionCookie(t, system, "u1"))
+	workflowRecorder := httptest.NewRecorder()
+	server.ServeHTTP(workflowRecorder, workflowRequest)
+	if workflowRecorder.Code != http.StatusCreated {
+		t.Fatalf("expected workflow 201, got %d: %s", workflowRecorder.Code, workflowRecorder.Body.String())
+	}
+
+	createRow := httptest.NewRequest(http.MethodPost, "/api/tables/db/contacts/rows", bytes.NewBufferString(`{"values":{"name":"Ada"}}`))
+	createRow.AddCookie(testSessionCookie(t, system, "u1"))
+	createRecorder := httptest.NewRecorder()
+	server.ServeHTTP(createRecorder, createRow)
+	if createRecorder.Code != http.StatusCreated {
+		t.Fatalf("expected row create 201, got %d: %s", createRecorder.Code, createRecorder.Body.String())
+	}
+
+	listRequest := httptest.NewRequest(http.MethodGet, "/api/workflows/1/runs", nil)
+	listRequest.AddCookie(testSessionCookie(t, system, "u1"))
+	listRecorder := httptest.NewRecorder()
+	server.ServeHTTP(listRecorder, listRequest)
+	if listRecorder.Code != http.StatusOK {
+		t.Fatalf("expected workflow runs 200, got %d: %s", listRecorder.Code, listRecorder.Body.String())
+	}
+	var runs []workflowRunResponse
+	if err := json.NewDecoder(listRecorder.Body).Decode(&runs); err != nil {
+		t.Fatal(err)
+	}
+	if len(runs) != 0 {
+		t.Fatalf("expected no workflow runs without field read permission, got %#v", runs)
 	}
 }
 
@@ -3224,7 +3421,7 @@ func TestPublishedFormRequiresExplicitFormPermission(t *testing.T) {
 		t.Fatalf("expected read permission on published form, got %#v", readableForm)
 	}
 
-	submitRequest := httptest.NewRequest(http.MethodPost, "/api/published/forms/"+published.PublishedToken+"/submit", bytes.NewBufferString(`{
+	submitRequest := httptest.NewRequest(http.MethodPost, "/api/tables/db/contacts/rows", bytes.NewBufferString(`{
 		"values":{"name":"Published Reader","email":"reader@example.com"}
 	}`))
 	submitRequest.AddCookie(testSessionCookie(t, system, "reader"))

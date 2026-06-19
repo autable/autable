@@ -1,4 +1,4 @@
-import type { RoleDefinition } from "./api";
+import type { RoleDefinition, RoleMember } from "./api";
 
 export function replaceResource<T extends { id?: number }>(items: T[], saved: T): T[] {
   if (!saved.id) {
@@ -17,8 +17,16 @@ export function replaceRole(items: RoleDefinition[], saved: RoleDefinition): Rol
   return items.map((item) => (item.name === saved.name ? saved : item));
 }
 
-export function compactMembers(members: string[]): string[] {
-  return [...new Set(members.map((member) => member.trim()).filter(Boolean))].sort((left, right) => left.localeCompare(right));
+export function compactMembers(members: RoleMember[]): RoleMember[] {
+  const byKey = new Map<string, RoleMember>();
+  for (const member of members) {
+    const type = member.type || "user";
+    const id = member.id.trim();
+    if (id) {
+      byKey.set(`${type}:${id}`, { type, id });
+    }
+  }
+  return [...byKey.values()].sort((left, right) => `${left.type}:${left.id}`.localeCompare(`${right.type}:${right.id}`));
 }
 
 export function rowDraftFromRecord(row: Record<string, unknown> | null, fieldNames: string[]): Record<string, string> {

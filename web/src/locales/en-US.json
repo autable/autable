@@ -105,6 +105,7 @@
   },
   "permission": {
     "addRoleMember": "Add role member",
+    "addWorkflowMember": "Add workflow member",
     "empty": "Create a role to configure table, field, workflow, and form permissions.",
     "fieldSet": "{{table}} fields",
     "fields": "Fields",
@@ -136,6 +137,7 @@
     "view": "{{view}} view",
     "viewSet": "{{table}} views",
     "views": "Views",
+    "workflowMember": "Workflow member",
     "workflowPartialPermissions": "Workflow partial permissions",
     "workflowSet": "All workflows",
     "workflows": "Workflows"

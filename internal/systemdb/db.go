@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -54,9 +55,14 @@ type RoleDefinition struct {
 	Name         string             `json:"name"`
 	SubjectID    string             `json:"subject_id"`
 	Grants       []permission.Grant `json:"grants"`
-	Members      []string           `json:"members"`
+	Members      []RoleMember       `json:"members"`
 	CreatedAt    int64              `json:"created_at"`
 	UpdatedAt    int64              `json:"updated_at"`
+}
+
+type RoleMember struct {
+	Type string `json:"type"`
+	ID   string `json:"id"`
 }
 
 type userModel struct {
@@ -130,7 +136,8 @@ type roleMemberModel struct {
 	ID           int64  `gorm:"primaryKey;autoIncrement"`
 	DatabaseName string `gorm:"uniqueIndex:idx_role_member;not null"`
 	RoleName     string `gorm:"uniqueIndex:idx_role_member;not null"`
-	UserID       string `gorm:"uniqueIndex:idx_role_member;not null"`
+	SubjectType  string `gorm:"uniqueIndex:idx_role_member;not null;default:'user'"`
+	SubjectID    string `gorm:"uniqueIndex:idx_role_member;not null"`
 	CreatedAt    int64  `gorm:"autoCreateTime:milli"`
 	UpdatedAt    int64  `gorm:"autoUpdateTime:milli"`
 }
@@ -160,6 +167,9 @@ func (db *DB) Close() error {
 }
 
 func (db *DB) Migrate(ctx context.Context) error {
+	if err := db.dropLegacyRoleMembers(ctx); err != nil {
+		return err
+	}
 	return db.orm.WithContext(ctx).AutoMigrate(
 		&userModel{},
 		&sessionModel{},
@@ -170,6 +180,14 @@ func (db *DB) Migrate(ctx context.Context) error {
 		&roleModel{},
 		&roleMemberModel{},
 	)
+}
+
+func (db *DB) dropLegacyRoleMembers(ctx context.Context) error {
+	migrator := db.orm.WithContext(ctx).Migrator()
+	if migrator.HasColumn(&roleMemberModel{}, "user_id") {
+		return migrator.DropTable(&roleMemberModel{})
+	}
+	return nil
 }
 
 func (db *DB) UpsertUserByEmail(ctx context.Context, user auth.User) (auth.User, error) {
@@ -614,10 +632,11 @@ func (db *DB) ReplaceRoleGrants(ctx context.Context, databaseName, roleName stri
 type RoleMembership struct {
 	DatabaseName string `json:"database_name"`
 	RoleName     string `json:"role_name"`
-	UserID       string `json:"user_id"`
+	SubjectType  string `json:"subject_type"`
+	SubjectID    string `json:"subject_id"`
 }
 
-func (db *DB) ReplaceRoleMembers(ctx context.Context, databaseName, roleName string, members []string) (RoleDefinition, error) {
+func (db *DB) ReplaceRoleMembers(ctx context.Context, databaseName, roleName string, members []RoleMember) (RoleDefinition, error) {
 	role, err := db.Role(ctx, databaseName, roleName)
 	if err != nil {
 		return RoleDefinition{}, err
@@ -628,15 +647,21 @@ func (db *DB) ReplaceRoleMembers(ctx context.Context, databaseName, roleName str
 		}
 		seen := map[string]struct{}{}
 		for _, member := range members {
-			member = strings.TrimSpace(member)
-			if member == "" {
+			member.Type = strings.TrimSpace(member.Type)
+			member.ID = strings.TrimSpace(member.ID)
+			if member.Type == "" {
+				member.Type = "user"
+			}
+			if member.ID == "" {
 				continue
 			}
-			if _, ok := seen[member]; ok {
+			subjectID := roleMemberSubjectID(member)
+			key := member.Type + ":" + subjectID
+			if _, ok := seen[key]; ok {
 				continue
 			}
-			seen[member] = struct{}{}
-			model := roleMemberModel{DatabaseName: databaseName, RoleName: roleName, UserID: member}
+			seen[key] = struct{}{}
+			model := roleMemberModel{DatabaseName: databaseName, RoleName: roleName, SubjectType: member.Type, SubjectID: subjectID}
 			if err := tx.Create(&model).Error; err != nil {
 				return err
 			}
@@ -649,10 +674,10 @@ func (db *DB) ReplaceRoleMembers(ctx context.Context, databaseName, roleName str
 	return db.Role(ctx, role.DatabaseName, role.Name)
 }
 
-func (db *DB) RoleMemberships(ctx context.Context, userID string) ([]RoleMembership, error) {
+func (db *DB) RoleMemberships(ctx context.Context, subjectID string) ([]RoleMembership, error) {
 	var models []roleMemberModel
 	err := db.orm.WithContext(ctx).
-		Where(&roleMemberModel{UserID: userID}).
+		Where(&roleMemberModel{SubjectID: subjectID}).
 		Order(clause.OrderByColumn{Column: clause.Column{Name: "database_name"}}).
 		Order(clause.OrderByColumn{Column: clause.Column{Name: "role_name"}}).
 		Find(&models).
@@ -665,7 +690,8 @@ func (db *DB) RoleMemberships(ctx context.Context, userID string) ([]RoleMembers
 		memberships = append(memberships, RoleMembership{
 			DatabaseName: model.DatabaseName,
 			RoleName:     model.RoleName,
-			UserID:       model.UserID,
+			SubjectType:  model.SubjectType,
+			SubjectID:    model.SubjectID,
 		})
 	}
 	return memberships, nil
@@ -673,6 +699,27 @@ func (db *DB) RoleMemberships(ctx context.Context, userID string) ([]RoleMembers
 
 func RoleSubjectID(databaseName, roleName string) string {
 	return "role:" + databaseName + ":" + roleName
+}
+
+func WorkflowSubjectID(workflowID int64) string {
+	return "workflow:" + strconv.FormatInt(workflowID, 10)
+}
+
+func roleMemberSubjectID(member RoleMember) string {
+	if member.Type == "workflow" {
+		workflowID, err := strconv.ParseInt(member.ID, 10, 64)
+		if err == nil {
+			return WorkflowSubjectID(workflowID)
+		}
+	}
+	return member.ID
+}
+
+func roleMemberFromModel(model roleMemberModel) RoleMember {
+	if model.SubjectType == "workflow" {
+		return RoleMember{Type: model.SubjectType, ID: strings.TrimPrefix(model.SubjectID, "workflow:")}
+	}
+	return RoleMember{Type: model.SubjectType, ID: model.SubjectID}
 }
 
 func userToModel(user auth.User) userModel {
@@ -818,19 +865,20 @@ func (db *DB) roleDefinition(ctx context.Context, model roleModel) (RoleDefiniti
 	}, nil
 }
 
-func (db *DB) roleMembers(ctx context.Context, databaseName, roleName string) ([]string, error) {
+func (db *DB) roleMembers(ctx context.Context, databaseName, roleName string) ([]RoleMember, error) {
 	var models []roleMemberModel
 	err := db.orm.WithContext(ctx).
 		Where(&roleMemberModel{DatabaseName: databaseName, RoleName: roleName}).
-		Order(clause.OrderByColumn{Column: clause.Column{Name: "user_id"}}).
+		Order(clause.OrderByColumn{Column: clause.Column{Name: "subject_type"}}).
+		Order(clause.OrderByColumn{Column: clause.Column{Name: "subject_id"}}).
 		Find(&models).
 		Error
 	if err != nil {
 		return nil, err
 	}
-	members := make([]string, 0, len(models))
+	members := make([]RoleMember, 0, len(models))
 	for _, model := range models {
-		members = append(members, model.UserID)
+		members = append(members, roleMemberFromModel(model))
 	}
 	return members, nil
 }

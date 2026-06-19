@@ -546,8 +546,10 @@ function WorkspaceApp() {
               members={roleDraftMembers}
               memberOptions={memberSearchResults}
               memberUsers={roleDraftMemberUsers}
+              memberWorkflows={permissionWorkspace.roleDraftMemberWorkflows}
               newMemberEmail={newRoleMemberEmail}
               onAddMember={permissionWorkspace.addRoleMember}
+              onAddWorkflowMember={permissionWorkspace.addWorkflowMember}
               onGrantChange={permissionWorkspace.updateRoleGrant}
               onMemberRemove={permissionWorkspace.removeRoleMember}
               onNewMemberEmailChange={permissionWorkspace.setNewRoleMemberEmail}

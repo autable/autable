@@ -23,7 +23,7 @@ describe("appState", () => {
       name: "editor",
       subject_id: "role:workspace:editor",
       grants: [],
-      members: ["u1"]
+      members: [{ type: "user", id: "u1" }]
     };
 
     expect(replaceRole(existing, saved)).toEqual([saved]);
@@ -31,7 +31,15 @@ describe("appState", () => {
   });
 
   it("compacts role members", () => {
-    expect(compactMembers([" u2 ", "", "u1", "u2"])).toEqual(["u1", "u2"]);
+    expect(compactMembers([
+      { type: "user", id: " u2 " },
+      { type: "user", id: "" },
+      { type: "workflow", id: "1" },
+      { type: "user", id: "u2" }
+    ])).toEqual([
+      { type: "user", id: "u2" },
+      { type: "workflow", id: "1" }
+    ]);
   });
 
   it("builds a row draft from visible fields", () => {

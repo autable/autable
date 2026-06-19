@@ -161,10 +161,16 @@ export type RoleDefinition = {
   name: string;
   subject_id: string;
   grants: PermissionGrant[];
-  members: string[];
+  members: RoleMember[];
   member_users?: AuthUser[];
+  member_workflows?: WorkflowDefinition[];
   created_at?: number;
   updated_at?: number;
+};
+
+export type RoleMember = {
+  type: "user" | "workflow";
+  id: string;
 };
 
 export type AuthUser = {
@@ -176,6 +182,17 @@ export type AuthUser = {
 export type RowRecord = {
   record_id: number;
   values: Record<string, unknown>;
+};
+
+export type RowMutation = RowRecord & {
+  operation: "create" | "update" | "noop";
+};
+
+export type FieldMutation = {
+  created: Field[];
+  restored: Field[];
+  existing: Field[];
+  fields: Field[];
 };
 
 export type OIDCProvider = {
@@ -278,6 +295,41 @@ export async function createRow(
     throw new Error(error.error ?? "row creation failed");
   }
   return response.json() as Promise<RowRecord>;
+}
+
+export async function upsertRow(
+  dbName: string,
+  tableName: string,
+  matchField: string,
+  values: Record<string, unknown>
+): Promise<RowMutation> {
+  const response = await fetch(`/api/tables/${dbName}/${tableName}/rows/upsert`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ match_field: matchField, values })
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: response.statusText }));
+    throw new Error(error.error ?? "row upsert failed");
+  }
+  return response.json() as Promise<RowMutation>;
+}
+
+export async function createFields(
+  dbName: string,
+  tableName: string,
+  fields: Field[] | Record<string, string>
+): Promise<FieldMutation> {
+  const response = await fetch(`/api/tables/${dbName}/${tableName}/fields`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ fields })
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: response.statusText }));
+    throw new Error(error.error ?? "field creation failed");
+  }
+  return response.json() as Promise<FieldMutation>;
 }
 
 export async function updateRow(
@@ -542,22 +594,6 @@ export async function loadPublishedForm(token: string): Promise<FormDefinition> 
   return response.json() as Promise<FormDefinition>;
 }
 
-export async function submitPublishedForm(
-  token: string,
-  values: Record<string, unknown>
-): Promise<RowRecord> {
-  const response = await fetch(`/api/published/forms/${encodeURIComponent(token)}/submit`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ values })
-  });
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: response.statusText }));
-    throw new Error(error.error ?? `published form submit failed: ${response.status}`);
-  }
-  return response.json() as Promise<RowRecord>;
-}
-
 export async function listRoles(dbName: string): Promise<RoleDefinition[]> {
   const response = await fetch(`/api/databases/${dbName}/roles`);
   if (!response.ok) {
@@ -599,7 +635,7 @@ export async function saveRoleGrants(
 export async function saveRoleMembers(
   dbName: string,
   roleName: string,
-  members: string[]
+  members: RoleMember[]
 ): Promise<RoleDefinition> {
   const response = await fetch(`/api/databases/${dbName}/roles/${encodeURIComponent(roleName)}/members`, {
     method: "PUT",

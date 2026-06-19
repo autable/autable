@@ -9,7 +9,7 @@ import {
   login,
   oidcStartURL,
   register,
-  submitPublishedForm,
+  createRow,
   type AuthUser,
   type FormDefinition,
   type OIDCProvider,
@@ -159,7 +159,7 @@ export function PublishedFormPage({ token }: PublishedFormPageProps) {
       })
     );
     try {
-      const saved = await submitPublishedForm(token, values);
+      const saved = await createRow(form.database_name, renderedForm.table, values);
       setFormValues({});
       setStatus(t("status.publishedFormSubmitted", { id: saved.record_id }));
     } catch (error) {

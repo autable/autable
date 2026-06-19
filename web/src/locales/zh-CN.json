@@ -105,6 +105,7 @@
   },
   "permission": {
     "addRoleMember": "添加角色成员",
+    "addWorkflowMember": "添加工作流成员",
     "empty": "创建角色后即可配置表、字段、工作流和表单权限。",
     "fieldSet": "{{table}} 字段",
     "fields": "字段",
@@ -136,6 +137,7 @@
     "view": "{{view}} 视图",
     "viewSet": "{{table}} 视图",
     "views": "视图",
+    "workflowMember": "工作流成员",
     "workflowPartialPermissions": "工作流部分权限",
     "workflowSet": "全部工作流",
     "workflows": "工作流"

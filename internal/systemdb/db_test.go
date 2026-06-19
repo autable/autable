@@ -356,11 +356,16 @@ func TestRoleDefinitionStoresReplaceableGrants(t *testing.T) {
 	if !perms.CanWriteField(role.SubjectID, "workspace.contacts", "secret") {
 		t.Fatal("expected field set write grant to apply to secret")
 	}
-	role, err = db.ReplaceRoleMembers(ctx, "workspace", "editor", []string{"u1", "u2", "u1", ""})
+	role, err = db.ReplaceRoleMembers(ctx, "workspace", "editor", []RoleMember{
+		{Type: "user", ID: "u1"},
+		{Type: "user", ID: "u2"},
+		{Type: "user", ID: "u1"},
+		{Type: "user", ID: ""},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(role.Members) != 2 || role.Members[0] != "u1" || role.Members[1] != "u2" {
+	if len(role.Members) != 2 || role.Members[0] != (RoleMember{Type: "user", ID: "u1"}) || role.Members[1] != (RoleMember{Type: "user", ID: "u2"}) {
 		t.Fatalf("expected de-duplicated role members, got %#v", role.Members)
 	}
 	effectivePerms, err := db.EffectiveGrantsForSubject(ctx, "u1")
@@ -375,6 +380,20 @@ func TestRoleDefinitionStoresReplaceableGrants(t *testing.T) {
 	}
 	if !effectivePerms.CanWriteField("u1", "workspace.contacts", "secret") {
 		t.Fatal("expected role member to inherit field set write grant")
+	}
+	role, err = db.ReplaceRoleMembers(ctx, "workspace", "editor", []RoleMember{{Type: "workflow", ID: "7"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(role.Members) != 1 || role.Members[0] != (RoleMember{Type: "workflow", ID: "7"}) {
+		t.Fatalf("expected workflow role member to round-trip raw id, got %#v", role.Members)
+	}
+	workflowPerms, err := db.EffectiveGrantsForSubject(ctx, WorkflowSubjectID(7))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !workflowPerms.CanReadField(WorkflowSubjectID(7), "workspace.contacts", "email") {
+		t.Fatal("expected workflow role member to inherit role grants")
 	}
 
 	role, err = db.ReplaceRoleGrants(ctx, "workspace", "editor", []permission.Grant{
@@ -393,7 +412,7 @@ func TestRoleDefinitionStoresReplaceableGrants(t *testing.T) {
 	if len(roles) != 1 || roles[0].Name != "editor" {
 		t.Fatalf("unexpected roles: %#v", roles)
 	}
-	role, err = db.ReplaceRoleMembers(ctx, "workspace", "editor", []string{"u2"})
+	role, err = db.ReplaceRoleMembers(ctx, "workspace", "editor", []RoleMember{{Type: "user", ID: "u2"}})
 	if err != nil {
 		t.Fatal(err)
 	}

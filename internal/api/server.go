@@ -17,7 +17,6 @@ import (
 
 	"codetable/internal/auth"
 	"codetable/internal/config"
-	"codetable/internal/formruntime"
 	"codetable/internal/history"
 	"codetable/internal/metadata"
 	"codetable/internal/permission"
@@ -62,9 +61,20 @@ type createRowRequest struct {
 	Values map[string]any `json:"values"`
 }
 
+type upsertRowRequest struct {
+	MatchField string         `json:"match_field"`
+	Values     map[string]any `json:"values"`
+}
+
 type rowResponse struct {
 	RecordID int64          `json:"record_id"`
 	Values   map[string]any `json:"values"`
+}
+
+type rowMutationResponse struct {
+	Operation string         `json:"operation"`
+	RecordID  int64          `json:"record_id"`
+	Values    map[string]any `json:"values"`
 }
 
 type rowHistoryResponse struct {
@@ -124,15 +134,16 @@ type workflowDefinitionResponse struct {
 }
 
 type roleDefinitionResponse struct {
-	ID           int64              `json:"id"`
-	DatabaseName string             `json:"database_name"`
-	Name         string             `json:"name"`
-	SubjectID    string             `json:"subject_id"`
-	Grants       []permission.Grant `json:"grants"`
-	Members      []string           `json:"members"`
-	MemberUsers  []userResponse     `json:"member_users"`
-	CreatedAt    int64              `json:"created_at"`
-	UpdatedAt    int64              `json:"updated_at"`
+	ID              int64                        `json:"id"`
+	DatabaseName    string                       `json:"database_name"`
+	Name            string                       `json:"name"`
+	SubjectID       string                       `json:"subject_id"`
+	Grants          []permission.Grant           `json:"grants"`
+	Members         []systemdb.RoleMember        `json:"members"`
+	MemberUsers     []userResponse               `json:"member_users"`
+	MemberWorkflows []workflowDefinitionResponse `json:"member_workflows"`
+	CreatedAt       int64                        `json:"created_at"`
+	UpdatedAt       int64                        `json:"updated_at"`
 }
 
 type workflowEventKind string
@@ -160,11 +171,7 @@ type roleGrantsRequest struct {
 }
 
 type roleMembersRequest struct {
-	Members []string `json:"members"`
-}
-
-type publishedFormSubmitRequest struct {
-	Values map[string]any `json:"values"`
+	Members []systemdb.RoleMember `json:"members"`
 }
 
 const (
@@ -251,7 +258,7 @@ func (server *Server) routes() {
 	server.mux.HandleFunc("GET /api/users", server.handleUsers)
 	server.mux.HandleFunc("GET /api/metadata", server.handleMetadata)
 	server.mux.HandleFunc("POST /api/permissions/grants", server.handleSaveGrant)
-	server.mux.HandleFunc("POST /api/tables/", server.handleCreateRow)
+	server.mux.HandleFunc("POST /api/tables/", server.handlePostTableResource)
 	server.mux.HandleFunc("PATCH /api/tables/", server.handleUpdateRow)
 	server.mux.HandleFunc("DELETE /api/tables/", server.handleDeleteRow)
 	server.mux.HandleFunc("GET /api/tables/", server.handleGetTable)
@@ -270,7 +277,6 @@ func (server *Server) routes() {
 	server.mux.HandleFunc("GET /api/forms/", server.handleGetForm)
 	server.mux.HandleFunc("DELETE /api/forms/", server.handleDeleteForm)
 	server.mux.HandleFunc("GET /api/published/forms/", server.handleGetPublishedForm)
-	server.mux.HandleFunc("POST /api/published/forms/", server.handleSubmitPublishedForm)
 }
 
 func (server *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
@@ -567,47 +573,151 @@ func (server *Server) handleSaveGrant(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, grant)
 }
 
-func (server *Server) handleCreateRow(w http.ResponseWriter, r *http.Request) {
-	dbName, tableName, ok := parseTableRowsPath(r.URL.Path)
-	if !ok || r.Method != http.MethodPost {
-		http.NotFound(w, r)
+func (server *Server) handlePostTableResource(w http.ResponseWriter, r *http.Request) {
+	if dbName, tableName, ok := parseTableRowsPath(r.URL.Path); ok {
+		server.handleCreateRow(w, r, dbName, tableName)
 		return
 	}
-	actorID, ok, err := server.currentUserID(r)
-	if err != nil {
-		writeError(w, http.StatusUnauthorized, err)
+	if dbName, tableName, ok := parseTableRowsUpsertPath(r.URL.Path); ok {
+		server.handleUpsertRow(w, r, dbName, tableName)
 		return
 	}
-	if !ok {
-		writeError(w, http.StatusUnauthorized, errors.New("authentication is required"))
+	if dbName, tableName, ok := parseTableFieldsPath(r.URL.Path); ok {
+		server.handleCreateFields(w, r, dbName, tableName)
 		return
 	}
+	http.NotFound(w, r)
+}
 
+func (server *Server) handleCreateRow(w http.ResponseWriter, r *http.Request, dbName, tableName string) {
+	actorID, ok := server.requireUserID(w, r)
+	if !ok {
+		return
+	}
 	var request createRowRequest
 	if err := readJSON(r, &request); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	perms, err := server.system.EffectiveGrantsForSubject(r.Context(), actorID)
+	row, err := server.createTableRowAs(r.Context(), actorID, dbName, tableName, request.Values)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	isOwner, err := server.system.IsDatabaseOwner(r.Context(), actorID, dbName)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	row, err := server.tables.CreateRow(r.Context(), server.catalogSnapshot(), perms, actorID, isOwner, dbName, tableName, request.Values)
-	if err != nil {
-		status := http.StatusBadRequest
-		if errors.Is(err, table.ErrPermissionDenied) {
-			status = http.StatusForbidden
-		}
-		writeError(w, status, err)
+		writeTableMutationError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, rowResponse{RecordID: row.RecordID, Values: row.Values})
+}
+
+func (server *Server) handleUpsertRow(w http.ResponseWriter, r *http.Request, dbName, tableName string) {
+	actorID, ok := server.requireUserID(w, r)
+	if !ok {
+		return
+	}
+	var request upsertRowRequest
+	if err := readJSON(r, &request); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	row, operation, err := server.upsertTableRowAs(r.Context(), actorID, dbName, tableName, request.MatchField, request.Values)
+	if err != nil {
+		writeTableMutationError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, rowMutationResponse{Operation: operation, RecordID: row.RecordID, Values: row.Values})
+}
+
+func (server *Server) handleCreateFields(w http.ResponseWriter, r *http.Request, dbName, tableName string) {
+	actorID, ok := server.requireUserID(w, r)
+	if !ok {
+		return
+	}
+	var request map[string]any
+	if err := readJSON(r, &request); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	fields, err := workflowFieldsInput(request)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	mutation, err := server.createTableFieldsAs(r.Context(), actorID, dbName, tableName, fields)
+	if err != nil {
+		writeTableMutationError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, workflowFieldMutationResponse(mutation))
+}
+
+func (server *Server) createTableRowAs(ctx context.Context, actorID string, dbName string, tableName string, values map[string]any) (table.Row, error) {
+	perms, isOwner, err := server.tablePermissions(ctx, actorID, dbName)
+	if err != nil {
+		return table.Row{}, err
+	}
+	return server.tables.CreateRow(ctx, server.catalogSnapshot(), perms, actorID, isOwner, dbName, tableName, values)
+}
+
+func (server *Server) updateTableRowAs(ctx context.Context, actorID string, dbName string, tableName string, recordID int64, values map[string]any) (table.Row, error) {
+	perms, isOwner, err := server.tablePermissions(ctx, actorID, dbName)
+	if err != nil {
+		return table.Row{}, err
+	}
+	return server.tables.UpdateRow(ctx, server.catalogSnapshot(), perms, actorID, isOwner, dbName, tableName, recordID, values)
+}
+
+func (server *Server) deleteTableRowAs(ctx context.Context, actorID string, dbName string, tableName string, recordID int64) (table.Row, error) {
+	perms, isOwner, err := server.tablePermissions(ctx, actorID, dbName)
+	if err != nil {
+		return table.Row{}, err
+	}
+	return server.tables.DeleteRow(ctx, server.catalogSnapshot(), perms, actorID, isOwner, dbName, tableName, recordID)
+}
+
+func (server *Server) listTableRowsAs(ctx context.Context, actorID string, dbName string, tableName string, viewName string, temporarySorts ...metadata.ViewSort) ([]table.Row, error) {
+	perms, isOwner, err := server.tablePermissions(ctx, actorID, dbName)
+	if err != nil {
+		return nil, err
+	}
+	return server.tables.Rows(ctx, server.catalogSnapshot(), perms, actorID, isOwner, dbName, tableName, viewName, temporarySorts...)
+}
+
+func (server *Server) upsertTableRowAs(ctx context.Context, actorID string, dbName string, tableName string, matchField string, values map[string]any) (table.Row, string, error) {
+	perms, isOwner, err := server.tablePermissions(ctx, actorID, dbName)
+	if err != nil {
+		return table.Row{}, "", err
+	}
+	return server.upsertTableRow(ctx, server.catalogSnapshot(), perms, actorID, isOwner, dbName, tableName, matchField, values)
+}
+
+func (server *Server) createTableFieldsAs(ctx context.Context, actorID string, dbName string, tableName string, fields []metadata.Field) (workflowFieldMutation, error) {
+	perms, isOwner, err := server.tablePermissions(ctx, actorID, dbName)
+	if err != nil {
+		return workflowFieldMutation{}, err
+	}
+	resource := dbName + "." + tableName
+	if !isOwner && perms.ResourceLevel(actorID, permission.ScopeFieldSet, resource) < permission.Write {
+		return workflowFieldMutation{}, table.ErrPermissionDenied
+	}
+	return server.addTableFields(ctx, dbName, tableName, fields)
+}
+
+func (server *Server) tablePermissions(ctx context.Context, actorID string, dbName string) (permission.Set, bool, error) {
+	perms, err := server.system.EffectiveGrantsForSubject(ctx, actorID)
+	if err != nil {
+		return permission.Set{}, false, err
+	}
+	isOwner, err := server.system.IsDatabaseOwner(ctx, actorID, dbName)
+	if err != nil {
+		return permission.Set{}, false, err
+	}
+	return perms, isOwner, nil
+}
+
+func writeTableMutationError(w http.ResponseWriter, err error) {
+	status := http.StatusBadRequest
+	if errors.Is(err, table.ErrPermissionDenied) {
+		status = http.StatusForbidden
+	}
+	writeError(w, status, err)
 }
 
 func (server *Server) handleUpdateRow(w http.ResponseWriter, r *http.Request) {
@@ -631,23 +741,9 @@ func (server *Server) handleUpdateRow(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	perms, err := server.system.EffectiveGrantsForSubject(r.Context(), actorID)
+	row, err := server.updateTableRowAs(r.Context(), actorID, dbName, tableName, recordID, request.Values)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	isOwner, err := server.system.IsDatabaseOwner(r.Context(), actorID, dbName)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	row, err := server.tables.UpdateRow(r.Context(), server.catalogSnapshot(), perms, actorID, isOwner, dbName, tableName, recordID, request.Values)
-	if err != nil {
-		status := http.StatusBadRequest
-		if errors.Is(err, table.ErrPermissionDenied) {
-			status = http.StatusForbidden
-		}
-		writeError(w, status, err)
+		writeTableMutationError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, rowResponse{RecordID: row.RecordID, Values: row.Values})
@@ -668,23 +764,9 @@ func (server *Server) handleDeleteRow(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, errors.New("authentication is required"))
 		return
 	}
-	perms, err := server.system.EffectiveGrantsForSubject(r.Context(), actorID)
+	row, err := server.deleteTableRowAs(r.Context(), actorID, dbName, tableName, recordID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	isOwner, err := server.system.IsDatabaseOwner(r.Context(), actorID, dbName)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	row, err := server.tables.DeleteRow(r.Context(), server.catalogSnapshot(), perms, actorID, isOwner, dbName, tableName, recordID)
-	if err != nil {
-		status := http.StatusBadRequest
-		if errors.Is(err, table.ErrPermissionDenied) {
-			status = http.StatusForbidden
-		}
-		writeError(w, status, err)
+		writeTableMutationError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, rowResponse{RecordID: row.RecordID, Values: row.Values})
@@ -708,28 +790,14 @@ func (server *Server) handleListRows(w http.ResponseWriter, r *http.Request, dbN
 		writeError(w, http.StatusUnauthorized, errors.New("authentication is required"))
 		return
 	}
-	perms, err := server.system.EffectiveGrantsForSubject(r.Context(), actorID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	isOwner, err := server.system.IsDatabaseOwner(r.Context(), actorID, dbName)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
 	temporarySorts, err := parseTemporaryRowSorts(r.URL.Query())
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	rows, err := server.tables.Rows(r.Context(), server.catalogSnapshot(), perms, actorID, isOwner, dbName, tableName, r.URL.Query().Get("view"), temporarySorts...)
+	rows, err := server.listTableRowsAs(r.Context(), actorID, dbName, tableName, r.URL.Query().Get("view"), temporarySorts...)
 	if err != nil {
-		status := http.StatusBadRequest
-		if errors.Is(err, table.ErrPermissionDenied) {
-			status = http.StatusForbidden
-		}
-		writeError(w, status, err)
+		writeTableMutationError(w, err)
 		return
 	}
 	response := make([]rowResponse, 0, len(rows))
@@ -1057,7 +1125,7 @@ func (server *Server) handlePutDatabaseResource(w http.ResponseWriter, r *http.R
 			writeError(w, http.StatusBadRequest, err)
 			return
 		}
-		if err := server.validateRoleMembers(r.Context(), request.Members); err != nil {
+		if err := server.validateRoleMembers(r.Context(), dbName, request.Members); err != nil {
 			writeError(w, http.StatusBadRequest, err)
 			return
 		}
@@ -1257,7 +1325,7 @@ func (server *Server) handleRunWorkflow(w http.ResponseWriter, r *http.Request) 
 		ID:           workflowDefinition.ID,
 		DatabaseName: workflowDefinition.DatabaseName,
 		Script:       workflowDefinition.Script,
-		CreatorID:    workflowDefinition.CreatorID,
+		CreatorID:    systemdb.WorkflowSubjectID(workflowDefinition.ID),
 		Secrets:      workflowDefinition.Secrets,
 		Variables:    workflowDefinition.Variables,
 	}, request.Inputs)
@@ -1473,7 +1541,7 @@ func (server *Server) processWorkflowEvent(ctx context.Context, event workflowEv
 			ID:           workflowDefinition.ID,
 			DatabaseName: workflowDefinition.DatabaseName,
 			Script:       workflowDefinition.Script,
-			CreatorID:    workflowDefinition.CreatorID,
+			CreatorID:    systemdb.WorkflowSubjectID(workflowDefinition.ID),
 			Secrets:      workflowDefinition.Secrets,
 			Variables:    workflowDefinition.Variables,
 		}
@@ -1484,7 +1552,11 @@ func (server *Server) processWorkflowEvent(ctx context.Context, event workflowEv
 		if err != nil || !server.workflowEventMayRun(ctx, workflowDefinition.ID, declaration, event) {
 			continue
 		}
-		inputs, matched, err := server.runner.TriggerRunInputs(ctx, definition, declaration, workflowTriggerEvent(event))
+		triggerEvent, ok := server.workflowTriggerEventForSubject(ctx, definition.CreatorID, event)
+		if !ok {
+			continue
+		}
+		inputs, matched, err := server.runner.TriggerRunInputs(ctx, definition, declaration, triggerEvent)
 		if err != nil || !matched {
 			continue
 		}
@@ -1523,6 +1595,72 @@ func workflowTriggerEvent(event workflowEvent) workflow.TriggerEvent {
 	default:
 		return workflow.TriggerEvent{}
 	}
+}
+
+func (server *Server) workflowTriggerEventForSubject(ctx context.Context, subjectID string, event workflowEvent) (workflow.TriggerEvent, bool) {
+	switch event.Kind {
+	case workflowEventSchedule:
+		return workflowTriggerEvent(event), true
+	case workflowEventRowChange:
+		change, ok := server.readableRowChangeForSubject(ctx, subjectID, event.RowChange)
+		if !ok {
+			return workflow.TriggerEvent{}, false
+		}
+		next := event
+		next.RowChange = change
+		return workflowTriggerEvent(next), true
+	default:
+		return workflow.TriggerEvent{}, false
+	}
+}
+
+func (server *Server) readableRowChangeForSubject(ctx context.Context, subjectID string, change history.RowChange) (history.RowChange, bool) {
+	perms, isOwner, err := server.tablePermissions(ctx, subjectID, change.Database)
+	if err != nil {
+		return history.RowChange{}, false
+	}
+	tableMeta, ok := server.catalogSnapshot().Table(change.Database, change.Table)
+	if !ok {
+		return history.RowChange{}, false
+	}
+	resource := change.Database + "." + change.Table
+	readable := map[string]struct{}{}
+	for _, field := range tableMeta.ActiveFields() {
+		if isOwner || perms.FieldLevel(subjectID, resource, field.Name) >= permission.Read {
+			readable[field.Name] = struct{}{}
+		}
+	}
+	if len(readable) == 0 {
+		return history.RowChange{}, false
+	}
+	filteredValues := filterRowChangeValues(change.Values, readable)
+	filteredDiff := filterRowChangeDiff(change.Diff, readable)
+	if len(filteredValues) == 0 && len(filteredDiff) == 0 {
+		return history.RowChange{}, false
+	}
+	change.Values = filteredValues
+	change.Diff = filteredDiff
+	return change, true
+}
+
+func filterRowChangeValues(values map[string]any, readable map[string]struct{}) map[string]any {
+	filtered := map[string]any{}
+	for field, value := range values {
+		if _, ok := readable[field]; ok {
+			filtered[field] = value
+		}
+	}
+	return filtered
+}
+
+func filterRowChangeDiff(diff history.RowDiff, readable map[string]struct{}) history.RowDiff {
+	filtered := history.RowDiff{}
+	for field, value := range diff {
+		if _, ok := readable[field]; ok {
+			filtered[field] = value
+		}
+	}
+	return filtered
 }
 
 func triggerStringParam(params map[string]any, key string) (string, bool) {
@@ -1731,72 +1869,25 @@ func (server *Server) handleGetPublishedForm(w http.ResponseWriter, r *http.Requ
 	writeJSON(w, http.StatusOK, form)
 }
 
-func (server *Server) handleSubmitPublishedForm(w http.ResponseWriter, r *http.Request) {
-	token, ok := parsePublishedFormPath(r.URL.Path, true)
-	if !ok {
-		http.NotFound(w, r)
-		return
-	}
-	actorID, ok := server.requireUserID(w, r)
-	if !ok {
-		return
-	}
-	form, err := server.system.FormByPublishedToken(r.Context(), token)
-	if err != nil {
-		writeError(w, http.StatusNotFound, err)
-		return
-	}
-	if !server.requireExplicitResourceRead(w, r, actorID, permission.ScopeForm, form.ID) {
-		return
-	}
-	var request publishedFormSubmitRequest
-	if err := readJSON(r, &request); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	form, err = server.formDefinitionWithFileScript(r.Context(), form)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	definition, err := formruntime.Evaluate(form.Script)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	if _, ok := server.catalogSnapshot().Table(form.DatabaseName, definition.Table); !ok {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("table %s.%s not found", form.DatabaseName, definition.Table))
-		return
-	}
-	rowValues := make(map[string]any, len(definition.Fields))
-	for inputID, fieldName := range definition.Fields {
-		rowValues[fieldName] = request.Values[inputID]
-	}
-	perms, err := server.system.EffectiveGrantsForSubject(r.Context(), actorID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	isOwner, err := server.system.IsDatabaseOwner(r.Context(), actorID, form.DatabaseName)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	row, err := server.tables.CreateRow(r.Context(), server.catalogSnapshot(), perms, actorID, isOwner, form.DatabaseName, definition.Table, rowValues)
-	if err != nil {
-		status := http.StatusBadRequest
-		if errors.Is(err, table.ErrPermissionDenied) {
-			status = http.StatusForbidden
-		}
-		writeError(w, status, err)
-		return
-	}
-	writeJSON(w, http.StatusCreated, rowResponse{RecordID: row.RecordID, Values: row.Values})
-}
-
 func parseTableRowsPath(path string) (string, string, bool) {
 	parts := strings.Split(strings.Trim(path, "/"), "/")
 	if len(parts) != 5 || parts[0] != "api" || parts[1] != "tables" || parts[4] != "rows" {
+		return "", "", false
+	}
+	return parts[2], parts[3], true
+}
+
+func parseTableFieldsPath(path string) (string, string, bool) {
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(parts) != 5 || parts[0] != "api" || parts[1] != "tables" || parts[4] != "fields" {
+		return "", "", false
+	}
+	return parts[2], parts[3], true
+}
+
+func parseTableRowsUpsertPath(path string) (string, string, bool) {
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(parts) != 6 || parts[0] != "api" || parts[1] != "tables" || parts[4] != "rows" || parts[5] != "upsert" {
 		return "", "", false
 	}
 	return parts[2], parts[3], true
@@ -2390,19 +2481,41 @@ func overlapKey(left, right map[string]struct{}) string {
 	return ""
 }
 
-func (server *Server) validateRoleMembers(ctx context.Context, members []string) error {
+func (server *Server) validateRoleMembers(ctx context.Context, dbName string, members []systemdb.RoleMember) error {
 	seen := map[string]struct{}{}
 	for _, member := range members {
-		member = strings.TrimSpace(member)
-		if member == "" {
+		member.Type = strings.TrimSpace(member.Type)
+		member.ID = strings.TrimSpace(member.ID)
+		if member.Type == "" {
+			member.Type = "user"
+		}
+		if member.ID == "" {
 			continue
 		}
-		if _, ok := seen[member]; ok {
+		key := member.Type + ":" + member.ID
+		if _, ok := seen[key]; ok {
 			continue
 		}
-		seen[member] = struct{}{}
-		if _, err := server.system.User(ctx, member); err != nil {
-			return fmt.Errorf("role member %q not found", member)
+		seen[key] = struct{}{}
+		switch member.Type {
+		case "user":
+			if _, err := server.system.User(ctx, member.ID); err != nil {
+				return fmt.Errorf("role member user %q not found", member.ID)
+			}
+		case "workflow":
+			workflowID, err := strconv.ParseInt(member.ID, 10, 64)
+			if err != nil {
+				return fmt.Errorf("role member workflow %q must be an id", member.ID)
+			}
+			workflow, err := server.system.Workflow(ctx, workflowID)
+			if err != nil {
+				return fmt.Errorf("role member workflow %q not found", member.ID)
+			}
+			if workflow.DatabaseName != dbName {
+				return fmt.Errorf("role member workflow %q belongs to database %q, not %q", member.ID, workflow.DatabaseName, dbName)
+			}
+		default:
+			return fmt.Errorf("role member type %q is unsupported", member.Type)
 		}
 	}
 	return nil
@@ -2784,23 +2897,38 @@ func (server *Server) roleResponses(ctx context.Context, roles []systemdb.RoleDe
 
 func (server *Server) roleResponse(ctx context.Context, role systemdb.RoleDefinition) (roleDefinitionResponse, error) {
 	memberUsers := make([]userResponse, 0, len(role.Members))
+	memberWorkflows := make([]workflowDefinitionResponse, 0, len(role.Members))
 	for _, member := range role.Members {
-		user, err := server.system.User(ctx, member)
-		if err != nil {
-			return roleDefinitionResponse{}, err
+		switch member.Type {
+		case "user":
+			user, err := server.system.User(ctx, member.ID)
+			if err != nil {
+				return roleDefinitionResponse{}, err
+			}
+			memberUsers = append(memberUsers, toUserResponse(user))
+		case "workflow":
+			workflowID, err := strconv.ParseInt(member.ID, 10, 64)
+			if err != nil {
+				return roleDefinitionResponse{}, err
+			}
+			workflow, err := server.system.Workflow(ctx, workflowID)
+			if err != nil {
+				return roleDefinitionResponse{}, err
+			}
+			memberWorkflows = append(memberWorkflows, workflowResponseFromDefinition(workflow))
 		}
-		memberUsers = append(memberUsers, toUserResponse(user))
 	}
 	return roleDefinitionResponse{
-		ID:           role.ID,
-		DatabaseName: role.DatabaseName,
-		Name:         role.Name,
-		SubjectID:    role.SubjectID,
-		Grants:       role.Grants,
-		Members:      role.Members,
-		MemberUsers:  memberUsers,
-		CreatedAt:    role.CreatedAt,
-		UpdatedAt:    role.UpdatedAt,
+		ID:              role.ID,
+		DatabaseName:    role.DatabaseName,
+		Name:            role.Name,
+		SubjectID:       role.SubjectID,
+		Grants:          role.Grants,
+		Members:         role.Members,
+		MemberUsers:     memberUsers,
+		MemberWorkflows: memberWorkflows,
+		CreatedAt:       role.CreatedAt,
+		UpdatedAt:       role.UpdatedAt,
 	}, nil
 }
 

@@ -8,8 +8,6 @@ import (
 	"strings"
 
 	"codetable/internal/metadata"
-	"codetable/internal/permission"
-	"codetable/internal/table"
 	"codetable/internal/workflow"
 )
 
@@ -33,28 +31,20 @@ func (service workflowCodeTableService) CreateFields(ctx context.Context, input 
 	if err != nil {
 		return nil, err
 	}
-	perms, err := server.system.EffectiveGrantsForSubject(ctx, info.CreatorID)
+	mutation, err := server.createTableFieldsAs(ctx, info.CreatorID, dbName, tableName, fields)
 	if err != nil {
 		return nil, err
 	}
-	resource := dbName + "." + tableName
-	isOwner, err := server.system.IsDatabaseOwner(ctx, info.CreatorID, dbName)
-	if err != nil {
-		return nil, err
-	}
-	if !isOwner && perms.ResourceLevel(info.CreatorID, permission.ScopeFieldSet, resource) < permission.Write {
-		return nil, table.ErrPermissionDenied
-	}
-	mutation, err := server.addTableFields(ctx, dbName, tableName, fields)
-	if err != nil {
-		return nil, err
-	}
+	return workflowFieldMutationResponse(mutation), nil
+}
+
+func workflowFieldMutationResponse(mutation workflowFieldMutation) map[string]any {
 	return map[string]any{
 		"created":  workflowFieldsOutput(mutation.Created),
 		"restored": workflowFieldsOutput(mutation.Restored),
 		"existing": workflowFieldsOutput(mutation.Existing),
 		"fields":   workflowFieldsOutput(mutation.Fields),
-	}, nil
+	}
 }
 
 func workflowFieldsInput(input map[string]any) ([]metadata.Field, error) {

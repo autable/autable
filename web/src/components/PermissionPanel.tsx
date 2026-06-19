@@ -24,6 +24,7 @@ import {
   type FormDefinition,
   type PermissionGrant,
   type RoleDefinition,
+  type RoleMember,
   type AuthUser,
   type WorkflowDefinition
 } from "../api";
@@ -35,18 +36,20 @@ type PermissionPanelProps = {
   database: DatabaseMetadata;
   forms: FormDefinition[];
   grants: PermissionGrant[];
-  members: string[];
+  members: RoleMember[];
   memberOptions: AuthUser[];
   memberUsers: AuthUser[];
+  memberWorkflows: WorkflowDefinition[];
   newMemberEmail: string;
   onAddMember: (user?: AuthUser) => void;
+  onAddWorkflowMember: (workflow: WorkflowDefinition) => void;
   onGrantChange: (
     scope: PermissionGrant["scope"],
     resource: string,
     field: string,
     level: PermissionGrant["level"]
   ) => void;
-  onMemberRemove: (memberID: string) => void;
+  onMemberRemove: (member: RoleMember) => void;
   onNewMemberEmailChange: (value: string) => void;
   onSave: () => void;
   role?: RoleDefinition;
@@ -60,8 +63,10 @@ export function PermissionPanel({
   members,
   memberOptions,
   memberUsers,
+  memberWorkflows,
   newMemberEmail,
   onAddMember,
+  onAddWorkflowMember,
   onGrantChange,
   onMemberRemove,
   onNewMemberEmailChange,
@@ -83,10 +88,13 @@ export function PermissionPanel({
               members={members}
               memberOptions={memberOptions}
               memberUsers={memberUsers}
+              memberWorkflows={memberWorkflows}
               newMemberEmail={newMemberEmail}
               onAddMember={onAddMember}
+              onAddWorkflowMember={onAddWorkflowMember}
               onMemberRemove={onMemberRemove}
               onNewMemberEmailChange={onNewMemberEmailChange}
+              workflows={workflows}
             />
             <Button icon={<SaveRegular />} appearance="primary" onClick={onSave}>
               {t("common.save")}
@@ -116,20 +124,38 @@ function MembersControl({
   members,
   memberOptions,
   memberUsers,
+  memberWorkflows,
   newMemberEmail,
   onAddMember,
+  onAddWorkflowMember,
   onMemberRemove,
-  onNewMemberEmailChange
+  onNewMemberEmailChange,
+  workflows
 }: Pick<
   PermissionPanelProps,
-  "members" | "memberOptions" | "memberUsers" | "newMemberEmail" | "onAddMember" | "onMemberRemove" | "onNewMemberEmailChange"
+  | "members"
+  | "memberOptions"
+  | "memberUsers"
+  | "memberWorkflows"
+  | "newMemberEmail"
+  | "onAddMember"
+  | "onAddWorkflowMember"
+  | "onMemberRemove"
+  | "onNewMemberEmailChange"
+  | "workflows"
 >) {
   const { t } = useTranslation();
   const memberByID = new Map(memberUsers.map((member) => [member.id, member]));
+  const workflowByID = new Map(memberWorkflows.map((workflow) => [String(workflow.id), workflow]));
   const memberItems = members.map((memberID) => ({
-    id: memberID,
-    email: memberByID.get(memberID)?.email ?? memberID
+    member: memberID,
+    key: `${memberID.type}:${memberID.id}`,
+    label:
+      memberID.type === "workflow"
+        ? workflowByID.get(memberID.id)?.name ?? `workflow:${memberID.id}`
+        : memberByID.get(memberID.id)?.email ?? memberID.id
   }));
+  const selectableWorkflows = workflows.filter((workflow) => workflow.id && !members.some((member) => member.type === "workflow" && member.id === String(workflow.id)));
   return (
     <Popover positioning="below-end" trapFocus>
       <PopoverTrigger disableButtonEnhancement>
@@ -167,19 +193,36 @@ function MembersControl({
           </Combobox>
           <Button icon={<AddRegular />} aria-label={t("permission.addRoleMember")} onClick={() => onAddMember()} />
         </div>
+        <Select
+          aria-label={t("permission.workflowMember")}
+          value=""
+          onChange={(event) => {
+            const selected = workflows.find((workflow) => String(workflow.id) === event.currentTarget.value);
+            if (selected) {
+              onAddWorkflowMember(selected);
+            }
+          }}
+        >
+          <option value="">{t("permission.addWorkflowMember")}</option>
+          {selectableWorkflows.map((workflow) => (
+            <option key={workflow.id} value={workflow.id}>
+              {workflow.name}
+            </option>
+          ))}
+        </Select>
         {members.length === 0 ? (
           <Text size={200}>{t("permission.noMembers")}</Text>
         ) : (
           <List navigationMode="items" aria-label={t("permission.members")}>
             {memberItems.map((member) => (
-              <ListItem key={member.id}>
+              <ListItem key={member.key}>
                 <div className="member-list-item">
-                  <Text truncate>{member.email}</Text>
+                  <Text truncate>{member.label}</Text>
                   <Button
                     appearance="subtle"
                     icon={<DismissRegular />}
-                    aria-label={t("permission.removeMember", { email: member.email })}
-                    onClick={() => onMemberRemove(member.id)}
+                    aria-label={t("permission.removeMember", { email: member.label })}
+                    onClick={() => onMemberRemove(member.member)}
                   />
                 </div>
               </ListItem>
