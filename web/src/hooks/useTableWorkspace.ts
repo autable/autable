@@ -384,6 +384,10 @@ export function useTableWorkspace({
       onStatus(t("status.selectTableBeforeRows"));
       return;
     }
+    if (selectedTableView !== "all") {
+      onStatus(t("status.createRecordFromAllRecordsOnly"));
+      return;
+    }
     const writableFields = activeFields.filter((field) => field.type !== "formula");
     const values = Object.fromEntries(writableFields.map((field) => [field.name, field.name === "status" ? "Review" : ""]));
     if (writableFields.some((field) => field.name === "name")) {

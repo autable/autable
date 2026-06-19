@@ -150,6 +150,7 @@
     "createdTable": "已创建表 {{database}}.{{table}}",
     "createdView": "已创建视图 {{name}}",
     "createdWorkflow": "已创建工作流 {{name}}",
+    "createRecordFromAllRecordsOnly": "只能在全部记录视图新增记录",
     "currentUserLoadFailed": "当前用户加载失败",
     "databaseCreationFailed": "数据库创建失败",
     "databaseNameRequired": "数据库名称必填",

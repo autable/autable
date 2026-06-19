@@ -333,6 +333,9 @@ function WorkspaceApp() {
     if (!nextDatabase) {
       return;
     }
+    if (nextView === "permission" && (nextDatabase.permission_level ?? 0) < 2) {
+      nextView = "table";
+    }
     setSelectedDatabaseName(databaseName);
     setView(nextView);
     if (nextView === "table") {

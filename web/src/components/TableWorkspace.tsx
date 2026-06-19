@@ -134,7 +134,7 @@ export function TableWorkspace({
   const canWriteDatabase = hasTable && (table.database_permission_level ?? 2) >= 2;
   const canWriteFields = hasTable && (table.field_permission_level ?? table.permission_level ?? 2) >= 2;
   const canWriteViews = hasTable && (table.view_permission_level ?? table.permission_level ?? 2) >= 2;
-  const canCreateRow = activeFields.some((field) => canWriteField(field));
+  const canCreateRow = selectedTableView === "all" && activeFields.some((field) => canWriteField(field));
   const hasWritableFields = activeFields.some(canWriteField);
   const [recordPanelOpen, setRecordPanelOpen] = useState(false);
   const [recordPanelTab, setRecordPanelTab] = useState<"details" | "history">("details");

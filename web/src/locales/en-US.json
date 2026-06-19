@@ -150,6 +150,7 @@
     "createdTable": "Created table {{database}}.{{table}}",
     "createdView": "Created view {{name}}",
     "createdWorkflow": "Created workflow {{name}}",
+    "createRecordFromAllRecordsOnly": "Create records from All records only",
     "currentUserLoadFailed": "Current user load failed",
     "databaseCreationFailed": "Database creation failed",
     "databaseNameRequired": "Database name is required",

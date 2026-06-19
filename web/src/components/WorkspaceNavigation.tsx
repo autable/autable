@@ -222,7 +222,9 @@ export function WorkspaceNavigation({
                   <NavSubItem value={`${item.name}:table`}>{t("common.table")}</NavSubItem>
                   <NavSubItem value={`${item.name}:workflow`}>{t("common.workflow")}</NavSubItem>
                   <NavSubItem value={`${item.name}:form`}>{t("common.form")}</NavSubItem>
-                  <NavSubItem value={`${item.name}:permission`}>{t("common.permission")}</NavSubItem>
+                  {(item.permission_level ?? 0) >= 2 && (
+                    <NavSubItem value={`${item.name}:permission`}>{t("common.permission")}</NavSubItem>
+                  )}
                 </NavSubItemGroup>
               </NavCategory>
             ))}
@@ -368,9 +370,12 @@ function PrimaryRail({
   const sections = [
     { key: "table" as WorkspaceView, label: t("common.table"), icon: <DocumentTableRegular /> },
     { key: "workflow" as WorkspaceView, label: t("common.workflow"), icon: <DocumentFlowchartRegular /> },
-    { key: "form" as WorkspaceView, label: t("common.form"), icon: <FormRegular /> },
-    { key: "permission" as WorkspaceView, label: t("common.permission"), icon: <PeopleRegular /> }
+    { key: "form" as WorkspaceView, label: t("common.form"), icon: <FormRegular /> }
   ];
+  const visibleSections =
+    (database.permission_level ?? 0) >= 2
+      ? [...sections, { key: "permission" as WorkspaceView, label: t("common.permission"), icon: <PeopleRegular /> }]
+      : sections;
   return (
     <aside className="primary-sidebar primary-rail" aria-label={t("nav.databaseList")}>
       <Tooltip content={t("nav.expandSidebar", "Expand")} relationship="label">
@@ -403,7 +408,7 @@ function PrimaryRail({
       </Menu>
       <div className="primary-rail-divider" />
       <div className="primary-rail-sections">
-        {sections.map((section) => (
+        {visibleSections.map((section) => (
           <Tooltip key={section.key} content={section.label} relationship="label">
             <Button
               appearance={view === section.key ? "primary" : "subtle"}

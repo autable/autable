@@ -9,6 +9,7 @@ const catalogFixture = {
     {
       name: "workspace",
       sqlite_path: "./data/workspace.sqlite",
+      permission_level: 2,
       tables: [
         {
           name: "contacts",
@@ -264,6 +265,48 @@ describe("App", () => {
 
     renderApp();
     await waitFor(() => expect(screen.getAllByText("1 of 1 records").length).toBeGreaterThan(0));
+  });
+
+  it("hides database permissions for non-owners", async () => {
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url === "/api/metadata") {
+        return jsonResponse({
+          databases: [{ ...catalogFixture.databases[0], permission_level: 0 }]
+        });
+      }
+      return defaultFetch(input, init);
+    });
+
+    renderApp();
+    await screen.findByRole("button", { name: authUserFixture.email });
+    expect(screen.queryByRole("button", { name: "Permission" })).not.toBeInTheDocument();
+  });
+
+  it("hides collapsed database permissions for non-owners", async () => {
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url === "/api/metadata") {
+        return jsonResponse({
+          databases: [{ ...catalogFixture.databases[0], permission_level: 0 }]
+        });
+      }
+      return defaultFetch(input, init);
+    });
+
+    renderApp();
+    await screen.findByRole("button", { name: authUserFixture.email });
+    await userEvent.click(screen.getByRole("button", { name: "Collapse sidebar" }));
+
+    expect(screen.queryByRole("button", { name: "Permission" })).not.toBeInTheDocument();
+  });
+
+  it("disables row creation outside all records", async () => {
+    renderApp();
+    await screen.findByRole("button", { name: authUserFixture.email });
+    await userEvent.click(screen.getByRole("button", { name: "Active" }));
+
+    expect(screen.getByRole("button", { name: "Row" })).toBeDisabled();
   });
 
   it("creates a database from the sidebar and selects it", async () => {
