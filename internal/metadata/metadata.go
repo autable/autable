@@ -228,6 +228,61 @@ func (catalog Catalog) UpdateTable(dbName, tableName string, table Table) (Catal
 	return Catalog{}, fmt.Errorf("database %q not found", dbName)
 }
 
+func (catalog Catalog) MergeTable(dbName, tableName string, patch Table) (Catalog, error) {
+	existing, ok := catalog.Table(dbName, tableName)
+	if !ok {
+		return Catalog{}, fmt.Errorf("database %q table %q not found", dbName, tableName)
+	}
+	if patch.Name == "" {
+		patch.Name = tableName
+	}
+	if patch.Name != tableName {
+		return Catalog{}, errors.New("table name cannot be changed")
+	}
+	next := existing
+	next.Name = tableName
+	if patch.DisplayName != "" {
+		next.DisplayName = patch.DisplayName
+	}
+	if patch.Fields != nil {
+		next.Fields = mergeFields(existing.Fields, patch.Fields)
+	}
+	if patch.Views != nil {
+		next.Views = mergeViews(existing.Views, patch.Views)
+	}
+	return catalog.UpdateTable(dbName, tableName, next)
+}
+
+func mergeFields(existing []Field, patch []Field) []Field {
+	merged := slices.Clone(existing)
+	for _, field := range patch {
+		index := slices.IndexFunc(merged, func(existingField Field) bool {
+			return existingField.Name == field.Name
+		})
+		if index < 0 {
+			merged = append(merged, field)
+			continue
+		}
+		merged[index] = field
+	}
+	return merged
+}
+
+func mergeViews(existing []View, patch []View) []View {
+	merged := slices.Clone(existing)
+	for _, view := range patch {
+		index := slices.IndexFunc(merged, func(existingView View) bool {
+			return existingView.Name == view.Name
+		})
+		if index < 0 {
+			merged = append(merged, view)
+			continue
+		}
+		merged[index] = view
+	}
+	return merged
+}
+
 func (catalog Catalog) MoveFieldToStart(dbName, tableName, fieldName string) (Catalog, error) {
 	return catalog.moveField(dbName, tableName, fieldName, 0)
 }

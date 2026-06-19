@@ -1073,39 +1073,68 @@ func (server *Server) handleUpdateTableMetadata(w http.ResponseWriter, r *http.R
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	resource := dbName + "." + tableName
-	if tableMeta.Fields != nil {
-		if _, ok := server.requireAuthorized(w, r, actorID, accessRequest{
-			Action:   accessWriteFieldSet,
-			Database: dbName,
-			Table:    tableName,
-		}); !ok {
-			return
-		}
+	existingTable, ok := server.catalogSnapshot().Table(dbName, tableName)
+	if !ok {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("table %s.%s not found", dbName, tableName))
+		return
 	}
-	if tableMeta.Views != nil {
-		if _, ok := server.requireAuthorized(w, r, actorID, accessRequest{
-			Action:   accessWriteViewSet,
-			Database: dbName,
-			Table:    tableName,
-		}); !ok {
-			return
-		}
+	perms, err := server.system.EffectiveGrantsForSubject(r.Context(), actorID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
 	}
-	if tableMeta.Fields == nil && tableMeta.Views == nil {
-		if _, ok := server.catalogSnapshot().Table(dbName, tableName); !ok {
-			writeError(w, http.StatusBadRequest, fmt.Errorf("table %s not found", resource))
-			return
-		}
+	if tableMeta.Fields != nil && !server.authorizeFieldMetadataPatch(w, actorID, dbName, tableName, perms, existingTable, tableMeta.Fields) {
+		return
+	}
+	if tableMeta.Views != nil && !server.authorizeViewMetadataPatch(w, actorID, dbName, tableName, perms, existingTable, tableMeta.Views) {
+		return
 	}
 	if tableMeta.Name == "" {
 		tableMeta.Name = tableName
 	}
-	if err := server.updateTable(r.Context(), dbName, tableName, tableMeta); err != nil {
+	updated, err := server.updateTable(r.Context(), dbName, tableName, tableMeta)
+	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, tableMeta)
+	writeJSON(w, http.StatusOK, visibleTableMetadata(perms, actorID, dbName, updated))
+}
+
+func (server *Server) authorizeFieldMetadataPatch(w http.ResponseWriter, actorID, dbName, tableName string, perms permission.Set, existing metadata.Table, fields []metadata.Field) bool {
+	resource := dbName + "." + tableName
+	if !perms.CanWriteResource(actorID, permission.ScopeDatabase, dbName) &&
+		!perms.CanWriteResource(actorID, permission.ScopeFieldSet, resource) {
+		writeError(w, http.StatusForbidden, table.ErrPermissionDenied)
+		return false
+	}
+	dbWrite := perms.CanWriteResource(actorID, permission.ScopeDatabase, dbName)
+	for _, field := range fields {
+		existingField, ok := existing.Field(field.Name)
+		if ok && !existingField.Deleted && field.Deleted && !dbWrite {
+			writeError(w, http.StatusForbidden, fmt.Errorf("delete field %q requires database write permission", field.Name))
+			return false
+		}
+	}
+	return true
+}
+
+func (server *Server) authorizeViewMetadataPatch(w http.ResponseWriter, actorID, dbName, tableName string, perms permission.Set, existing metadata.Table, views []metadata.View) bool {
+	resource := dbName + "." + tableName
+	if perms.CanWriteResource(actorID, permission.ScopeDatabase, dbName) ||
+		perms.CanWriteResource(actorID, permission.ScopeViewSet, resource) {
+		return true
+	}
+	for _, view := range views {
+		if _, ok := existing.View(view.Name); !ok {
+			writeError(w, http.StatusForbidden, fmt.Errorf("create view %q requires view set write permission", view.Name))
+			return false
+		}
+		if !perms.CanWriteView(actorID, resource, view.Name) {
+			writeError(w, http.StatusForbidden, table.ErrPermissionDenied)
+			return false
+		}
+	}
+	return true
 }
 
 func (server *Server) handleGetWorkflow(w http.ResponseWriter, r *http.Request) {
@@ -2093,24 +2122,25 @@ func (server *Server) addTable(ctx context.Context, dbName string, tableMeta met
 	return nil
 }
 
-func (server *Server) updateTable(ctx context.Context, dbName, tableName string, tableMeta metadata.Table) error {
+func (server *Server) updateTable(ctx context.Context, dbName, tableName string, tableMeta metadata.Table) (metadata.Table, error) {
 	if server.metadataPath == "" {
-		return errors.New("metadata writes are not configured")
+		return metadata.Table{}, errors.New("metadata writes are not configured")
 	}
 	server.catalogMu.Lock()
 	defer server.catalogMu.Unlock()
-	next, err := server.catalog.UpdateTable(dbName, tableName, tableMeta)
+	next, err := server.catalog.MergeTable(dbName, tableName, tableMeta)
 	if err != nil {
-		return err
+		return metadata.Table{}, err
 	}
 	if err := server.tables.SyncTable(ctx, next, dbName, tableName); err != nil {
-		return err
+		return metadata.Table{}, err
 	}
 	if err := metadata.Save(server.metadataPath, next); err != nil {
-		return err
+		return metadata.Table{}, err
 	}
 	server.catalog = next
-	return nil
+	updated, _ := next.Table(dbName, tableName)
+	return updated, nil
 }
 
 func (server *Server) moveField(ctx context.Context, dbName, tableName, fieldName string, request fieldPositionRequest) (metadata.Table, error) {

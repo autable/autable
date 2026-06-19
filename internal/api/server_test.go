@@ -855,6 +855,14 @@ func TestTableOwnerCanUpdateFieldsAndViews(t *testing.T) {
 	server, system, metadataPath := newTestServerWithMetadataFile(t, catalog)
 	if err := system.SaveGrant(ctx, permission.Grant{
 		SubjectID: "owner",
+		Scope:     permission.ScopeDatabase,
+		Resource:  "workspace",
+		Level:     permission.Write,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := system.SaveGrant(ctx, permission.Grant{
+		SubjectID: "owner",
 		Scope:     permission.ScopeFieldSet,
 		Resource:  "workspace.contacts",
 		Level:     permission.Write,
@@ -910,6 +918,137 @@ func TestTableOwnerCanUpdateFieldsAndViews(t *testing.T) {
 	}
 	if resolved.Query == nil || len(resolved.Query.Rules) != 1 || len(resolved.Sorts) != 1 {
 		t.Fatalf("expected composed based view, got %#v", resolved)
+	}
+}
+
+func TestTableMetadataUpdatePreservesOmittedFieldsAndViews(t *testing.T) {
+	catalog := metadata.Catalog{Databases: []metadata.Database{{
+		Name:       "workspace",
+		SQLitePath: "./data/workspace.sqlite",
+		Tables: []metadata.Table{{
+			Name: "contacts",
+			Fields: []metadata.Field{
+				{Name: "name", Type: "string"},
+				{Name: "email", Type: "string"},
+				{Name: "hidden_notes", Type: "string"},
+			},
+			Views: []metadata.View{
+				{Name: "all"},
+				{Name: "hidden-view", Query: &metadata.ViewQuery{Combinator: "and", Rules: []metadata.ViewQueryRule{{Field: "hidden_notes", Operator: "notNull"}}}},
+			},
+		}},
+	}}}
+	server, system, metadataPath := newTestServerWithMetadataFile(t, catalog)
+	saveTestGrants(t, system,
+		permission.Grant{SubjectID: "editor", Scope: permission.ScopeFieldSet, Resource: "workspace.contacts", Level: permission.Write},
+		permission.Grant{SubjectID: "editor", Scope: permission.ScopeViewSet, Resource: "workspace.contacts", Level: permission.Write},
+	)
+
+	request := httptest.NewRequest(http.MethodPut, "/api/databases/workspace/tables/contacts", bytes.NewBufferString(`{
+		"name":"contacts",
+		"fields":[
+			{"name":"name","type":"string"},
+			{"name":"phone","type":"string"}
+		],
+		"views":[
+			{"name":"all","sorts":[{"field":"name","direction":"asc"}]}
+		]
+	}`))
+	request.AddCookie(testSessionCookie(t, system, "editor"))
+	recorder := httptest.NewRecorder()
+	server.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected table metadata update 200, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+
+	loaded, err := metadata.Load(metadataPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tableMeta, ok := loaded.Table("workspace", "contacts")
+	if !ok {
+		t.Fatal("expected contacts table")
+	}
+	if _, ok := tableMeta.Field("email"); !ok {
+		t.Fatalf("omitted email field was removed: %#v", tableMeta.Fields)
+	}
+	if _, ok := tableMeta.Field("hidden_notes"); !ok {
+		t.Fatalf("omitted hidden field was removed: %#v", tableMeta.Fields)
+	}
+	if _, ok := tableMeta.Field("phone"); !ok {
+		t.Fatalf("expected new phone field, got %#v", tableMeta.Fields)
+	}
+	if _, ok := tableMeta.View("hidden-view"); !ok {
+		t.Fatalf("omitted view was removed: %#v", tableMeta.Views)
+	}
+}
+
+func TestFieldSetWriterCannotDeleteField(t *testing.T) {
+	catalog := metadata.Catalog{Databases: []metadata.Database{{
+		Name:       "workspace",
+		SQLitePath: "./data/workspace.sqlite",
+		Tables: []metadata.Table{{
+			Name:   "contacts",
+			Fields: []metadata.Field{{Name: "name", Type: "string"}, {Name: "status", Type: "string"}},
+		}},
+	}}}
+	server, system, _ := newTestServerWithMetadataFile(t, catalog)
+	saveTestGrants(t, system, permission.Grant{SubjectID: "editor", Scope: permission.ScopeFieldSet, Resource: "workspace.contacts", Level: permission.Write})
+
+	request := httptest.NewRequest(http.MethodPut, "/api/databases/workspace/tables/contacts", bytes.NewBufferString(`{
+		"name":"contacts",
+		"fields":[{"name":"status","type":"string","deleted":true}]
+	}`))
+	request.AddCookie(testSessionCookie(t, system, "editor"))
+	recorder := httptest.NewRecorder()
+	server.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusForbidden {
+		t.Fatalf("expected field delete 403, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestViewWriterCanUpdateOnlyGrantedExistingView(t *testing.T) {
+	catalog := metadata.Catalog{Databases: []metadata.Database{{
+		Name:       "workspace",
+		SQLitePath: "./data/workspace.sqlite",
+		Tables: []metadata.Table{{
+			Name:   "contacts",
+			Fields: []metadata.Field{{Name: "name", Type: "string"}, {Name: "status", Type: "string"}},
+			Views:  []metadata.View{{Name: "active"}},
+		}},
+	}}}
+	server, system, metadataPath := newTestServerWithMetadataFile(t, catalog)
+	saveTestGrants(t, system, permission.Grant{SubjectID: "editor", Scope: permission.ScopeView, Resource: "workspace.contacts", Field: "active", Level: permission.Write})
+
+	updateExisting := httptest.NewRequest(http.MethodPut, "/api/databases/workspace/tables/contacts", bytes.NewBufferString(`{
+		"name":"contacts",
+		"views":[{"name":"active","query":{"combinator":"and","rules":[{"field":"status","operator":"=","value":"active"}]}}]
+	}`))
+	updateExisting.AddCookie(testSessionCookie(t, system, "editor"))
+	updateRecorder := httptest.NewRecorder()
+	server.ServeHTTP(updateRecorder, updateExisting)
+	if updateRecorder.Code != http.StatusOK {
+		t.Fatalf("expected view update 200, got %d: %s", updateRecorder.Code, updateRecorder.Body.String())
+	}
+	loaded, err := metadata.Load(metadataPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tableMeta, _ := loaded.Table("workspace", "contacts")
+	active, _ := tableMeta.View("active")
+	if active.Query == nil || len(active.Query.Rules) != 1 {
+		t.Fatalf("expected active view query update, got %#v", active)
+	}
+
+	createView := httptest.NewRequest(http.MethodPut, "/api/databases/workspace/tables/contacts", bytes.NewBufferString(`{
+		"name":"contacts",
+		"views":[{"name":"new-view"}]
+	}`))
+	createView.AddCookie(testSessionCookie(t, system, "editor"))
+	createRecorder := httptest.NewRecorder()
+	server.ServeHTTP(createRecorder, createView)
+	if createRecorder.Code != http.StatusForbidden {
+		t.Fatalf("expected view create 403, got %d: %s", createRecorder.Code, createRecorder.Body.String())
 	}
 }
 
