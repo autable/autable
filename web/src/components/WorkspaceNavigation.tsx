@@ -86,7 +86,7 @@ type WorkspaceNavigationProps = {
   onNewTableNameChange: (value: string) => void;
   onNewWorkflowNameChange: (value: string) => void;
   onOpenLogin: () => void;
-  onOpenTableViewPanel: (tableName: string) => void;
+  onCreateTableView: (tableName: string, viewName: string) => void;
   onSelectDatabaseSection: (databaseName: string, view: WorkspaceView) => void;
   onSelectFormID: (id: number) => void;
   onSelectRoleName: (name: string) => void;
@@ -131,7 +131,7 @@ export function WorkspaceNavigation({
   onNewTableNameChange,
   onNewWorkflowNameChange,
   onOpenLogin,
-  onOpenTableViewPanel,
+  onCreateTableView,
   onSelectDatabaseSection,
   onSelectFormID,
   onSelectRoleName,
@@ -261,7 +261,7 @@ export function WorkspaceNavigation({
                 onNewTableNameChange={onNewTableNameChange}
                 onSelectTable={onSelectTable}
                 onSelectTableView={onSelectTableView}
-              onOpenTableViewPanel={onOpenTableViewPanel}
+                onCreateTableView={onCreateTableView}
                 newTableName={newTableName}
                 selectedTableView={selectedTableView}
                 table={table}
@@ -545,13 +545,20 @@ function TableNav(props: {
   newTableName: string;
   onCreateTable: () => void;
   onNewTableNameChange: (value: string) => void;
-  onOpenTableViewPanel: (tableName: string) => void;
+  onCreateTableView: (tableName: string, viewName: string) => void;
   onSelectTable: (name: string) => void;
   onSelectTableView: (name: string) => void;
   selectedTableView: string;
   table: TableMetadata;
 }) {
   const { t } = useTranslation();
+  const [newViewNames, setNewViewNames] = useState<Record<string, string>>({});
+  function newViewName(tableName: string) {
+    return newViewNames[tableName] ?? "";
+  }
+  function setNewViewName(tableName: string, value: string) {
+    setNewViewNames((current) => ({ ...current, [tableName]: value }));
+  }
   return (
     <>
       <div className="list-heading">
@@ -589,10 +596,6 @@ function TableNav(props: {
           if (action === "view") {
             props.onSelectTableView(viewName || "all");
           }
-          if (action === "add-view") {
-            props.onSelectTableView("all");
-            props.onOpenTableViewPanel(tableName);
-          }
         }}
       >
         {props.database.tables.map((item) => (
@@ -606,7 +609,23 @@ function TableNav(props: {
                 </NavSubItem>
               ))}
               {(item.view_permission_level ?? item.permission_level ?? 2) >= 2 && (
-                <NavSubItem value={`${item.name}:add-view`}>{t("nav.view")}</NavSubItem>
+                <div className="nav-create-subitem">
+                  <CreateNamePopover
+                    ariaLabel={t("nav.createView")}
+                    buttonLabel={t("nav.createView")}
+                    buttonText={t("nav.view")}
+                    hideIcon
+                    inputLabel={t("nav.newViewName")}
+                    name={newViewName(item.name)}
+                    onNameChange={(value) => setNewViewName(item.name, value)}
+                    onSave={() => {
+                      props.onSelectTable(item.name);
+                      props.onCreateTableView(item.name, newViewName(item.name));
+                      setNewViewName(item.name, "");
+                    }}
+                    placeholder={t("nav.placeholderView")}
+                  />
+                </div>
               )}
             </NavSubItemGroup>
           </NavCategory>
@@ -619,6 +638,8 @@ function TableNav(props: {
 function CreateNamePopover({
   ariaLabel,
   buttonLabel,
+  buttonText,
+  hideIcon,
   disabled,
   inputLabel,
   name,
@@ -628,6 +649,8 @@ function CreateNamePopover({
 }: {
   ariaLabel: string;
   buttonLabel: string;
+  buttonText?: string;
+  hideIcon?: boolean;
   disabled?: boolean;
   inputLabel: string;
   name: string;
@@ -640,7 +663,9 @@ function CreateNamePopover({
   return (
     <Popover open={open} onOpenChange={(_, data) => setOpen(data.open)} positioning="below-end" withArrow>
       <PopoverTrigger disableButtonEnhancement>
-        <Button appearance="subtle" icon={<AddRegular />} aria-label={ariaLabel} disabled={disabled} />
+        <Button appearance="subtle" icon={hideIcon ? undefined : <AddRegular />} aria-label={ariaLabel} disabled={disabled}>
+          {buttonText}
+        </Button>
       </PopoverTrigger>
       <PopoverSurface className="create-name-popover" aria-label={buttonLabel}>
         <FluentField label={inputLabel}>

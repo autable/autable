@@ -368,6 +368,42 @@ describe("App", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: /projects/ })).toBeInTheDocument());
   });
 
+  it("creates a named table view from the sidebar", async () => {
+    let metadata = catalogFixture;
+    let savedTable: unknown;
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url === "/api/metadata") {
+        return jsonResponse(metadata);
+      }
+      if (url === "/api/databases/workspace/tables/contacts" && init?.method === "PUT") {
+        savedTable = JSON.parse(String(init.body));
+        metadata = {
+          databases: [
+            {
+              ...catalogFixture.databases[0],
+              tables: [savedTable as typeof catalogFixture.databases[number]["tables"][number]]
+            }
+          ]
+        };
+        return jsonResponse(savedTable);
+      }
+      return defaultFetch(input, init);
+    });
+
+    renderApp();
+    await screen.findByRole("button", { name: authUserFixture.email });
+    await userEvent.click(screen.getByRole("button", { name: "Create View" }));
+    await userEvent.type(screen.getByRole("textbox", { name: "New view name" }), "Needs Review");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(screen.getByText("Created view Needs Review")).toBeInTheDocument());
+    expect(savedTable).toMatchObject({
+      views: expect.arrayContaining([{ name: "Needs Review", display_name: "Needs Review", sorts: [] }])
+    });
+    expect(screen.getAllByText("Needs Review").length).toBeGreaterThan(0);
+  });
+
   it("loads row history for the selected table record", async () => {
     vi.mocked(fetch).mockImplementation(async (input, init) => {
       const url = String(input);

@@ -177,6 +177,15 @@ select {
   width: 260px;
 }
 
+.nav-create-subitem {
+  padding-left: 28px;
+}
+
+.nav-create-subitem .fui-Button {
+  justify-content: flex-start;
+  width: 100%;
+}
+
 .popover-actions {
   display: flex;
   justify-content: flex-end;

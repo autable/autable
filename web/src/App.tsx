@@ -22,6 +22,7 @@ import {
   logout,
   oidcStartURL,
   register,
+  updateTableMetadata,
   type AuthUser,
   type Catalog,
   type DatabaseMetadata,
@@ -340,16 +341,39 @@ function WorkspaceApp() {
     }
   }
 
-  async function openTableViewPanelFromSidebar(tableName: string) {
-    setView("table");
-    setSelectedTable(tableName);
-    setOpenViewPanelRequest((current) => current + 1);
-    if (tableName !== table.name) {
-      setSelectedTableView("all");
+  async function createTableViewFromSidebar(tableName: string, viewName: string) {
+    const name = viewName.trim();
+    if (!name) {
+      setStatus(t("status.viewNameRequired"));
+      return;
+    }
+    const targetTable = database.tables.find((item) => item.name === tableName);
+    if (!database.name || !targetTable) {
       setStatus(t("status.selectTableBeforeView"));
       return;
     }
-    await tableWorkspace.createDefaultViewFromSidebar();
+    if (name === "all" || (targetTable.views ?? []).some((viewDef) => viewDef.name === name)) {
+      setStatus(t("status.viewAlreadyExists", { name }));
+      return;
+    }
+    const nextTable = {
+      ...targetTable,
+      views: [...(targetTable.views ?? []), { name, display_name: name, sorts: [] }]
+    };
+    try {
+      await updateTableMetadata(database.name, tableName, nextTable);
+      const nextCatalog = await loadMetadata();
+      setCatalog(nextCatalog);
+      setSelectedTable(tableName);
+      setSelectedTableView(name);
+      tableWorkspace.resetRows(name);
+      setStatus(t("status.createdView", { name }));
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : t("status.tableMetadataUpdateFailed"));
+      return;
+    }
+    setView("table");
+    setOpenViewPanelRequest((current) => current + 1);
   }
 
   return (
@@ -378,7 +402,7 @@ function WorkspaceApp() {
         onNewTableNameChange={setNewTableName}
         onNewWorkflowNameChange={workflowFormWorkspace.setNewWorkflowName}
         onOpenLogin={() => setAuthDialogOpen(true)}
-        onOpenTableViewPanel={openTableViewPanelFromSidebar}
+        onCreateTableView={createTableViewFromSidebar}
         onSelectDatabaseSection={selectDatabaseSection}
         onSelectFormID={workflowFormWorkspace.setSelectedFormID}
         onSelectRoleName={permissionWorkspace.setSelectedRoleName}

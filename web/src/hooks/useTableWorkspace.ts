@@ -356,31 +356,6 @@ export function useTableWorkspace({
     return newViewSortField ? [{ field: newViewSortField, direction: newViewSortDirection }] : [];
   }
 
-  async function createDefaultViewFromSidebar() {
-    if (!databaseName || !table.name) {
-      onStatus(t("status.selectTableBeforeView"));
-      return;
-    }
-    const existingNames = new Set(["all", ...(table.views ?? []).map((viewDef) => viewDef.name)]);
-    let index = (table.views ?? []).length + 1;
-    while (existingNames.has(`view_${index}`)) {
-      index += 1;
-    }
-    const name = `view_${index}`;
-    const displayName = `View ${index}`;
-    const nextView: TableView = {
-      name,
-      display_name: displayName,
-      sorts: []
-    };
-    const nextTable = { ...table, views: [...(table.views ?? []), nextView] };
-    await persistTableMetadata(nextTable, t("status.createdView", { name: displayName }), name);
-    setNewViewBase("all");
-    setNewViewQuery(emptyViewQuery());
-    setNewViewSortField("");
-    setNewViewSortDirection("asc");
-  }
-
   async function updateSelectedViewFromCanvas() {
     const selectedView = table.views.find((viewDef) => viewDef.name === selectedTableView);
     if (!selectedView) {
@@ -506,7 +481,6 @@ export function useTableWorkspace({
     addDraftRow,
     addFieldFromCanvas,
     addSubmittedRow,
-    createDefaultViewFromSidebar,
     deleteFieldFromCanvas,
     deleteSelectedRow,
     editGridRows,
