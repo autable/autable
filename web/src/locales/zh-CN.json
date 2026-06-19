@@ -57,6 +57,7 @@
     "relationSearchPlaceholder": "搜索记录",
     "relationView": "视图：{{view}}",
     "noRelationSearchResults": "没有匹配的记录",
+    "resultDialogTitle": "结果",
     "scannerInput": "支持扫码枪/摄像头输入后自动触发",
     "selectedRecord": "记录 {{id}}",
     "unpublish": "取消发布"

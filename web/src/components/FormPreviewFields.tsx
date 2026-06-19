@@ -39,6 +39,12 @@ export function FormPreviewFields({
   tables = []
 }: FormPreviewFieldsProps) {
   const { t } = useTranslation();
+  const [resultOpen, setResultOpen] = useState(false);
+  useEffect(() => {
+    if (result !== undefined && result !== null) {
+      setResultOpen(true);
+    }
+  }, [result]);
   return (
     <>
       {elements.map((element) => {
@@ -104,7 +110,19 @@ export function FormPreviewFields({
           </Button>
         );
       })}
-      <FormResultView result={result} tables={tables} />
+      <Dialog open={resultOpen} onOpenChange={(_, data) => setResultOpen(data.open)}>
+        <DialogSurface className="form-result-dialog" style={{ width: "min(1280px, calc(100vw - 32px))", maxWidth: "none" }}>
+          <DialogBody>
+            <DialogTitle>{t("form.resultDialogTitle")}</DialogTitle>
+            <DialogContent className="form-result-content">
+              <FormResultView result={result} tables={tables} />
+            </DialogContent>
+            <DialogActions>
+              <Button type="button" onClick={() => setResultOpen(false)}>{t("common.close")}</Button>
+            </DialogActions>
+          </DialogBody>
+        </DialogSurface>
+      </Dialog>
     </>
   );
 }
@@ -141,7 +159,7 @@ function RowsResult({ rows, tables }: { rows: RowRecord[]; tables: TableMetadata
     renderCell: ({ row }) => String(row[fieldName] ?? "")
   }));
   return (
-    <div className="grid-host relation-picker-grid">
+    <div className="grid-host form-result-grid">
       <RecordDataGrid columns={columns} rows={rows.map(rowRecordToValues)} rowKeyGetter={(row) => row.ct_record_id} />
     </div>
   );

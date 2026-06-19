@@ -835,6 +835,25 @@ select {
   background: var(--colorNeutralBackground1);
 }
 
+.form-result-dialog {
+  width: min(1280px, calc(100vw - 32px));
+  max-width: none;
+}
+
+.form-result-content {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: min(760px, calc(100vh - 180px));
+  min-height: 0;
+}
+
+.form-result-grid {
+  width: 100%;
+  height: min(640px, calc(100vh - 260px));
+  min-height: 360px;
+}
+
 .relation-input {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto;

@@ -57,6 +57,7 @@
     "relationSearchPlaceholder": "Search records",
     "relationView": "View: {{view}}",
     "noRelationSearchResults": "No matching records",
+    "resultDialogTitle": "Result",
     "scannerInput": "Scanner input triggers automatically",
     "selectedRecord": "Record {{id}}",
     "unpublish": "Unpublish"
