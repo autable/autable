@@ -28,6 +28,10 @@ import {
   HistoryRegular,
   MoreHorizontalRegular,
   SaveRegular,
+  TriangleDownFilled,
+  TriangleDownRegular,
+  TriangleUpFilled,
+  TriangleUpRegular,
 } from "@fluentui/react-icons";
 import { type CellSelectArgs, type Column, type RowsChangeData } from "react-data-grid";
 import { useEffect, useMemo, useState } from "react";
@@ -56,6 +60,7 @@ type TableWorkspaceProps = {
   onNewViewQueryChange: (value: TableViewQuery) => void;
   onNewViewSortDirectionChange: (value: TableViewSort["direction"]) => void;
   onNewViewSortFieldChange: (value: string) => void;
+  onTemporarySortChange: (value?: TableViewSort) => void;
   onMoveFieldPosition: (sourceFieldName: string, targetFieldName: string) => void | Promise<void>;
   onSelectGridCell: (args: CellSelectArgs<TableGridRow>) => void;
   onSelectRecordID: (recordID: number) => void;
@@ -81,6 +86,7 @@ type TableWorkspaceProps = {
   selectedTableView: string;
   table: TableMetadata;
   tables: TableMetadata[];
+  temporarySort?: TableViewSort;
 };
 
 export function TableWorkspace({
@@ -102,6 +108,7 @@ export function TableWorkspace({
   onNewViewQueryChange,
   onNewViewSortDirectionChange,
   onNewViewSortFieldChange,
+  onTemporarySortChange,
   onMoveFieldPosition,
   onSelectGridCell,
   onSelectRecordID,
@@ -126,7 +133,8 @@ export function TableWorkspace({
   selectedRowDraft,
   selectedTableView,
   table,
-  tables
+  tables,
+  temporarySort
 }: TableWorkspaceProps) {
   const { t } = useTranslation();
   const activeFields = table.fields.filter((field) => !field.deleted);
@@ -198,6 +206,10 @@ export function TableWorkspace({
                   formula: targetField.formula ?? ""
                 })
               }
+              onSort={(fieldName, direction) =>
+                onTemporarySortChange(direction ? { field: fieldName, direction } : undefined)
+              }
+              sortDirection={temporarySort?.field === field.name ? temporarySort.direction : undefined}
             />
           )
         } satisfies Column<TableGridRow>;
@@ -244,7 +256,9 @@ export function TableWorkspace({
       onNewFieldNameChange,
       onNewFieldTypeChange,
       onNewFormulaValueTypeChange,
-      onNewRelationTableChange
+      onNewRelationTableChange,
+      onTemporarySortChange,
+      temporarySort
     ]
   );
 
@@ -606,18 +620,42 @@ function FieldHeader({
   canWriteFields,
   field,
   onDeleteField,
-  onEditFormula
+  onEditFormula,
+  onSort,
+  sortDirection
 }: {
   canDeleteField: boolean;
   canWriteFields: boolean;
   field: Field;
   onDeleteField: (fieldName: string) => void;
   onEditFormula: (field: Field, point: { x: number; y: number }) => void;
+  onSort: (fieldName: string, direction?: TableViewSort["direction"]) => void;
+  sortDirection?: TableViewSort["direction"];
 }) {
   const { t } = useTranslation();
+  const nextSortDirection = sortDirection === "desc" ? "asc" : sortDirection === "asc" ? undefined : "desc";
+  const SortUpIcon = sortDirection === "asc" ? TriangleUpFilled : TriangleUpRegular;
+  const SortDownIcon = sortDirection === "desc" ? TriangleDownFilled : TriangleDownRegular;
   return (
     <div className="field-header">
       <span className="field-header-name">{field.name}</span>
+      <button
+        type="button"
+        className={`field-header-sort-button${sortDirection ? " is-active" : ""}`}
+        aria-label={t("table.toggleSort", { name: field.name })}
+        aria-pressed={Boolean(sortDirection)}
+        title={t("table.toggleSort", { name: field.name })}
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          onSort(field.name, nextSortDirection);
+        }}
+      >
+        <span className="field-header-sort-icons">
+          <SortUpIcon className={sortDirection === "asc" ? "is-active" : ""} />
+          <SortDownIcon className={sortDirection === "desc" ? "is-active" : ""} />
+        </span>
+      </button>
       <Menu>
         <MenuTrigger disableButtonEnhancement>
           <button

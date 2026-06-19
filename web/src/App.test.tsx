@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { FluentProvider, webLightTheme } from "@fluentui/react-components";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
+import i18n from "./i18n";
 
 const catalogFixture = {
   databases: [
@@ -176,9 +177,11 @@ async function defaultFetch(input: RequestInfo | URL, init?: RequestInit): Promi
   return jsonResponse({ error: `unhandled ${url}` }, 404);
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   vi.useRealTimers();
   vi.restoreAllMocks();
+  window.localStorage.clear();
+  await i18n.changeLanguage("en-US");
   vi.spyOn(globalThis, "fetch").mockImplementation(defaultFetch);
 });
 
@@ -197,6 +200,34 @@ describe("App", () => {
     expect(await screen.findByRole("button", { name: /^Table$/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Contacts/ })).toBeInTheDocument();
     await waitFor(() => expect(screen.getAllByText("3 of 3 records").length).toBeGreaterThan(0));
+  });
+
+  it("requests temporary table sorting from the rows API", async () => {
+    const requests: string[] = [];
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      requests.push(String(input));
+      return defaultFetch(input, init);
+    });
+
+    const user = userEvent.setup();
+    renderApp();
+    const sortButton = await screen.findByRole("button", { name: "Toggle name sort" });
+
+    await user.click(sortButton);
+    await waitFor(() =>
+      expect(requests).toContain("/api/tables/workspace/contacts/rows?sort_field=name&sort_direction=desc")
+    );
+
+    await user.click(sortButton);
+    await waitFor(() =>
+      expect(requests).toContain("/api/tables/workspace/contacts/rows?sort_field=name&sort_direction=asc")
+    );
+
+    await user.click(sortButton);
+    await waitFor(() => {
+      const rowRequests = requests.filter((url) => url.startsWith("/api/tables/workspace/contacts/rows"));
+      expect(rowRequests.at(-1)).toBe("/api/tables/workspace/contacts/rows");
+    });
   });
 
   it("does not load protected workspace resources before authentication", async () => {
@@ -506,13 +537,18 @@ describe("App", () => {
     expect(screen.getByText("Record changed")).toBeInTheDocument();
     expect(screen.getByText(/run\(info\)\.inputs/)).toBeInTheDocument();
     await userEvent.keyboard("{Escape}");
-    await userEvent.click(screen.getByRole("button", { name: "Switch language" }));
+    await act(async () => {
+      await i18n.changeLanguage("zh-CN");
+    });
     await userEvent.click(screen.getByRole("button", { name: "工作流节点" }));
-    await userEvent.click(screen.getByRole("button", { name: "dingtalk.robot.send" }));
+    expect(await screen.findByRole("dialog", { name: "工作流节点目录" })).toBeInTheDocument();
+    await userEvent.click(await screen.findByRole("button", { name: "dingtalk.robot.send" }));
     expect(screen.getByText("钉钉机器人")).toBeInTheDocument();
     expect(screen.getByText(/钉钉自定义机器人的 access token/)).toBeInTheDocument();
     await userEvent.keyboard("{Escape}");
-    await userEvent.click(screen.getByRole("button", { name: "切换语言" }));
+    await act(async () => {
+      await i18n.changeLanguage("en-US");
+    });
     await userEvent.click(screen.getByRole("button", { name: "Edit config review_echo" }));
     expect(screen.getByLabelText("Variable review_echo.CHANNEL")).toHaveValue("ops");
     expect(screen.getByLabelText("Secret review_echo.TOKEN")).toHaveValue("x".repeat(12));

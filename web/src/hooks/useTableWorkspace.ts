@@ -56,6 +56,7 @@ export function useTableWorkspace({
   const [newViewQuery, setNewViewQuery] = useState<TableViewQuery>(() => emptyViewQuery());
   const [newViewSortField, setNewViewSortField] = useState("");
   const [newViewSortDirection, setNewViewSortDirection] = useState<TableViewSort["direction"]>("asc");
+  const [temporarySort, setTemporarySort] = useState<TableViewSort | undefined>(undefined);
   const [relationRows, setRelationRows] = useState<Record<string, TableGridRow[]>>({});
   const [relationDetail, setRelationDetail] = useState<{
     field: Field;
@@ -114,6 +115,10 @@ export function useTableWorkspace({
   }, [selectedTableView, table.views]);
 
   useEffect(() => {
+    setTemporarySort(undefined);
+  }, [databaseName, table.name, selectedTableView]);
+
+  useEffect(() => {
     if (displayedRecordIDs.length === 0) {
       setSelectedRecordID(0);
       setRowHistory([]);
@@ -133,7 +138,7 @@ export function useTableWorkspace({
         cancelled = true;
       };
     }
-    void listRows(databaseName, table.name, selectedTableView)
+    void listRows(databaseName, table.name, selectedTableView, temporarySort)
       .then((nextRows) => {
         if (cancelled) {
           return;
@@ -145,7 +150,7 @@ export function useTableWorkspace({
     return () => {
       cancelled = true;
     };
-  }, [currentUserID, databaseName, table.name, selectedTableView]);
+  }, [currentUserID, databaseName, table.name, selectedTableView, temporarySort]);
 
   useEffect(() => {
     let cancelled = false;
@@ -274,7 +279,15 @@ export function useTableWorkspace({
     try {
       await updateTableMetadata(databaseName, table.name, nextTable);
       const nextCatalog = await loadMetadata();
-      const nextRows = await listRows(databaseName, nextTable.name, nextViewName);
+      const nextTemporarySort = nextTable.fields.some(
+        (field) => !field.deleted && field.name === temporarySort?.field
+      )
+        ? temporarySort
+        : undefined;
+      if (temporarySort && !nextTemporarySort) {
+        setTemporarySort(undefined);
+      }
+      const nextRows = await listRows(databaseName, nextTable.name, nextViewName, nextTemporarySort);
       onCatalogChanged(nextCatalog, nextTable.name, nextViewName);
       setRows(nextRows.map(rowRecordToValues));
       setRowsViewName(nextViewName);
@@ -482,6 +495,7 @@ export function useTableWorkspace({
     rows,
     selectedRecordID,
     selectedRowDraft,
+    temporarySort,
     addDraftRow,
     addFieldFromCanvas,
     addSubmittedRow,
@@ -502,6 +516,7 @@ export function useTableWorkspace({
     setNewViewSortDirection,
     setNewViewSortField,
     setSelectedRecordID,
+    setTemporarySort,
     selectGridCell,
     updateSelectedViewFromCanvas,
     updateFieldFormulaFromCanvas,

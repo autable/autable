@@ -1888,6 +1888,44 @@ func TestListRowsAPIAppliesView(t *testing.T) {
 		t.Fatalf("unexpected view order: %#v", rows)
 	}
 
+	viewSortOverride := httptest.NewRequest(http.MethodGet, "/api/tables/db/contacts/rows?view=active-a&sort_field=name&sort_direction=asc", nil)
+	viewSortOverride.AddCookie(testSessionCookie(t, system, "u1"))
+	viewSortOverrideRecorder := httptest.NewRecorder()
+	server.ServeHTTP(viewSortOverrideRecorder, viewSortOverride)
+	if viewSortOverrideRecorder.Code != http.StatusOK {
+		t.Fatalf("expected view temporary sort 200, got %d: %s", viewSortOverrideRecorder.Code, viewSortOverrideRecorder.Body.String())
+	}
+	var overrideRows []rowResponse
+	if err := json.NewDecoder(viewSortOverrideRecorder.Body).Decode(&overrideRows); err != nil {
+		t.Fatal(err)
+	}
+	if len(overrideRows) != 2 || overrideRows[0].Values["name"] != "Ada" || overrideRows[1].Values["name"] != "Grace" {
+		t.Fatalf("temporary sort did not override view sort: %#v", overrideRows)
+	}
+
+	sortRequest := httptest.NewRequest(http.MethodGet, "/api/tables/db/contacts/rows?sort_field=name&sort_direction=asc", nil)
+	sortRequest.AddCookie(testSessionCookie(t, system, "u1"))
+	sortRecorder := httptest.NewRecorder()
+	server.ServeHTTP(sortRecorder, sortRequest)
+	if sortRecorder.Code != http.StatusOK {
+		t.Fatalf("expected temporary sort 200, got %d: %s", sortRecorder.Code, sortRecorder.Body.String())
+	}
+	var sortedRows []rowResponse
+	if err := json.NewDecoder(sortRecorder.Body).Decode(&sortedRows); err != nil {
+		t.Fatal(err)
+	}
+	if len(sortedRows) != 3 || sortedRows[0].Values["name"] != "Ada" || sortedRows[1].Values["name"] != "Grace" || sortedRows[2].Values["name"] != "Linus" {
+		t.Fatalf("unexpected temporary sort order: %#v", sortedRows)
+	}
+
+	invalidSort := httptest.NewRequest(http.MethodGet, "/api/tables/db/contacts/rows?sort_field=name&sort_direction=sideways", nil)
+	invalidSort.AddCookie(testSessionCookie(t, system, "u1"))
+	invalidRecorder := httptest.NewRecorder()
+	server.ServeHTTP(invalidRecorder, invalidSort)
+	if invalidRecorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected invalid temporary sort 400, got %d: %s", invalidRecorder.Code, invalidRecorder.Body.String())
+	}
+
 	if err := system.SaveGrant(ctx, permission.Grant{
 		SubjectID: "reader",
 		Scope:     permission.ScopeField,
@@ -1903,6 +1941,14 @@ func TestListRowsAPIAppliesView(t *testing.T) {
 	server.ServeHTTP(deniedRecorder, deniedView)
 	if deniedRecorder.Code != http.StatusForbidden {
 		t.Fatalf("expected unreadable view 403, got %d: %s", deniedRecorder.Code, deniedRecorder.Body.String())
+	}
+
+	deniedSort := httptest.NewRequest(http.MethodGet, "/api/tables/db/contacts/rows?sort_field=status&sort_direction=desc", nil)
+	deniedSort.AddCookie(testSessionCookie(t, system, "reader"))
+	deniedSortRecorder := httptest.NewRecorder()
+	server.ServeHTTP(deniedSortRecorder, deniedSort)
+	if deniedSortRecorder.Code != http.StatusForbidden {
+		t.Fatalf("expected unreadable temporary sort 403, got %d: %s", deniedSortRecorder.Code, deniedSortRecorder.Body.String())
 	}
 }
 

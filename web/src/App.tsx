@@ -480,6 +480,7 @@ function WorkspaceApp() {
               onNewViewQueryChange={tableWorkspace.setNewViewQuery}
               onNewViewSortDirectionChange={tableWorkspace.setNewViewSortDirection}
               onNewViewSortFieldChange={tableWorkspace.setNewViewSortField}
+              onTemporarySortChange={tableWorkspace.setTemporarySort}
               onMoveFieldPosition={tableWorkspace.moveFieldPosition}
               onRowsChange={tableWorkspace.editGridRows}
               onSelectGridCell={tableWorkspace.selectGridCell}
@@ -497,6 +498,7 @@ function WorkspaceApp() {
               selectedTableView={selectedTableView}
               table={table}
               tables={database.tables}
+              temporarySort={tableWorkspace.temporarySort}
               openViewPanelRequest={openViewPanelRequest}
             />
           )}

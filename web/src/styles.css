@@ -430,9 +430,54 @@ select {
 }
 
 .field-header-name {
+  flex: 1 1 auto;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.field-header-sort-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  color: var(--colorNeutralForeground3);
+  background: transparent;
+  cursor: pointer;
+}
+
+.field-header-sort-button:hover {
+  color: var(--colorNeutralForeground1);
+  background: var(--colorNeutralBackground1Hover);
+}
+
+.field-header-sort-button.is-active {
+  color: var(--colorBrandForeground1);
+  background: var(--colorBrandBackground2);
+}
+
+.field-header-sort-icons {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+.field-header-sort-icons svg {
+  width: 10px;
+  height: 10px;
+  margin-block: -1px;
+}
+
+.field-header-sort-icons svg.is-active {
+  color: var(--colorBrandForeground1);
 }
 
 .field-header-menu-button {

@@ -312,10 +312,19 @@ export async function deleteRow(dbName: string, tableName: string, recordID: num
 export async function listRows(
   dbName: string,
   tableName: string,
-  viewName?: string
+  viewName?: string,
+  sort?: TableViewSort
 ): Promise<RowRecord[]> {
-  const query = viewName && viewName !== "all" ? `?view=${encodeURIComponent(viewName)}` : "";
-  const response = await fetch(`/api/tables/${dbName}/${tableName}/rows${query}`);
+  const params = new URLSearchParams();
+  if (viewName && viewName !== "all") {
+    params.set("view", viewName);
+  }
+  if (sort) {
+    params.set("sort_field", sort.field);
+    params.set("sort_direction", sort.direction);
+  }
+  const query = params.toString();
+  const response = await fetch(`/api/tables/${dbName}/${tableName}/rows${query ? `?${query}` : ""}`);
   if (!response.ok) {
     const error = await response.json().catch(() => ({ error: response.statusText }));
     throw new Error(error.error ?? `row list failed: ${response.status}`);

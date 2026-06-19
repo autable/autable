@@ -718,7 +718,12 @@ func (server *Server) handleListRows(w http.ResponseWriter, r *http.Request, dbN
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	rows, err := server.tables.Rows(r.Context(), server.catalogSnapshot(), perms, actorID, isOwner, dbName, tableName, r.URL.Query().Get("view"))
+	temporarySorts, err := parseTemporaryRowSorts(r.URL.Query())
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	rows, err := server.tables.Rows(r.Context(), server.catalogSnapshot(), perms, actorID, isOwner, dbName, tableName, r.URL.Query().Get("view"), temporarySorts...)
 	if err != nil {
 		status := http.StatusBadRequest
 		if errors.Is(err, table.ErrPermissionDenied) {
@@ -732,6 +737,21 @@ func (server *Server) handleListRows(w http.ResponseWriter, r *http.Request, dbN
 		response = append(response, rowResponse{RecordID: row.RecordID, Values: row.Values})
 	}
 	writeJSON(w, http.StatusOK, response)
+}
+
+func parseTemporaryRowSorts(query url.Values) ([]metadata.ViewSort, error) {
+	sortField := query.Get("sort_field")
+	sortDirection := query.Get("sort_direction")
+	if sortField == "" && sortDirection == "" {
+		return nil, nil
+	}
+	if sortField == "" || sortDirection == "" {
+		return nil, errors.New("sort_field and sort_direction are required together")
+	}
+	if sortDirection != "asc" && sortDirection != "desc" {
+		return nil, fmt.Errorf("unsupported sort direction %q", sortDirection)
+	}
+	return []metadata.ViewSort{{Field: sortField, Direction: sortDirection}}, nil
 }
 
 func (server *Server) handleRowHistory(w http.ResponseWriter, r *http.Request) {

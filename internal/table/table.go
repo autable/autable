@@ -193,11 +193,12 @@ func (service *Service) DeleteRow(ctx context.Context, catalog metadata.Catalog,
 	return row, nil
 }
 
-func (service *Service) Rows(ctx context.Context, catalog metadata.Catalog, perms permission.Set, actorID string, isDatabaseOwner bool, dbName, tableName, viewName string) ([]Row, error) {
+func (service *Service) Rows(ctx context.Context, catalog metadata.Catalog, perms permission.Set, actorID string, isDatabaseOwner bool, dbName, tableName, viewName string, temporarySorts ...metadata.ViewSort) ([]Row, error) {
 	tableMeta, ok := catalog.Table(dbName, tableName)
 	if !ok {
 		return nil, fmt.Errorf("table %s.%s not found", dbName, tableName)
 	}
+	resource := dbName + "." + tableName
 
 	var resolved metadata.ResolvedView
 	if viewName != "" {
@@ -206,7 +207,6 @@ func (service *Service) Rows(ctx context.Context, catalog metadata.Catalog, perm
 		if err != nil {
 			return nil, err
 		}
-		resource := dbName + "." + tableName
 		if !perms.CanReadView(actorID, resource, viewName) && !isDatabaseOwner {
 			return nil, fmt.Errorf("%w: view %s", ErrPermissionDenied, viewName)
 		}
@@ -214,12 +214,26 @@ func (service *Service) Rows(ctx context.Context, catalog metadata.Catalog, perm
 			return nil, fmt.Errorf("%w: view %s", ErrPermissionDenied, viewName)
 		}
 	}
+	if len(temporarySorts) > 0 {
+		for _, sortDef := range temporarySorts {
+			field, ok := tableMeta.Field(sortDef.Field)
+			if !ok || field.Deleted {
+				return nil, fmt.Errorf("unknown temporary sort field %q", sortDef.Field)
+			}
+			if sortDef.Direction != "asc" && sortDef.Direction != "desc" {
+				return nil, fmt.Errorf("unsupported temporary sort direction %q", sortDef.Direction)
+			}
+		}
+		if !isDatabaseOwner && !viewFieldsReadable(perms, actorID, resource, nil, temporarySorts) {
+			return nil, fmt.Errorf("%w: sort", ErrPermissionDenied)
+		}
+		resolved.Sorts = temporarySorts
+	}
 	rows, err := service.rows.Rows(ctx, dbName, tableMeta, resolved)
 	if err != nil {
 		return nil, err
 	}
 
-	resource := dbName + "." + tableName
 	filtered := make([]Row, 0, len(rows))
 	for _, row := range rows {
 		values := map[string]any{}
