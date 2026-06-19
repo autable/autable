@@ -87,6 +87,13 @@ type permissionGrantModel struct {
 	Level     permission.Level `gorm:"not null"`
 }
 
+type databaseOwnerModel struct {
+	DatabaseName string `gorm:"primaryKey;not null"`
+	OwnerID      string `gorm:"primaryKey;not null"`
+	CreatedAt    int64  `gorm:"autoCreateTime:milli"`
+	UpdatedAt    int64  `gorm:"autoUpdateTime:milli"`
+}
+
 type workflowModel struct {
 	ID            int64  `gorm:"primaryKey;autoIncrement"`
 	DatabaseName  string `gorm:"uniqueIndex:idx_workflow_database_name;not null"`
@@ -157,6 +164,7 @@ func (db *DB) Migrate(ctx context.Context) error {
 		&userModel{},
 		&sessionModel{},
 		&permissionGrantModel{},
+		&databaseOwnerModel{},
 		&workflowModel{},
 		&formModel{},
 		&roleModel{},
@@ -291,6 +299,26 @@ func (db *DB) SaveGrant(ctx context.Context, grant permission.Grant) error {
 		},
 		DoUpdates: clause.AssignmentColumns([]string{"level"}),
 	}).Create(&model).Error
+}
+
+func (db *DB) SaveDatabaseOwner(ctx context.Context, dbName, ownerID string) error {
+	model := databaseOwnerModel{DatabaseName: dbName, OwnerID: ownerID}
+	return db.orm.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "database_name"}, {Name: "owner_id"}},
+		DoNothing: true,
+	}).Create(&model).Error
+}
+
+func (db *DB) IsDatabaseOwner(ctx context.Context, userID, dbName string) (bool, error) {
+	var count int64
+	err := db.orm.WithContext(ctx).
+		Model(&databaseOwnerModel{}).
+		Where(&databaseOwnerModel{DatabaseName: dbName, OwnerID: userID}).
+		Count(&count).Error
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
 }
 
 func (db *DB) GrantsForSubject(ctx context.Context, subjectID string) (permission.Set, error) {

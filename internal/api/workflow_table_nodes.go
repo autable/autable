@@ -54,6 +54,10 @@ func (service workflowCodeTableService) runRow(ctx context.Context, kind string,
 	if err != nil {
 		return nil, err
 	}
+	isOwner, err := server.system.IsDatabaseOwner(ctx, info.CreatorID, dbName)
+	if err != nil {
+		return nil, err
+	}
 	catalog := server.catalogSnapshot()
 	switch kind {
 	case "create":
@@ -61,7 +65,7 @@ func (service workflowCodeTableService) runRow(ctx context.Context, kind string,
 		if err != nil {
 			return nil, err
 		}
-		row, err := server.tables.CreateRow(ctx, catalog, perms, info.CreatorID, dbName, tableName, values)
+		row, err := server.tables.CreateRow(ctx, catalog, perms, info.CreatorID, isOwner, dbName, tableName, values)
 		return workflowRowOutput(row, err)
 	case "update":
 		recordID, err := workflowRecordIDInput(input)
@@ -72,7 +76,7 @@ func (service workflowCodeTableService) runRow(ctx context.Context, kind string,
 		if err != nil {
 			return nil, err
 		}
-		row, err := server.tables.UpdateRow(ctx, catalog, perms, info.CreatorID, dbName, tableName, recordID, values)
+		row, err := server.tables.UpdateRow(ctx, catalog, perms, info.CreatorID, isOwner, dbName, tableName, recordID, values)
 		return workflowRowOutput(row, err)
 	case "upsert":
 		values, err := workflowValuesInput(input)
@@ -83,18 +87,18 @@ func (service workflowCodeTableService) runRow(ctx context.Context, kind string,
 		if err != nil {
 			return nil, err
 		}
-		row, operation, err := server.upsertWorkflowTableRow(ctx, catalog, perms, info.CreatorID, dbName, tableName, matchField, values)
+		row, operation, err := server.upsertWorkflowTableRow(ctx, catalog, perms, info.CreatorID, isOwner, dbName, tableName, matchField, values)
 		return workflowRowMutationOutput(row, operation, err)
 	case "delete":
 		recordID, err := workflowRecordIDInput(input)
 		if err != nil {
 			return nil, err
 		}
-		row, err := server.tables.DeleteRow(ctx, catalog, perms, info.CreatorID, dbName, tableName, recordID)
+		row, err := server.tables.DeleteRow(ctx, catalog, perms, info.CreatorID, isOwner, dbName, tableName, recordID)
 		return workflowRowOutput(row, err)
 	default:
 		viewName, _ := input["view"].(string)
-		rows, err := server.tables.Rows(ctx, catalog, perms, info.CreatorID, dbName, tableName, viewName)
+		rows, err := server.tables.Rows(ctx, catalog, perms, info.CreatorID, isOwner, dbName, tableName, viewName)
 		if err != nil {
 			return nil, err
 		}
@@ -155,7 +159,7 @@ func workflowRecordIDInput(input map[string]any) (int64, error) {
 	}
 }
 
-func (server *Server) upsertWorkflowTableRow(ctx context.Context, catalog metadata.Catalog, perms permission.Set, actorID string, dbName string, tableName string, matchField string, values map[string]any) (table.Row, string, error) {
+func (server *Server) upsertWorkflowTableRow(ctx context.Context, catalog metadata.Catalog, perms permission.Set, actorID string, isDatabaseOwner bool, dbName string, tableName string, matchField string, values map[string]any) (table.Row, string, error) {
 	tableMeta, ok := catalog.Table(dbName, tableName)
 	if !ok {
 		return table.Row{}, "", fmt.Errorf("table %s.%s not found", dbName, tableName)
@@ -168,7 +172,7 @@ func (server *Server) upsertWorkflowTableRow(ctx context.Context, catalog metada
 	if err != nil {
 		return table.Row{}, "", err
 	}
-	rows, err := server.tables.Rows(ctx, catalog, perms, actorID, dbName, tableName, "")
+	rows, err := server.tables.Rows(ctx, catalog, perms, actorID, isDatabaseOwner, dbName, tableName, "")
 	if err != nil {
 		return table.Row{}, "", err
 	}
@@ -181,11 +185,11 @@ func (server *Server) upsertWorkflowTableRow(ctx context.Context, catalog metada
 			if !changed {
 				return row, "noop", nil
 			}
-			updated, err := server.tables.UpdateRow(ctx, catalog, perms, actorID, dbName, tableName, row.RecordID, values)
+			updated, err := server.tables.UpdateRow(ctx, catalog, perms, actorID, isDatabaseOwner, dbName, tableName, row.RecordID, values)
 			return updated, "update", err
 		}
 	}
-	created, err := server.tables.CreateRow(ctx, catalog, perms, actorID, dbName, tableName, values)
+	created, err := server.tables.CreateRow(ctx, catalog, perms, actorID, isDatabaseOwner, dbName, tableName, values)
 	return created, "create", err
 }
 

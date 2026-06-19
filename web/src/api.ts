@@ -149,7 +149,7 @@ export type FormDefinition = {
 
 export type PermissionGrant = {
   subject_id: string;
-  scope: "database" | "field_set" | "field" | "view_set" | "view" | "workflow_set" | "workflow" | "form_set" | "form";
+  scope: "field_set" | "field" | "view_set" | "view" | "workflow_set" | "workflow" | "form_set" | "form";
   resource: string;
   field: string;
   level: 0 | 1 | 2;

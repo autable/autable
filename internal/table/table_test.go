@@ -34,7 +34,7 @@ func TestCreateRowAssignsRecordIDAndWritesHistory(t *testing.T) {
 		permission.Grant{SubjectID: "u1", Scope: permission.ScopeViewSet, Resource: "db.contacts", Level: permission.Write},
 	)
 
-	row, err := service.CreateRow(ctx, catalog, perms, "u1", "db", "contacts", map[string]any{
+	row, err := service.CreateRow(ctx, catalog, perms, "u1", false, "db", "contacts", map[string]any{
 		"name":  "Ada",
 		"email": "ada@example.com",
 	})
@@ -87,7 +87,7 @@ func TestCreateRowNotifiesHistoryBackedRowChange(t *testing.T) {
 		notifiedChange = change
 	})
 
-	if _, err := service.CreateRow(ctx, catalog, perms, "u1", "db", "contacts", map[string]any{"name": "Ada"}); err != nil {
+	if _, err := service.CreateRow(ctx, catalog, perms, "u1", false, "db", "contacts", map[string]any{"name": "Ada"}); err != nil {
 		t.Fatal(err)
 	}
 	if notifiedKey == "" || notifiedChange.Operation != "create" || notifiedChange.Diff["name"].New != "Ada" {
@@ -127,7 +127,7 @@ func TestCreateRowRejectsDeletedField(t *testing.T) {
 		Level:     permission.Write,
 	})
 
-	_, err := service.CreateRow(ctx, catalog, perms, "u1", "db", "contacts", map[string]any{"legacy": "x"})
+	_, err := service.CreateRow(ctx, catalog, perms, "u1", false, "db", "contacts", map[string]any{"legacy": "x"})
 	if !errors.Is(err, table.ErrDeletedField) {
 		t.Fatalf("expected deleted field error, got %v", err)
 	}
@@ -151,7 +151,7 @@ func TestCreateRowEnforcesFieldWritePermission(t *testing.T) {
 		Level:     permission.Read,
 	})
 
-	_, err := service.CreateRow(ctx, catalog, perms, "u1", "db", "contacts", map[string]any{"name": "Ada"})
+	_, err := service.CreateRow(ctx, catalog, perms, "u1", false, "db", "contacts", map[string]any{"name": "Ada"})
 	if !errors.Is(err, table.ErrPermissionDenied) {
 		t.Fatalf("expected permission error, got %v", err)
 	}
@@ -188,10 +188,10 @@ func TestCreateRowHonorsPartialFieldWriteGrant(t *testing.T) {
 		},
 	)
 
-	if _, err := service.CreateRow(ctx, catalog, perms, "u1", "db", "contacts", map[string]any{"name": "Ada"}); err != nil {
+	if _, err := service.CreateRow(ctx, catalog, perms, "u1", false, "db", "contacts", map[string]any{"name": "Ada"}); err != nil {
 		t.Fatal(err)
 	}
-	_, err := service.CreateRow(ctx, catalog, perms, "u1", "db", "contacts", map[string]any{
+	_, err := service.CreateRow(ctx, catalog, perms, "u1", false, "db", "contacts", map[string]any{
 		"name":  "Grace",
 		"email": "grace@example.com",
 	})
@@ -220,14 +220,14 @@ func TestUpdateRowMergesValuesAndWritesHistory(t *testing.T) {
 		permission.Grant{SubjectID: "u1", Scope: permission.ScopeViewSet, Resource: "db.contacts", Level: permission.Write},
 	)
 
-	row, err := service.CreateRow(ctx, catalog, perms, "u1", "db", "contacts", map[string]any{
+	row, err := service.CreateRow(ctx, catalog, perms, "u1", false, "db", "contacts", map[string]any{
 		"name":  "Ada",
 		"email": "ada@example.com",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	updated, err := service.UpdateRow(ctx, catalog, perms, "u1", "db", "contacts", row.RecordID, map[string]any{
+	updated, err := service.UpdateRow(ctx, catalog, perms, "u1", false, "db", "contacts", row.RecordID, map[string]any{
 		"email": "ada@codetable.test",
 	})
 	if err != nil {
@@ -281,16 +281,16 @@ func TestUpdateRowRejectsRecordIDAndReadOnlyField(t *testing.T) {
 		Resource:  "db.contacts",
 		Level:     permission.Read,
 	})
-	row, err := service.CreateRow(ctx, catalog, writePerms, "u1", "db", "contacts", map[string]any{"name": "Ada"})
+	row, err := service.CreateRow(ctx, catalog, writePerms, "u1", false, "db", "contacts", map[string]any{"name": "Ada"})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	_, err = service.UpdateRow(ctx, catalog, writePerms, "u1", "db", "contacts", row.RecordID, map[string]any{"ct_record_id": 99})
+	_, err = service.UpdateRow(ctx, catalog, writePerms, "u1", false, "db", "contacts", row.RecordID, map[string]any{"ct_record_id": 99})
 	if !errors.Is(err, table.ErrPermissionDenied) {
 		t.Fatalf("expected ct_record_id permission error, got %v", err)
 	}
-	_, err = service.UpdateRow(ctx, catalog, readPerms, "u1", "db", "contacts", row.RecordID, map[string]any{"name": "Grace"})
+	_, err = service.UpdateRow(ctx, catalog, readPerms, "u1", false, "db", "contacts", row.RecordID, map[string]any{"name": "Grace"})
 	if !errors.Is(err, table.ErrPermissionDenied) {
 		t.Fatalf("expected read-only permission error, got %v", err)
 	}
@@ -332,7 +332,7 @@ func TestUpdateRowHonorsPartialFieldWriteGrant(t *testing.T) {
 			Level:     permission.Read,
 		},
 	)
-	row, err := service.CreateRow(ctx, catalog, writePerms, "u1", "db", "contacts", map[string]any{
+	row, err := service.CreateRow(ctx, catalog, writePerms, "u1", false, "db", "contacts", map[string]any{
 		"name":  "Ada",
 		"email": "ada@example.com",
 	})
@@ -340,16 +340,16 @@ func TestUpdateRowHonorsPartialFieldWriteGrant(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := service.UpdateRow(ctx, catalog, fieldReadPerms, "u1", "db", "contacts", row.RecordID, map[string]any{"name": "Grace"}); err != nil {
+	if _, err := service.UpdateRow(ctx, catalog, fieldReadPerms, "u1", false, "db", "contacts", row.RecordID, map[string]any{"name": "Grace"}); err != nil {
 		t.Fatal(err)
 	}
-	_, err = service.UpdateRow(ctx, catalog, fieldReadPerms, "u1", "db", "contacts", row.RecordID, map[string]any{"email": "blocked@example.com"})
+	_, err = service.UpdateRow(ctx, catalog, fieldReadPerms, "u1", false, "db", "contacts", row.RecordID, map[string]any{"email": "blocked@example.com"})
 	if !errors.Is(err, table.ErrPermissionDenied) {
 		t.Fatalf("expected field override permission error, got %v", err)
 	}
 }
 
-func TestDeleteRowRequiresDatabaseWriteRemovesRowAndWritesHistory(t *testing.T) {
+func TestDeleteRowRequiresDatabaseOwnerRemovesRowAndWritesHistory(t *testing.T) {
 	ctx := context.Background()
 	store := history.NewMemoryStore()
 	catalog := metadata.Catalog{Databases: []metadata.Database{{
@@ -373,28 +373,21 @@ func TestDeleteRowRequiresDatabaseWriteRemovesRowAndWritesHistory(t *testing.T) 
 		Resource:  "db.contacts",
 		Level:     permission.Read,
 	})
-	deletePerms := permission.New(permission.Grant{
-		SubjectID: "u1",
-		Scope:     permission.ScopeDatabase,
-		Resource:  "db",
-		Level:     permission.Write,
-	})
-
-	row, err := service.CreateRow(ctx, catalog, writePerms, "u1", "db", "contacts", map[string]any{"name": "Ada"})
+	row, err := service.CreateRow(ctx, catalog, writePerms, "u1", false, "db", "contacts", map[string]any{"name": "Ada"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.DeleteRow(ctx, catalog, readPerms, "u1", "db", "contacts", row.RecordID); !errors.Is(err, table.ErrPermissionDenied) {
+	if _, err := service.DeleteRow(ctx, catalog, readPerms, "u1", false, "db", "contacts", row.RecordID); !errors.Is(err, table.ErrPermissionDenied) {
 		t.Fatalf("expected read-only delete permission error, got %v", err)
 	}
-	deleted, err := service.DeleteRow(ctx, catalog, deletePerms, "u1", "db", "contacts", row.RecordID)
+	deleted, err := service.DeleteRow(ctx, catalog, writePerms, "u1", true, "db", "contacts", row.RecordID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if deleted.Values["name"] != "Ada" {
 		t.Fatalf("expected deleted row values, got %#v", deleted)
 	}
-	rows, err := service.Rows(ctx, catalog, writePerms, "u1", "db", "contacts", "")
+	rows, err := service.Rows(ctx, catalog, writePerms, "u1", false, "db", "contacts", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -439,11 +432,11 @@ func TestCreateRowUsesInjectedRepository(t *testing.T) {
 		Level:     permission.Write,
 	})
 
-	first, err := service.CreateRow(ctx, catalog, perms, "u1", "db", "contacts", map[string]any{"name": "Ada"})
+	first, err := service.CreateRow(ctx, catalog, perms, "u1", false, "db", "contacts", map[string]any{"name": "Ada"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := service.CreateRow(ctx, catalog, perms, "u1", "db", "contacts", map[string]any{"name": "Grace"})
+	second, err := service.CreateRow(ctx, catalog, perms, "u1", false, "db", "contacts", map[string]any{"name": "Grace"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -458,7 +451,7 @@ func TestCreateRowRollsBackWhenHistoryWriteFails(t *testing.T) {
 	service, catalog, repository := newSQLiteService(t, failingHistoryStore{}, catalog)
 	perms := testWritePerms()
 
-	if _, err := service.CreateRow(ctx, catalog, perms, "u1", "db", "contacts", map[string]any{"name": "Ada"}); err == nil {
+	if _, err := service.CreateRow(ctx, catalog, perms, "u1", false, "db", "contacts", map[string]any{"name": "Ada"}); err == nil {
 		t.Fatal("expected history failure")
 	}
 	tableMeta, _ := catalog.Table("db", "contacts")
@@ -481,7 +474,7 @@ func TestUpdateRowDoesNotMutateWhenHistoryWriteFails(t *testing.T) {
 		catalog,
 		perms,
 		"u1",
-		"db",
+		false, "db",
 		"contacts",
 		map[string]any{"name": "Ada"},
 	)
@@ -489,7 +482,7 @@ func TestUpdateRowDoesNotMutateWhenHistoryWriteFails(t *testing.T) {
 		t.Fatal(err)
 	}
 	service := table.NewServiceWithRepository(failingHistoryStore{}, repository)
-	if _, err := service.UpdateRow(ctx, catalog, perms, "u1", "db", "contacts", row.RecordID, map[string]any{"name": "Grace"}); err == nil {
+	if _, err := service.UpdateRow(ctx, catalog, perms, "u1", false, "db", "contacts", row.RecordID, map[string]any{"name": "Grace"}); err == nil {
 		t.Fatal("expected history failure")
 	}
 	tableMeta, _ := catalog.Table("db", "contacts")
@@ -512,21 +505,15 @@ func TestDeleteRowDoesNotMutateWhenHistoryWriteFails(t *testing.T) {
 		catalog,
 		perms,
 		"u1",
-		"db",
+		false, "db",
 		"contacts",
 		map[string]any{"name": "Ada"},
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	deletePerms := permission.New(permission.Grant{
-		SubjectID: "u1",
-		Scope:     permission.ScopeDatabase,
-		Resource:  "db",
-		Level:     permission.Write,
-	})
 	service := table.NewServiceWithRepository(failingHistoryStore{}, repository)
-	if _, err := service.DeleteRow(ctx, catalog, deletePerms, "u1", "db", "contacts", row.RecordID); err == nil {
+	if _, err := service.DeleteRow(ctx, catalog, perms, "u1", true, "db", "contacts", row.RecordID); err == nil {
 		t.Fatal("expected history failure")
 	}
 	tableMeta, _ := catalog.Table("db", "contacts")
@@ -580,12 +567,12 @@ func TestRowsAppliesComposedViewQueryAndSorts(t *testing.T) {
 		{"name": "Grace", "status": "active"},
 		{"name": "Linus", "status": "archived"},
 	} {
-		if _, err := service.CreateRow(ctx, catalog, perms, "u1", "db", "contacts", values); err != nil {
+		if _, err := service.CreateRow(ctx, catalog, perms, "u1", false, "db", "contacts", values); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	rows, err := service.Rows(ctx, catalog, perms, "u1", "db", "contacts", "active-a")
+	rows, err := service.Rows(ctx, catalog, perms, "u1", false, "db", "contacts", "active-a")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -629,7 +616,7 @@ func TestFormulaFieldsAreComputedAndNotWritable(t *testing.T) {
 		permission.Grant{SubjectID: "u1", Scope: permission.ScopeViewSet, Resource: "db.contacts", Level: permission.Write},
 	)
 
-	low, err := service.CreateRow(ctx, catalog, perms, "u1", "db", "contacts", map[string]any{
+	low, err := service.CreateRow(ctx, catalog, perms, "u1", false, "db", "contacts", map[string]any{
 		"name":  "Ada",
 		"score": 4,
 	})
@@ -639,27 +626,27 @@ func TestFormulaFieldsAreComputedAndNotWritable(t *testing.T) {
 	if fmt.Sprint(low.Values["score_plus_one"]) != "5" || low.Values["score_band"] != "low" || low.Values["row_label"] != "row-1" || low.Values["stable_json"] != `{"a":"Ada","b":4}` {
 		t.Fatalf("expected computed formula values, got %#v", low.Values)
 	}
-	if _, err := service.CreateRow(ctx, catalog, perms, "u1", "db", "contacts", map[string]any{
+	if _, err := service.CreateRow(ctx, catalog, perms, "u1", false, "db", "contacts", map[string]any{
 		"name":           "Blocked",
 		"score":          9,
 		"score_plus_one": 10,
 	}); !errors.Is(err, table.ErrPermissionDenied) {
 		t.Fatalf("expected formula create write to be denied, got %v", err)
 	}
-	high, err := service.CreateRow(ctx, catalog, perms, "u1", "db", "contacts", map[string]any{
+	high, err := service.CreateRow(ctx, catalog, perms, "u1", false, "db", "contacts", map[string]any{
 		"name":  "Grace",
 		"score": 7,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.UpdateRow(ctx, catalog, perms, "u1", "db", "contacts", high.RecordID, map[string]any{
+	if _, err := service.UpdateRow(ctx, catalog, perms, "u1", false, "db", "contacts", high.RecordID, map[string]any{
 		"score_plus_one": 99,
 	}); !errors.Is(err, table.ErrPermissionDenied) {
 		t.Fatalf("expected formula update write to be denied, got %v", err)
 	}
 
-	rows, err := service.Rows(ctx, catalog, perms, "u1", "db", "contacts", "high")
+	rows, err := service.Rows(ctx, catalog, perms, "u1", false, "db", "contacts", "high")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -701,7 +688,7 @@ func TestSyncTableRecomputesFormulaFieldsWithoutHistory(t *testing.T) {
 		Level:     permission.Write,
 	})
 
-	row, err := service.CreateRow(ctx, catalog, perms, "u1", "db", "contacts", map[string]any{"score": 4})
+	row, err := service.CreateRow(ctx, catalog, perms, "u1", false, "db", "contacts", map[string]any{"score": 4})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -722,7 +709,7 @@ func TestSyncTableRecomputesFormulaFieldsWithoutHistory(t *testing.T) {
 	if err := service.SyncTable(ctx, updatedCatalog, "db", "contacts"); err != nil {
 		t.Fatal(err)
 	}
-	rows, err := service.Rows(ctx, updatedCatalog, perms, "u1", "db", "contacts", "")
+	rows, err := service.Rows(ctx, updatedCatalog, perms, "u1", false, "db", "contacts", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -760,7 +747,7 @@ func TestFormulaErrorsClearValueInsteadOfFailingWrite(t *testing.T) {
 		Level:     permission.Write,
 	})
 
-	row, err := service.CreateRow(ctx, catalog, perms, "u1", "db", "contacts", map[string]any{"score": 1})
+	row, err := service.CreateRow(ctx, catalog, perms, "u1", false, "db", "contacts", map[string]any{"score": 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -768,7 +755,7 @@ func TestFormulaErrorsClearValueInsteadOfFailingWrite(t *testing.T) {
 		t.Fatalf("expected invalid int formula to be cleared, got %#v", row.Values)
 	}
 
-	row, err = service.UpdateRow(ctx, catalog, perms, "u1", "db", "contacts", row.RecordID, map[string]any{"score": 4})
+	row, err = service.UpdateRow(ctx, catalog, perms, "u1", false, "db", "contacts", row.RecordID, map[string]any{"score": 4})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -790,7 +777,7 @@ func TestFormulaErrorsClearValueInsteadOfFailingWrite(t *testing.T) {
 	if err := service.SyncTable(ctx, updatedCatalog, "db", "contacts"); err != nil {
 		t.Fatal(err)
 	}
-	rows, err := service.Rows(ctx, updatedCatalog, perms, "u1", "db", "contacts", "")
+	rows, err := service.Rows(ctx, updatedCatalog, perms, "u1", false, "db", "contacts", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -820,11 +807,11 @@ func TestInvalidTypedFieldInputClearsValueInsteadOfKeepingOldValue(t *testing.T)
 		Level:     permission.Write,
 	})
 
-	row, err := service.CreateRow(ctx, catalog, perms, "u1", "db", "contacts", map[string]any{"12": "5"})
+	row, err := service.CreateRow(ctx, catalog, perms, "u1", false, "db", "contacts", map[string]any{"12": "5"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	updated, err := service.UpdateRow(ctx, catalog, perms, "u1", "db", "contacts", row.RecordID, map[string]any{"12": "0.5"})
+	updated, err := service.UpdateRow(ctx, catalog, perms, "u1", false, "db", "contacts", row.RecordID, map[string]any{"12": "0.5"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -939,7 +926,7 @@ func TestRowsRejectsViewsUsingUnreadableFields(t *testing.T) {
 		permission.Grant{SubjectID: "writer", Scope: permission.ScopeFieldSet, Resource: "db.contacts", Level: permission.Write},
 		permission.Grant{SubjectID: "writer", Scope: permission.ScopeViewSet, Resource: "db.contacts", Level: permission.Write},
 	)
-	if _, err := service.CreateRow(ctx, catalog, writerPerms, "writer", "db", "contacts", map[string]any{
+	if _, err := service.CreateRow(ctx, catalog, writerPerms, "writer", false, "db", "contacts", map[string]any{
 		"name":   "Ada",
 		"email":  "ada@example.com",
 		"status": "active",
@@ -951,10 +938,10 @@ func TestRowsRejectsViewsUsingUnreadableFields(t *testing.T) {
 		permission.Grant{SubjectID: "reader", Scope: permission.ScopeViewSet, Resource: "db.contacts", Level: permission.Read},
 	)
 
-	if _, err := service.Rows(ctx, catalog, readerPerms, "reader", "db", "contacts", "active"); !errors.Is(err, table.ErrPermissionDenied) {
+	if _, err := service.Rows(ctx, catalog, readerPerms, "reader", false, "db", "contacts", "active"); !errors.Is(err, table.ErrPermissionDenied) {
 		t.Fatalf("expected unreadable filter permission error, got %v", err)
 	}
-	rows, err := service.Rows(ctx, catalog, readerPerms, "reader", "db", "contacts", "email-sort")
+	rows, err := service.Rows(ctx, catalog, readerPerms, "reader", false, "db", "contacts", "email-sort")
 	if err != nil {
 		t.Fatal(err)
 	}

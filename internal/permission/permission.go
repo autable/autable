@@ -11,7 +11,6 @@ const (
 type Scope string
 
 const (
-	ScopeDatabase    Scope = "database"
 	ScopeFieldSet    Scope = "field_set"
 	ScopeField       Scope = "field"
 	ScopeViewSet     Scope = "view_set"

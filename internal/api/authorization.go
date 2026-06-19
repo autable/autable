@@ -56,23 +56,23 @@ func (server *Server) authorize(ctx context.Context, actorID string, request acc
 }
 
 func (server *Server) isAuthorized(ctx context.Context, actorID string, perms permission.Set, request accessRequest) bool {
-	if request.Database != "" && perms.CanWriteResource(actorID, permission.ScopeDatabase, request.Database) {
+	if request.Database != "" && server.isDatabaseOwner(ctx, actorID, request.Database) {
 		return true
 	}
 	resource := tableResource(request.Database, request.Table)
 	switch request.Action {
 	case accessManageDatabase:
-		return perms.CanWriteResource(actorID, permission.ScopeDatabase, request.Database)
+		return server.isDatabaseOwner(ctx, actorID, request.Database)
 	case accessCreateField, accessWriteFieldSet:
 		return resource != "" && perms.CanWriteResource(actorID, permission.ScopeFieldSet, resource)
 	case accessDeleteField:
-		return perms.CanWriteResource(actorID, permission.ScopeDatabase, request.Database)
+		return server.isDatabaseOwner(ctx, actorID, request.Database)
 	case accessCreateView, accessWriteViewSet:
 		return resource != "" && perms.CanWriteResource(actorID, permission.ScopeViewSet, resource)
 	case accessWriteView:
 		return resource != "" && (perms.CanWriteResource(actorID, permission.ScopeViewSet, resource) || perms.CanWriteView(actorID, resource, request.View))
 	case accessDeleteView:
-		return perms.CanWriteResource(actorID, permission.ScopeDatabase, request.Database)
+		return server.isDatabaseOwner(ctx, actorID, request.Database)
 	case accessCreateWorkflow:
 		return perms.CanWriteResource(actorID, permission.ScopeWorkflowSet, request.Database)
 	case accessReadWorkflow:
@@ -99,11 +99,11 @@ func (server *Server) canAccessWorkflow(ctx context.Context, actorID string, per
 	if err != nil {
 		return false
 	}
-	if perms.CanWriteResource(actorID, permission.ScopeDatabase, workflow.DatabaseName) {
-		return true
-	}
 	if deleteOnly {
-		return workflow.CreatorID == actorID
+		return server.isDatabaseOwner(ctx, actorID, workflow.DatabaseName)
+	}
+	if server.isDatabaseOwner(ctx, actorID, workflow.DatabaseName) {
+		return true
 	}
 	if perms.ResourceLevel(actorID, permission.ScopeWorkflowSet, workflow.DatabaseName) >= level {
 		return true
@@ -116,11 +116,11 @@ func (server *Server) canAccessForm(ctx context.Context, actorID string, perms p
 	if err != nil {
 		return false
 	}
-	if perms.CanWriteResource(actorID, permission.ScopeDatabase, form.DatabaseName) {
-		return true
-	}
 	if deleteOnly {
-		return form.CreatorID == actorID
+		return server.isDatabaseOwner(ctx, actorID, form.DatabaseName)
+	}
+	if server.isDatabaseOwner(ctx, actorID, form.DatabaseName) {
+		return true
 	}
 	if perms.ResourceLevel(actorID, permission.ScopeFormSet, form.DatabaseName) >= level {
 		return true
@@ -139,6 +139,11 @@ func (server *Server) requireAuthorized(w http.ResponseWriter, r *http.Request, 
 		return permission.Set{}, false
 	}
 	return perms, true
+}
+
+func (server *Server) isDatabaseOwner(ctx context.Context, actorID, dbName string) bool {
+	ok, err := server.system.IsDatabaseOwner(ctx, actorID, dbName)
+	return err == nil && ok
 }
 
 func (server *Server) requireDatabaseOrSetWrite(w http.ResponseWriter, r *http.Request, actorID string, dbName string, scope permission.Scope) bool {

@@ -525,12 +525,7 @@ func (server *Server) handleCreateDatabase(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	if err := server.system.SaveGrant(r.Context(), permission.Grant{
-		SubjectID: actorID,
-		Scope:     permission.ScopeDatabase,
-		Resource:  database.Name,
-		Level:     permission.Write,
-	}); err != nil {
+	if err := server.system.SaveDatabaseOwner(r.Context(), database.Name, actorID); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
@@ -552,7 +547,7 @@ func (server *Server) handleSaveGrant(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	if !server.requireDatabaseWrite(w, r, actorID, dbName) {
+	if !server.requireDatabaseOwner(w, r, actorID, dbName) {
 		return
 	}
 	if err := server.system.SaveGrant(r.Context(), grant); err != nil {
@@ -588,7 +583,12 @@ func (server *Server) handleCreateRow(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	row, err := server.tables.CreateRow(r.Context(), server.catalogSnapshot(), perms, actorID, dbName, tableName, request.Values)
+	isOwner, err := server.system.IsDatabaseOwner(r.Context(), actorID, dbName)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	row, err := server.tables.CreateRow(r.Context(), server.catalogSnapshot(), perms, actorID, isOwner, dbName, tableName, request.Values)
 	if err != nil {
 		status := http.StatusBadRequest
 		if errors.Is(err, table.ErrPermissionDenied) {
@@ -626,7 +626,12 @@ func (server *Server) handleUpdateRow(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	row, err := server.tables.UpdateRow(r.Context(), server.catalogSnapshot(), perms, actorID, dbName, tableName, recordID, request.Values)
+	isOwner, err := server.system.IsDatabaseOwner(r.Context(), actorID, dbName)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	row, err := server.tables.UpdateRow(r.Context(), server.catalogSnapshot(), perms, actorID, isOwner, dbName, tableName, recordID, request.Values)
 	if err != nil {
 		status := http.StatusBadRequest
 		if errors.Is(err, table.ErrPermissionDenied) {
@@ -658,7 +663,12 @@ func (server *Server) handleDeleteRow(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	row, err := server.tables.DeleteRow(r.Context(), server.catalogSnapshot(), perms, actorID, dbName, tableName, recordID)
+	isOwner, err := server.system.IsDatabaseOwner(r.Context(), actorID, dbName)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	row, err := server.tables.DeleteRow(r.Context(), server.catalogSnapshot(), perms, actorID, isOwner, dbName, tableName, recordID)
 	if err != nil {
 		status := http.StatusBadRequest
 		if errors.Is(err, table.ErrPermissionDenied) {
@@ -693,7 +703,12 @@ func (server *Server) handleListRows(w http.ResponseWriter, r *http.Request, dbN
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	rows, err := server.tables.Rows(r.Context(), server.catalogSnapshot(), perms, actorID, dbName, tableName, r.URL.Query().Get("view"))
+	isOwner, err := server.system.IsDatabaseOwner(r.Context(), actorID, dbName)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	rows, err := server.tables.Rows(r.Context(), server.catalogSnapshot(), perms, actorID, isOwner, dbName, tableName, r.URL.Query().Get("view"))
 	if err != nil {
 		status := http.StatusBadRequest
 		if errors.Is(err, table.ErrPermissionDenied) {
@@ -729,8 +744,13 @@ func (server *Server) handleRowHistory(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+	isOwner, err := server.system.IsDatabaseOwner(r.Context(), actorID, dbName)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
 	resource := dbName + "." + tableName
-	if !canReadRowHistory(perms, actorID, resource, tableMeta) {
+	if !canReadRowHistory(perms, actorID, isOwner, resource, tableMeta) {
 		writeError(w, http.StatusForbidden, table.ErrPermissionDenied)
 		return
 	}
@@ -746,7 +766,7 @@ func (server *Server) handleRowHistory(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, err)
 			return
 		}
-		change.Values = readableHistoryValues(change.Values, perms, actorID, resource, tableMeta)
+		change.Values = readableHistoryValues(change.Values, perms, actorID, isOwner, resource, tableMeta)
 		changes = append(changes, rowHistoryResponse{HistoryKey: entry.Key, RowChange: change})
 	}
 	writeJSON(w, http.StatusOK, changes)
@@ -838,7 +858,7 @@ func (server *Server) handleGetDatabaseResource(w http.ResponseWriter, r *http.R
 		}
 		writeJSON(w, http.StatusOK, filtered)
 	case "roles":
-		if !server.requireDatabaseWrite(w, r, actorID, dbName) {
+		if !server.requireDatabaseOwner(w, r, actorID, dbName) {
 			return
 		}
 		roles, err := server.system.Roles(r.Context(), dbName)
@@ -869,7 +889,7 @@ func (server *Server) handlePostDatabaseResource(w http.ResponseWriter, r *http.
 	}
 	switch resource {
 	case "tables":
-		if !server.requireDatabaseWrite(w, r, actorID, dbName) {
+		if !server.requireDatabaseOwner(w, r, actorID, dbName) {
 			return
 		}
 		var tableMeta metadata.Table
@@ -945,7 +965,7 @@ func (server *Server) handlePostDatabaseResource(w http.ResponseWriter, r *http.
 		saved = server.formWithPermissionLevel(r.Context(), actorID, saved)
 		writeJSON(w, http.StatusCreated, saved)
 	case "roles":
-		if !server.requireDatabaseWrite(w, r, actorID, dbName) {
+		if !server.requireDatabaseOwner(w, r, actorID, dbName) {
 			return
 		}
 		var role systemdb.RoleDefinition
@@ -984,7 +1004,7 @@ func (server *Server) handlePutDatabaseResource(w http.ResponseWriter, r *http.R
 	if !ok {
 		return
 	}
-	if !server.requireDatabaseWrite(w, r, actorID, dbName) {
+	if !server.requireDatabaseOwner(w, r, actorID, dbName) {
 		return
 	}
 	var role systemdb.RoleDefinition
@@ -1050,6 +1070,11 @@ func (server *Server) handlePatchDatabaseResource(w http.ResponseWriter, r *http
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+	isOwner, err := server.system.IsDatabaseOwner(r.Context(), actorID, dbName)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
 	var request fieldPositionRequest
 	if err := readJSON(r, &request); err != nil {
 		writeError(w, http.StatusBadRequest, err)
@@ -1060,7 +1085,7 @@ func (server *Server) handlePatchDatabaseResource(w http.ResponseWriter, r *http
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, visibleTableMetadata(perms, actorID, dbName, tableMeta))
+	writeJSON(w, http.StatusOK, visibleTableMetadata(perms, actorID, dbName, isOwner, tableMeta))
 }
 
 func (server *Server) handleUpdateTableMetadata(w http.ResponseWriter, r *http.Request, dbName, tableName string) {
@@ -1083,10 +1108,15 @@ func (server *Server) handleUpdateTableMetadata(w http.ResponseWriter, r *http.R
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	if tableMeta.Fields != nil && !server.authorizeFieldMetadataPatch(w, actorID, dbName, tableName, perms, existingTable, tableMeta.Fields) {
+	isOwner, err := server.system.IsDatabaseOwner(r.Context(), actorID, dbName)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	if tableMeta.Views != nil && !server.authorizeViewMetadataPatch(w, actorID, dbName, tableName, perms, existingTable, tableMeta.Views) {
+	if tableMeta.Fields != nil && !server.authorizeFieldMetadataPatch(w, actorID, isOwner, dbName, tableName, perms, existingTable, tableMeta.Fields) {
+		return
+	}
+	if tableMeta.Views != nil && !server.authorizeViewMetadataPatch(w, actorID, isOwner, dbName, tableName, perms, existingTable, tableMeta.Views) {
 		return
 	}
 	if tableMeta.Name == "" {
@@ -1097,31 +1127,28 @@ func (server *Server) handleUpdateTableMetadata(w http.ResponseWriter, r *http.R
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, visibleTableMetadata(perms, actorID, dbName, updated))
+	writeJSON(w, http.StatusOK, visibleTableMetadata(perms, actorID, dbName, isOwner, updated))
 }
 
-func (server *Server) authorizeFieldMetadataPatch(w http.ResponseWriter, actorID, dbName, tableName string, perms permission.Set, existing metadata.Table, fields []metadata.Field) bool {
+func (server *Server) authorizeFieldMetadataPatch(w http.ResponseWriter, actorID string, isOwner bool, dbName, tableName string, perms permission.Set, existing metadata.Table, fields []metadata.Field) bool {
 	resource := dbName + "." + tableName
-	if !perms.CanWriteResource(actorID, permission.ScopeDatabase, dbName) &&
-		!perms.CanWriteResource(actorID, permission.ScopeFieldSet, resource) {
+	if !isOwner && !perms.CanWriteResource(actorID, permission.ScopeFieldSet, resource) {
 		writeError(w, http.StatusForbidden, table.ErrPermissionDenied)
 		return false
 	}
-	dbWrite := perms.CanWriteResource(actorID, permission.ScopeDatabase, dbName)
 	for _, field := range fields {
 		existingField, ok := existing.Field(field.Name)
-		if ok && !existingField.Deleted && field.Deleted && !dbWrite {
-			writeError(w, http.StatusForbidden, fmt.Errorf("delete field %q requires database write permission", field.Name))
+		if ok && !existingField.Deleted && field.Deleted && !isOwner {
+			writeError(w, http.StatusForbidden, fmt.Errorf("delete field %q requires database owner", field.Name))
 			return false
 		}
 	}
 	return true
 }
 
-func (server *Server) authorizeViewMetadataPatch(w http.ResponseWriter, actorID, dbName, tableName string, perms permission.Set, existing metadata.Table, views []metadata.View) bool {
+func (server *Server) authorizeViewMetadataPatch(w http.ResponseWriter, actorID string, isOwner bool, dbName, tableName string, perms permission.Set, existing metadata.Table, views []metadata.View) bool {
 	resource := dbName + "." + tableName
-	if perms.CanWriteResource(actorID, permission.ScopeDatabase, dbName) ||
-		perms.CanWriteResource(actorID, permission.ScopeViewSet, resource) {
+	if isOwner || perms.CanWriteResource(actorID, permission.ScopeViewSet, resource) {
 		return true
 	}
 	for _, view := range views {
@@ -1535,7 +1562,7 @@ func (server *Server) handlePostFormAction(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return
 	}
-	if _, ok := server.requireAuthorized(w, r, actorID, accessRequest{Action: accessDeleteForm, FormID: id}); !ok {
+	if _, ok := server.requireAuthorized(w, r, actorID, accessRequest{Action: accessWriteForm, FormID: id}); !ok {
 		return
 	}
 	var form systemdb.FormDefinition
@@ -1568,7 +1595,7 @@ func (server *Server) handleDeleteWorkflow(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return
 	}
-	if !server.requireResourceWrite(w, r, actorID, permission.ScopeWorkflow, id) {
+	if _, ok := server.requireAuthorized(w, r, actorID, accessRequest{Action: accessDeleteWorkflow, WorkflowID: id}); !ok {
 		return
 	}
 	workflow, err := server.system.Workflow(r.Context(), id)
@@ -1599,7 +1626,7 @@ func (server *Server) handleDeleteForm(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !server.requireResourceWrite(w, r, actorID, permission.ScopeForm, id) {
+	if _, ok := server.requireAuthorized(w, r, actorID, accessRequest{Action: accessDeleteForm, FormID: id}); !ok {
 		return
 	}
 	form, err := server.system.Form(r.Context(), id)
@@ -1720,7 +1747,12 @@ func (server *Server) handleSubmitPublishedForm(w http.ResponseWriter, r *http.R
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	row, err := server.tables.CreateRow(r.Context(), server.catalogSnapshot(), perms, actorID, form.DatabaseName, definition.Table, rowValues)
+	isOwner, err := server.system.IsDatabaseOwner(r.Context(), actorID, form.DatabaseName)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	row, err := server.tables.CreateRow(r.Context(), server.catalogSnapshot(), perms, actorID, isOwner, form.DatabaseName, definition.Table, rowValues)
 	if err != nil {
 		status := http.StatusBadRequest
 		if errors.Is(err, table.ErrPermissionDenied) {
@@ -1912,15 +1944,21 @@ func (server *Server) visibleCatalog(ctx context.Context, actorID string, perms 
 	catalog := server.catalogSnapshot()
 	visible := metadata.Catalog{Databases: []metadata.Database{}}
 	for _, database := range catalog.Databases {
-		dbLevel := perms.ResourceLevel(actorID, permission.ScopeDatabase, database.Name)
+		isOwner, err := server.system.IsDatabaseOwner(ctx, actorID, database.Name)
+		if err != nil {
+			return metadata.Catalog{}, err
+		}
+		dbLevel := permission.None
+		if isOwner {
+			dbLevel = permission.Write
+		}
 		workflowSetLevel := perms.ResourceLevel(actorID, permission.ScopeWorkflowSet, database.Name)
 		formSetLevel := perms.ResourceLevel(actorID, permission.ScopeFormSet, database.Name)
-		dbVisible := dbLevel >= permission.Read
-		dbWritable := dbLevel >= permission.Write
+		dbVisible := isOwner
 		tables := make([]metadata.Table, 0, len(database.Tables))
 		for _, tableMeta := range database.Tables {
-			if dbWritable || canSeeTableMetadata(perms, actorID, database.Name, tableMeta) {
-				tables = append(tables, visibleTableMetadata(perms, actorID, database.Name, tableMeta))
+			if isOwner || canSeeTableMetadata(perms, actorID, database.Name, tableMeta) {
+				tables = append(tables, visibleTableMetadata(perms, actorID, database.Name, isOwner, tableMeta))
 				dbVisible = true
 			}
 		}
@@ -1942,9 +1980,12 @@ func (server *Server) visibleCatalog(ctx context.Context, actorID string, perms 
 	return visible, nil
 }
 
-func visibleTableMetadata(perms permission.Set, actorID, dbName string, tableMeta metadata.Table) metadata.Table {
+func visibleTableMetadata(perms permission.Set, actorID, dbName string, isOwner bool, tableMeta metadata.Table) metadata.Table {
 	resource := dbName + "." + tableMeta.Name
-	dbLevel := perms.ResourceLevel(actorID, permission.ScopeDatabase, dbName)
+	dbLevel := permission.None
+	if isOwner {
+		dbLevel = permission.Write
+	}
 	fieldSetLevel := perms.ResourceLevel(actorID, permission.ScopeFieldSet, resource)
 	viewSetLevel := perms.ResourceLevel(actorID, permission.ScopeViewSet, resource)
 	annotated := tableMeta
@@ -2047,8 +2088,7 @@ func viewQueryRuleFields(rule metadata.ViewQueryRule) []string {
 
 func canSeeTableMetadata(perms permission.Set, actorID, dbName string, tableMeta metadata.Table) bool {
 	resource := dbName + "." + tableMeta.Name
-	if perms.ResourceLevel(actorID, permission.ScopeDatabase, dbName) >= permission.Read ||
-		perms.ResourceLevel(actorID, permission.ScopeFieldSet, resource) >= permission.Read ||
+	if perms.ResourceLevel(actorID, permission.ScopeFieldSet, resource) >= permission.Read ||
 		perms.ResourceLevel(actorID, permission.ScopeViewSet, resource) >= permission.Read {
 		return true
 	}
@@ -2126,18 +2166,13 @@ func (server *Server) requireExplicitResourceRead(w http.ResponseWriter, r *http
 	return false
 }
 
-func (server *Server) requireDatabaseWrite(w http.ResponseWriter, r *http.Request, actorID string, dbName string) bool {
+func (server *Server) requireDatabaseOwner(w http.ResponseWriter, r *http.Request, actorID string, dbName string) bool {
 	_, ok := server.requireAuthorized(w, r, actorID, accessRequest{Action: accessManageDatabase, Database: dbName})
 	return ok
 }
 
 func (server *Server) grantDatabaseName(ctx context.Context, grant permission.Grant) (string, error) {
 	switch grant.Scope {
-	case permission.ScopeDatabase:
-		if grant.Resource == "" {
-			return "", errors.New("grant database resource is required")
-		}
-		return grant.Resource, nil
 	case permission.ScopeFieldSet, permission.ScopeField, permission.ScopeViewSet, permission.ScopeView:
 		dbName, _, ok := strings.Cut(grant.Resource, ".")
 		if !ok || dbName == "" {
@@ -2213,13 +2248,6 @@ func (server *Server) validateRoleMembers(ctx context.Context, members []string)
 
 func (server *Server) validateGrantResource(ctx context.Context, dbName string, grant permission.Grant) error {
 	switch grant.Scope {
-	case permission.ScopeDatabase:
-		if grant.Resource != dbName {
-			return fmt.Errorf("database grant resource must be %q", dbName)
-		}
-		if _, ok := server.catalogSnapshot().Database(dbName); !ok {
-			return fmt.Errorf("database %q not found", dbName)
-		}
 	case permission.ScopeFieldSet:
 		if grant.Field != "" {
 			return errors.New("field set grant cannot include field")
@@ -2401,10 +2429,14 @@ func (server *Server) filterReadableWorkflows(ctx context.Context, actorID strin
 	}
 	filtered := make([]systemdb.WorkflowDefinition, 0, len(workflows))
 	for _, workflow := range workflows {
-		if perms.ResourceLevel(actorID, permission.ScopeDatabase, workflow.DatabaseName) >= permission.Write ||
+		isOwner, err := server.system.IsDatabaseOwner(ctx, actorID, workflow.DatabaseName)
+		if err != nil {
+			return nil, err
+		}
+		if isOwner ||
 			perms.ResourceLevel(actorID, permission.ScopeWorkflowSet, workflow.DatabaseName) >= permission.Read ||
 			perms.CanReadResource(actorID, permission.ScopeWorkflow, resourceID(workflow.ID)) {
-			workflow.PermissionLevel = workflowPermissionLevel(perms, actorID, workflow)
+			workflow.PermissionLevel = server.workflowPermissionLevel(ctx, perms, actorID, workflow)
 			filtered = append(filtered, workflow)
 		}
 	}
@@ -2418,10 +2450,14 @@ func (server *Server) filterReadableForms(ctx context.Context, actorID string, f
 	}
 	filtered := make([]systemdb.FormDefinition, 0, len(forms))
 	for _, form := range forms {
-		if perms.ResourceLevel(actorID, permission.ScopeDatabase, form.DatabaseName) >= permission.Write ||
+		isOwner, err := server.system.IsDatabaseOwner(ctx, actorID, form.DatabaseName)
+		if err != nil {
+			return nil, err
+		}
+		if isOwner ||
 			perms.ResourceLevel(actorID, permission.ScopeFormSet, form.DatabaseName) >= permission.Read ||
 			perms.CanReadResource(actorID, permission.ScopeForm, resourceID(form.ID)) {
-			form.PermissionLevel = formPermissionLevel(perms, actorID, form)
+			form.PermissionLevel = server.formPermissionLevel(ctx, perms, actorID, form)
 			filtered = append(filtered, form)
 		}
 	}
@@ -2433,7 +2469,7 @@ func (server *Server) workflowWithPermissionLevel(ctx context.Context, actorID s
 	if err != nil {
 		return workflow
 	}
-	workflow.PermissionLevel = workflowPermissionLevel(perms, actorID, workflow)
+	workflow.PermissionLevel = server.workflowPermissionLevel(ctx, perms, actorID, workflow)
 	return workflow
 }
 
@@ -2442,12 +2478,12 @@ func (server *Server) formWithPermissionLevel(ctx context.Context, actorID strin
 	if err != nil {
 		return form
 	}
-	form.PermissionLevel = formPermissionLevel(perms, actorID, form)
+	form.PermissionLevel = server.formPermissionLevel(ctx, perms, actorID, form)
 	return form
 }
 
-func workflowPermissionLevel(perms permission.Set, actorID string, workflow systemdb.WorkflowDefinition) permission.Level {
-	if perms.ResourceLevel(actorID, permission.ScopeDatabase, workflow.DatabaseName) >= permission.Write {
+func (server *Server) workflowPermissionLevel(ctx context.Context, perms permission.Set, actorID string, workflow systemdb.WorkflowDefinition) permission.Level {
+	if server.isDatabaseOwner(ctx, actorID, workflow.DatabaseName) {
 		return permission.Write
 	}
 	return maxPermissionLevel(
@@ -2456,8 +2492,8 @@ func workflowPermissionLevel(perms permission.Set, actorID string, workflow syst
 	)
 }
 
-func formPermissionLevel(perms permission.Set, actorID string, form systemdb.FormDefinition) permission.Level {
-	if perms.ResourceLevel(actorID, permission.ScopeDatabase, form.DatabaseName) >= permission.Write {
+func (server *Server) formPermissionLevel(ctx context.Context, perms permission.Set, actorID string, form systemdb.FormDefinition) permission.Level {
+	if server.isDatabaseOwner(ctx, actorID, form.DatabaseName) {
 		return permission.Write
 	}
 	return maxPermissionLevel(
@@ -2466,9 +2502,8 @@ func formPermissionLevel(perms permission.Set, actorID string, form systemdb.For
 	)
 }
 
-func canReadRowHistory(perms permission.Set, actorID, resource string, tableMeta metadata.Table) bool {
-	dbName, _, _ := strings.Cut(resource, ".")
-	if perms.CanReadResource(actorID, permission.ScopeDatabase, dbName) {
+func canReadRowHistory(perms permission.Set, actorID string, isDatabaseOwner bool, resource string, tableMeta metadata.Table) bool {
+	if isDatabaseOwner {
 		return true
 	}
 	if perms.CanReadField(actorID, resource, "ct_record_id") {
@@ -2482,9 +2517,8 @@ func canReadRowHistory(perms permission.Set, actorID, resource string, tableMeta
 	return false
 }
 
-func readableHistoryValues(values map[string]any, perms permission.Set, actorID, resource string, tableMeta metadata.Table) map[string]any {
-	dbName, _, _ := strings.Cut(resource, ".")
-	if perms.CanReadResource(actorID, permission.ScopeDatabase, dbName) {
+func readableHistoryValues(values map[string]any, perms permission.Set, actorID string, isDatabaseOwner bool, resource string, tableMeta metadata.Table) map[string]any {
+	if isDatabaseOwner {
 		readable := make(map[string]any, len(values))
 		for fieldName, value := range values {
 			readable[fieldName] = value
