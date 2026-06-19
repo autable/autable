@@ -31,6 +31,13 @@ type Row struct {
 
 type RowChangeHandler func(ctx context.Context, historyKey string, change history.RowChange)
 
+type RowListOptions struct {
+	ViewName string
+	Query    *metadata.ViewQuery
+	Sorts    []metadata.ViewSort
+	Limit    int
+}
+
 type RowRepository interface {
 	EnsureTable(ctx context.Context, dbName string, tableMeta metadata.Table) error
 	CreateRow(ctx context.Context, dbName string, tableMeta metadata.Table, values map[string]any) (Row, error)
@@ -194,6 +201,13 @@ func (service *Service) DeleteRow(ctx context.Context, catalog metadata.Catalog,
 }
 
 func (service *Service) Rows(ctx context.Context, catalog metadata.Catalog, perms permission.Set, actorID string, isDatabaseOwner bool, dbName, tableName, viewName string, temporarySorts ...metadata.ViewSort) ([]Row, error) {
+	return service.RowsWithOptions(ctx, catalog, perms, actorID, isDatabaseOwner, dbName, tableName, RowListOptions{
+		ViewName: viewName,
+		Sorts:    temporarySorts,
+	})
+}
+
+func (service *Service) RowsWithOptions(ctx context.Context, catalog metadata.Catalog, perms permission.Set, actorID string, isDatabaseOwner bool, dbName, tableName string, options RowListOptions) ([]Row, error) {
 	tableMeta, ok := catalog.Table(dbName, tableName)
 	if !ok {
 		return nil, fmt.Errorf("table %s.%s not found", dbName, tableName)
@@ -201,21 +215,27 @@ func (service *Service) Rows(ctx context.Context, catalog metadata.Catalog, perm
 	resource := dbName + "." + tableName
 
 	var resolved metadata.ResolvedView
-	if viewName != "" {
+	if options.ViewName != "" {
 		var err error
-		resolved, err = tableMeta.ResolveView(viewName)
+		resolved, err = tableMeta.ResolveView(options.ViewName)
 		if err != nil {
 			return nil, err
 		}
-		if !perms.CanReadView(actorID, resource, viewName) && !isDatabaseOwner {
-			return nil, fmt.Errorf("%w: view %s", ErrPermissionDenied, viewName)
+		if !perms.CanReadView(actorID, resource, options.ViewName) && !isDatabaseOwner {
+			return nil, fmt.Errorf("%w: view %s", ErrPermissionDenied, options.ViewName)
 		}
 		if !isDatabaseOwner && !viewFieldsReadable(perms, actorID, resource, resolved.Query, resolved.Sorts) {
-			return nil, fmt.Errorf("%w: view %s", ErrPermissionDenied, viewName)
+			return nil, fmt.Errorf("%w: view %s", ErrPermissionDenied, options.ViewName)
 		}
 	}
-	if len(temporarySorts) > 0 {
-		for _, sortDef := range temporarySorts {
+	if options.Query != nil {
+		if !isDatabaseOwner && !viewFieldsReadable(perms, actorID, resource, options.Query, nil) {
+			return nil, fmt.Errorf("%w: query", ErrPermissionDenied)
+		}
+		resolved.Query = combineRuntimeQueries(resolved.Query, options.Query)
+	}
+	if len(options.Sorts) > 0 {
+		for _, sortDef := range options.Sorts {
 			field, ok := tableMeta.Field(sortDef.Field)
 			if !ok || field.Deleted {
 				return nil, fmt.Errorf("unknown temporary sort field %q", sortDef.Field)
@@ -224,11 +244,15 @@ func (service *Service) Rows(ctx context.Context, catalog metadata.Catalog, perm
 				return nil, fmt.Errorf("unsupported temporary sort direction %q", sortDef.Direction)
 			}
 		}
-		if !isDatabaseOwner && !viewFieldsReadable(perms, actorID, resource, nil, temporarySorts) {
+		if !isDatabaseOwner && !viewFieldsReadable(perms, actorID, resource, nil, options.Sorts) {
 			return nil, fmt.Errorf("%w: sort", ErrPermissionDenied)
 		}
-		resolved.Sorts = temporarySorts
+		resolved.Sorts = options.Sorts
 	}
+	if options.Limit < 0 {
+		return nil, fmt.Errorf("limit must be greater than or equal to 0")
+	}
+	resolved.Limit = options.Limit
 	rows, err := service.rows.Rows(ctx, dbName, tableMeta, resolved)
 	if err != nil {
 		return nil, err
@@ -245,6 +269,22 @@ func (service *Service) Rows(ctx context.Context, catalog metadata.Catalog, perm
 		filtered = append(filtered, Row{RecordID: row.RecordID, Values: values})
 	}
 	return filtered, nil
+}
+
+func combineRuntimeQueries(left *metadata.ViewQuery, right *metadata.ViewQuery) *metadata.ViewQuery {
+	if left == nil {
+		return right
+	}
+	if right == nil {
+		return left
+	}
+	return &metadata.ViewQuery{
+		Combinator: "and",
+		Rules: []metadata.ViewQueryRule{
+			{Combinator: left.Combinator, Rules: left.Rules, Not: left.Not},
+			{Combinator: right.Combinator, Rules: right.Rules, Not: right.Not},
+		},
+	}
 }
 
 func (service *Service) SyncTable(ctx context.Context, catalog metadata.Catalog, dbName, tableName string) error {

@@ -41,16 +41,50 @@ declare global {
   type CodeTableFormInputType = "text" | "email" | "search" | "tel" | "url" | "password";
 
   type CodeTableFormElement =
-    | { kind: "input"; field: string; label: string; inputType: CodeTableFormInputType }
+    | { kind: "input"; field: string; label: string; inputType: CodeTableFormInputType; scanner?: boolean; onChangeActionID?: string }
     | { kind: "select"; field: string; label: string; options: string[] }
     | { kind: "relation"; field: string; label: string; table: string; view?: string }
-    | { kind: "submit"; label: string }
+    | { kind: "button"; id: string; label: string; actionID: string }
+    | { kind: "submit"; id: string; label: string; actionID: string }
     | { kind: "html"; html: string };
 
+  interface CodeTableRowRecord {
+    record_id: number;
+    values: Record<string, unknown>;
+  }
+
+  interface CodeTableFormRowsAPI {
+    create(table: string, values: Record<string, unknown>): Promise<CodeTableRowRecord>;
+    update(table: string, recordID: number, values: Record<string, unknown>): Promise<CodeTableRowRecord>;
+    upsert(table: string, input: { match_field: string; values: Record<string, unknown> }): Promise<CodeTableRowRecord & { operation: "create" | "update" | "noop" }>;
+    list(table: string, options?: {
+      view?: string;
+      query?: { field: string; op?: string; operator?: string; value?: unknown } | {
+        combinator: "and" | "or";
+        rules: Array<{ field?: string; operator?: string; value?: unknown; combinator?: "and" | "or"; rules?: unknown[]; not?: boolean }>;
+        not?: boolean;
+      };
+      sorts?: Array<{ field: string; direction: "asc" | "desc" }>;
+      limit?: number;
+    }): Promise<CodeTableRowRecord[]>;
+  }
+
+  interface CodeTableFormActionAPI {
+    value(field: string): string;
+    values(): Record<string, string>;
+    setValue(field: string, value: string): void;
+    rows: CodeTableFormRowsAPI;
+    show(value: unknown): void;
+  }
+
+  type CodeTableFormAction = (api: CodeTableFormActionAPI) => unknown | Promise<unknown>;
+
   interface CodeTableFormAPI {
-    input(config: { field: string; label?: string; type?: CodeTableFormInputType }): CodeTableFormElement;
+    input(config: { field: string; label?: string; type?: CodeTableFormInputType; scanner?: boolean; onChange?: CodeTableFormAction }): CodeTableFormElement;
     relation(config: { field: string; label?: string; table: string; view?: string }): CodeTableFormElement;
     select(config: { field: string; label?: string; options: string[] }): CodeTableFormElement;
+    button(label: string, action: CodeTableFormAction): CodeTableFormElement;
+    button(config: { id?: string; label: string; action: CodeTableFormAction }): CodeTableFormElement;
     submit(label: string): CodeTableFormElement;
   }
 

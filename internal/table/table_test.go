@@ -997,3 +997,49 @@ func TestRowsRejectsViewsUsingUnreadableFields(t *testing.T) {
 		t.Fatalf("row leaked unreadable status: %#v", rows[0].Values)
 	}
 }
+
+func TestRowsWithOptionsRejectsUnreadableQueryFields(t *testing.T) {
+	ctx := context.Background()
+	catalog := metadata.Catalog{Databases: []metadata.Database{{
+		Name:       "db",
+		SQLitePath: "./db.sqlite",
+		Tables: []metadata.Table{{
+			Name: "contacts",
+			Fields: []metadata.Field{
+				{Name: "name", Type: "string"},
+				{Name: "email", Type: "string"},
+				{Name: "status", Type: "string"},
+			},
+		}},
+	}}}
+	service, catalog, _ := newSQLiteService(t, history.NewMemoryStore(), catalog)
+	writerPerms := permission.New(
+		permission.Grant{SubjectID: "writer", Scope: permission.ScopeFieldSet, Resource: "db.contacts", Level: permission.Write},
+		permission.Grant{SubjectID: "writer", Scope: permission.ScopeRecord, Resource: "db.contacts", Field: "create", Level: permission.Write},
+	)
+	if _, err := service.CreateRow(ctx, catalog, writerPerms, "writer", false, "db", "contacts", map[string]any{
+		"name":   "Ada",
+		"email":  "ada@example.com",
+		"status": "active",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	readerPerms := permission.New(
+		permission.Grant{SubjectID: "reader", Scope: permission.ScopeField, Resource: "db.contacts", Field: "email", Level: permission.Read},
+	)
+	rows, err := service.RowsWithOptions(ctx, catalog, readerPerms, "reader", false, "db", "contacts", table.RowListOptions{
+		Query: &metadata.ViewQuery{Combinator: "and", Rules: []metadata.ViewQueryRule{{Field: "email", Operator: "=", Value: "ada@example.com"}}},
+		Limit: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].Values["email"] != "ada@example.com" {
+		t.Fatalf("expected readable query rows, got %#v", rows)
+	}
+	if _, err := service.RowsWithOptions(ctx, catalog, readerPerms, "reader", false, "db", "contacts", table.RowListOptions{
+		Query: &metadata.ViewQuery{Combinator: "and", Rules: []metadata.ViewQueryRule{{Field: "status", Operator: "=", Value: "active"}}},
+	}); !errors.Is(err, table.ErrPermissionDenied) {
+		t.Fatalf("expected unreadable query field permission error, got %v", err)
+	}
+}

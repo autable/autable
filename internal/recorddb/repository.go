@@ -228,6 +228,9 @@ func (repository *Repository) Rows(ctx context.Context, dbName string, tableMeta
 				Desc:   sortDef.Direction == "desc",
 			})
 		}
+		if views[0].Limit > 0 {
+			query = query.Limit(views[0].Limit)
+		}
 	}
 	var records []map[string]any
 	err = query.

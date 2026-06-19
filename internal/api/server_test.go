@@ -519,6 +519,68 @@ func TestUpsertRowAPIUpdatesCreatesAndNoops(t *testing.T) {
 	}
 }
 
+func TestQueryRowsAPIEnforcesQueryFieldPermissions(t *testing.T) {
+	ctx := context.Background()
+	server, system := newTestServer(t)
+	writerGrants := []permission.Grant{
+		{SubjectID: "writer", Scope: permission.ScopeFieldSet, Resource: "db.contacts", Level: permission.Write},
+		{SubjectID: "writer", Scope: permission.ScopeRecord, Resource: "db.contacts", Field: "create", Level: permission.Write},
+	}
+	for _, grant := range writerGrants {
+		if err := system.SaveGrant(ctx, grant); err != nil {
+			t.Fatal(err)
+		}
+	}
+	create := httptest.NewRequest(http.MethodPost, "/api/tables/db/contacts/rows", bytes.NewBufferString(`{
+		"values":{"name":"Ada","email":"ada@example.com","status":"active"}
+	}`))
+	create.AddCookie(testSessionCookie(t, system, "writer"))
+	createRecorder := httptest.NewRecorder()
+	server.ServeHTTP(createRecorder, create)
+	if createRecorder.Code != http.StatusCreated {
+		t.Fatalf("expected create 201, got %d: %s", createRecorder.Code, createRecorder.Body.String())
+	}
+	readerGrants := []permission.Grant{
+		{SubjectID: "reader", Scope: permission.ScopeField, Resource: "db.contacts", Field: "email", Level: permission.Read},
+	}
+	for _, grant := range readerGrants {
+		if err := system.SaveGrant(ctx, grant); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	allowed := httptest.NewRequest(http.MethodPost, "/api/tables/db/contacts/rows/query", bytes.NewBufferString(`{
+		"query":{"combinator":"and","rules":[{"field":"email","operator":"=","value":"ada@example.com"}]},
+		"limit":10
+	}`))
+	allowed.AddCookie(testSessionCookie(t, system, "reader"))
+	allowedRecorder := httptest.NewRecorder()
+	server.ServeHTTP(allowedRecorder, allowed)
+	if allowedRecorder.Code != http.StatusOK {
+		t.Fatalf("expected query 200, got %d: %s", allowedRecorder.Code, allowedRecorder.Body.String())
+	}
+	var rows []rowResponse
+	if err := json.NewDecoder(allowedRecorder.Body).Decode(&rows); err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].Values["email"] != "ada@example.com" {
+		t.Fatalf("unexpected readable query rows: %#v", rows)
+	}
+	if _, ok := rows[0].Values["status"]; ok {
+		t.Fatalf("query leaked unreadable status: %#v", rows[0].Values)
+	}
+
+	denied := httptest.NewRequest(http.MethodPost, "/api/tables/db/contacts/rows/query", bytes.NewBufferString(`{
+		"query":{"combinator":"and","rules":[{"field":"status","operator":"=","value":"active"}]}
+	}`))
+	denied.AddCookie(testSessionCookie(t, system, "reader"))
+	deniedRecorder := httptest.NewRecorder()
+	server.ServeHTTP(deniedRecorder, denied)
+	if deniedRecorder.Code != http.StatusForbidden {
+		t.Fatalf("expected unreadable query field 403, got %d: %s", deniedRecorder.Code, deniedRecorder.Body.String())
+	}
+}
+
 func TestUpdateRowAPIEnforcesPermissionsAndWritesHistory(t *testing.T) {
 	server, system := newTestServer(t)
 	saveTestDatabaseOwners(t, system, "db", "u1")

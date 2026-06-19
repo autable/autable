@@ -66,6 +66,13 @@ type upsertRowRequest struct {
 	Values     map[string]any `json:"values"`
 }
 
+type listRowsRequest struct {
+	View  string              `json:"view,omitempty"`
+	Query *metadata.ViewQuery `json:"query,omitempty"`
+	Sorts []metadata.ViewSort `json:"sorts,omitempty"`
+	Limit int                 `json:"limit,omitempty"`
+}
+
 type rowResponse struct {
 	RecordID int64          `json:"record_id"`
 	Values   map[string]any `json:"values"`
@@ -582,6 +589,10 @@ func (server *Server) handlePostTableResource(w http.ResponseWriter, r *http.Req
 		server.handleUpsertRow(w, r, dbName, tableName)
 		return
 	}
+	if dbName, tableName, ok := parseTableRowsQueryPath(r.URL.Path); ok {
+		server.handleQueryRows(w, r, dbName, tableName)
+		return
+	}
 	if dbName, tableName, ok := parseTableFieldsPath(r.URL.Path); ok {
 		server.handleCreateFields(w, r, dbName, tableName)
 		return
@@ -623,6 +634,29 @@ func (server *Server) handleUpsertRow(w http.ResponseWriter, r *http.Request, db
 		return
 	}
 	writeJSON(w, http.StatusOK, rowMutationResponse{Operation: operation, RecordID: row.RecordID, Values: row.Values})
+}
+
+func (server *Server) handleQueryRows(w http.ResponseWriter, r *http.Request, dbName, tableName string) {
+	actorID, ok := server.requireUserID(w, r)
+	if !ok {
+		return
+	}
+	var request listRowsRequest
+	if err := readJSON(r, &request); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	rows, err := server.listTableRowsAs(r.Context(), actorID, dbName, tableName, table.RowListOptions{
+		ViewName: request.View,
+		Query:    request.Query,
+		Sorts:    request.Sorts,
+		Limit:    request.Limit,
+	})
+	if err != nil {
+		writeTableMutationError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, rowResponses(rows))
 }
 
 func (server *Server) handleCreateFields(w http.ResponseWriter, r *http.Request, dbName, tableName string) {
@@ -672,12 +706,12 @@ func (server *Server) deleteTableRowAs(ctx context.Context, actorID string, dbNa
 	return server.tables.DeleteRow(ctx, server.catalogSnapshot(), perms, actorID, isOwner, dbName, tableName, recordID)
 }
 
-func (server *Server) listTableRowsAs(ctx context.Context, actorID string, dbName string, tableName string, viewName string, temporarySorts ...metadata.ViewSort) ([]table.Row, error) {
+func (server *Server) listTableRowsAs(ctx context.Context, actorID string, dbName string, tableName string, options table.RowListOptions) ([]table.Row, error) {
 	perms, isOwner, err := server.tablePermissions(ctx, actorID, dbName)
 	if err != nil {
 		return nil, err
 	}
-	return server.tables.Rows(ctx, server.catalogSnapshot(), perms, actorID, isOwner, dbName, tableName, viewName, temporarySorts...)
+	return server.tables.RowsWithOptions(ctx, server.catalogSnapshot(), perms, actorID, isOwner, dbName, tableName, options)
 }
 
 func (server *Server) upsertTableRowAs(ctx context.Context, actorID string, dbName string, tableName string, matchField string, values map[string]any) (table.Row, string, error) {
@@ -795,16 +829,23 @@ func (server *Server) handleListRows(w http.ResponseWriter, r *http.Request, dbN
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	rows, err := server.listTableRowsAs(r.Context(), actorID, dbName, tableName, r.URL.Query().Get("view"), temporarySorts...)
+	rows, err := server.listTableRowsAs(r.Context(), actorID, dbName, tableName, table.RowListOptions{
+		ViewName: r.URL.Query().Get("view"),
+		Sorts:    temporarySorts,
+	})
 	if err != nil {
 		writeTableMutationError(w, err)
 		return
 	}
+	writeJSON(w, http.StatusOK, rowResponses(rows))
+}
+
+func rowResponses(rows []table.Row) []rowResponse {
 	response := make([]rowResponse, 0, len(rows))
 	for _, row := range rows {
 		response = append(response, rowResponse{RecordID: row.RecordID, Values: row.Values})
 	}
-	writeJSON(w, http.StatusOK, response)
+	return response
 }
 
 func parseTemporaryRowSorts(query url.Values) ([]metadata.ViewSort, error) {
@@ -1888,6 +1929,14 @@ func parseTableFieldsPath(path string) (string, string, bool) {
 func parseTableRowsUpsertPath(path string) (string, string, bool) {
 	parts := strings.Split(strings.Trim(path, "/"), "/")
 	if len(parts) != 6 || parts[0] != "api" || parts[1] != "tables" || parts[4] != "rows" || parts[5] != "upsert" {
+		return "", "", false
+	}
+	return parts[2], parts[3], true
+}
+
+func parseTableRowsQueryPath(path string) (string, string, bool) {
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(parts) != 6 || parts[0] != "api" || parts[1] != "tables" || parts[4] != "rows" || parts[5] != "query" {
 		return "", "", false
 	}
 	return parts[2], parts[3], true

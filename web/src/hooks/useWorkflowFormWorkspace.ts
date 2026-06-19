@@ -1,8 +1,7 @@
-import { type FormEvent, useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { replaceResource } from "../appState";
 import {
-  createRow,
   deleteForm,
   deleteWorkflow,
   listForms,
@@ -19,8 +18,8 @@ import {
   type WorkflowNodeInfo,
   type WorkflowRunResponse
 } from "../api";
-import { renderFormScript, type FormElement } from "../formRuntime";
 import { rowRecordToValues } from "../tableGrid";
+import { useFormRunner } from "./useFormRunner";
 import {
   evaluateWorkflowInstances,
   evaluateWorkflowTrigger,
@@ -54,7 +53,6 @@ export function useWorkflowFormWorkspace({
   const [selectedFormID, setSelectedFormID] = useState(0);
   const [workflowRuns, setWorkflowRuns] = useState<WorkflowRunResponse[]>([]);
   const [selectedWorkflowRunKey, setSelectedWorkflowRunKey] = useState("");
-  const [formValues, setFormValues] = useState<Record<string, string>>({});
   const [newWorkflowName, setNewWorkflowName] = useState("");
   const [newFormName, setNewFormName] = useState("");
   const [workflowInstances, setWorkflowInstances] = useState<WorkflowInstanceResult>(emptyWorkflowInstances);
@@ -64,7 +62,15 @@ export function useWorkflowFormWorkspace({
   const selectedForm = forms.find((item) => item.id === selectedFormID) ?? forms[0];
   const selectedWorkflowRun =
     workflowRuns.find((run) => run.history_key === selectedWorkflowRunKey) ?? workflowRuns[0] ?? null;
-  const renderedForm = useMemo(() => renderFormScript(selectedForm?.script ?? ""), [selectedForm?.script]);
+  const formRunner = useFormRunner({
+    databaseName,
+    script: selectedForm?.script ?? "",
+    onStatus,
+    onRowCreated: (targetTableName, row) => {
+      onSubmittedRow(targetTableName, rowRecordToValues(row));
+      onStatus(t("status.formCreatedRecord", { table: targetTableName, id: row.record_id }));
+    }
+  });
 
   useEffect(() => {
     evaluateSelectedWorkflowScript();
@@ -97,10 +103,6 @@ export function useWorkflowFormWorkspace({
       setWorkflowTrigger(nextTrigger.value ?? undefined);
     }
   }
-
-  useEffect(() => {
-    setFormValues({});
-  }, [selectedForm?.id, selectedForm?.script]);
 
   useEffect(() => {
     let cancelled = false;
@@ -370,7 +372,6 @@ export function useWorkflowFormWorkspace({
       await deleteForm(form.id);
       setForms((current) => current.filter((item) => item.id !== form.id));
       setSelectedFormID(forms.find((item) => item.id !== form.id)?.id ?? 0);
-      setFormValues({});
       onStatus(t("status.deletedForm", { name: form.name }));
     } catch (error) {
       onStatus(error instanceof Error ? error.message : t("status.formDeleteFailed"));
@@ -396,40 +397,10 @@ export function useWorkflowFormWorkspace({
       });
       setForms((current) => replaceResource(current, saved));
       setSelectedFormID(saved.id ?? 0);
-      setFormValues({});
       setNewFormName("");
       onStatus(t("status.createdForm", { name: saved.name }));
     } catch (error) {
       onStatus(error instanceof Error ? error.message : t("status.formCreationFailed"));
-    }
-  }
-
-  async function submitRenderedForm(submitElement?: Extract<FormElement, { kind: "submit" }>, event?: FormEvent<HTMLFormElement>) {
-    event?.preventDefault();
-    if (!submitElement && !renderedForm.elements.some((element) => element.kind === "submit")) {
-      return;
-    }
-    if (!databaseName || !renderedForm.table) {
-      onStatus(t("status.formRenderTargetRequired"));
-      return;
-    }
-    const values = Object.fromEntries(
-      renderedForm.elements.flatMap((element) => {
-        if (element.kind === "input" || element.kind === "relation") {
-          return [[element.field, formValues[element.field] ?? ""]];
-        }
-        if (element.kind === "select") {
-          return [[element.field, formValues[element.field] ?? element.options[0] ?? ""]];
-        }
-        return [];
-      })
-    );
-    try {
-      const saved = await createRow(databaseName, renderedForm.table, values);
-      onSubmittedRow(renderedForm.table, rowRecordToValues(saved));
-      onStatus(t("status.formCreatedRecord", { table: renderedForm.table, id: saved.record_id }));
-    } catch (error) {
-      onStatus(error instanceof Error ? error.message : t("status.formSubmitFailed"));
     }
   }
 
@@ -476,16 +447,13 @@ export function useWorkflowFormWorkspace({
     setForms((current) => current.map((item) => (item.id === selectedForm?.id ? { ...item, script } : item)));
   }
 
-  function updateFormValue(name: string, value: string) {
-    setFormValues((current) => ({ ...current, [name]: value }));
-  }
-
   return {
     forms,
-    formValues,
+    formResult: formRunner.result,
+    formValues: formRunner.values,
     newFormName,
     newWorkflowName,
-    renderedForm,
+    renderedForm: formRunner.rendered,
     selectedForm,
     selectedWorkflow,
     selectedWorkflowRun,
@@ -511,10 +479,11 @@ export function useWorkflowFormWorkspace({
     setSelectedFormID,
     setSelectedWorkflowID,
     setSelectedWorkflowRunKey,
-    submitRenderedForm,
+    executeFormAction: formRunner.execute,
+    submitRenderedForm: formRunner.submit,
     toggleSelectedWorkflowEnabled,
     unpublishSelectedForm,
-    updateFormValue,
+    updateFormValue: formRunner.updateValue,
     updateSelectedFormScript,
     saveSelectedWorkflowInstanceConfig,
     updateSelectedWorkflowScript
@@ -568,7 +537,13 @@ function defaultFormScript(targetTable: string) {
  * @returns {CodeTableFormDefinition}
  */
 function render(api, root) {
-  root.append(api.input({ field: 'name', label: 'Name' }), api.submit('Submit'));
+  root.append(
+    api.input({ field: 'name', label: 'Name' }),
+    api.button('Submit', async (api) => {
+      const row = await api.rows.create(${targetTable}, api.values());
+      api.show(row);
+    })
+  );
   return { table: ${targetTable} };
 }`;
 }

@@ -4,18 +4,20 @@ import { DismissRegular, SaveRegular, TabDesktopLinkRegular } from "@fluentui/re
 import { useTranslation } from "react-i18next";
 import type { FormDefinition, TableMetadata } from "../api";
 import { formEditorExtraLibs } from "../editorTypes";
-import type { FormElement, FormRenderResult } from "../formRuntime";
-import { FormPreviewFields } from "./FormPreviewFields";
+import type { FormRenderResult } from "../formRuntime";
+import { FormRunner } from "./FormRunner";
 import { JavaScriptEditor } from "./JavaScriptEditor";
 
 type FormWorkspaceProps = {
   databaseName: string;
   form?: FormDefinition;
+  formResult?: unknown;
   formValues: Record<string, string>;
+  onAction: (actionID: string, valueOverrides?: Record<string, string>) => void | Promise<void>;
   onFormValueChange: (name: string, value: string) => void;
   onPublish: () => void;
   onSave: () => void;
-  onSubmit: (submitElement?: Extract<FormElement, { kind: "submit" }>, event?: FormEvent<HTMLFormElement>) => void | Promise<void>;
+  onSubmit: (event?: FormEvent<HTMLFormElement>) => void | Promise<void>;
   onUnpublish: () => void;
   onUpdateScript: (script: string) => void;
   renderedForm: FormRenderResult;
@@ -25,7 +27,9 @@ type FormWorkspaceProps = {
 export function FormWorkspace({
   databaseName,
   form,
+  formResult,
   formValues,
+  onAction,
   onFormValueChange,
   onPublish,
   onSave,
@@ -78,18 +82,17 @@ export function FormWorkspace({
           />
         </div>
       </div>
-      <form className="form-preview" onSubmit={(event) => onSubmit(undefined, event)}>
-        <Text weight="semibold">{t("common.preview")}</Text>
-        {renderedForm.error && <Text className="form-error">{renderedForm.error}</Text>}
-        <FormPreviewFields
-          databaseName={databaseName}
-          elements={renderedForm.elements}
-          formValues={formValues}
-          onFormValueChange={onFormValueChange}
-          onSubmit={onSubmit}
-          tables={tables}
-        />
-      </form>
+      <FormRunner
+        databaseName={databaseName}
+        renderedForm={renderedForm}
+        result={formResult}
+        tables={tables}
+        title={t("common.preview")}
+        values={formValues}
+        onAction={onAction}
+        onSubmit={onSubmit}
+        onValueChange={onFormValueChange}
+      />
     </div>
   );
 }

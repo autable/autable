@@ -89,7 +89,7 @@ func (service workflowCodeTableService) runRow(ctx context.Context, kind string,
 		return workflowRowOutput(row, err)
 	default:
 		viewName, _ := input["view"].(string)
-		rows, err := server.listTableRowsAs(ctx, info.CreatorID, dbName, tableName, viewName)
+		rows, err := server.listTableRowsAs(ctx, info.CreatorID, dbName, tableName, table.RowListOptions{ViewName: viewName})
 		if err != nil {
 			return nil, err
 		}

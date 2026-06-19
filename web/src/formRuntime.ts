@@ -4,18 +4,23 @@ export type FormElement =
       field: string;
       label: string;
       inputType: "text" | "email" | "search" | "tel" | "url" | "password";
+      scanner?: boolean;
+      onChangeActionID?: string;
     }
   | { kind: "select"; field: string; label: string; options: string[] }
   | { kind: "relation"; field: string; label: string; table: string; view?: string }
-  | { kind: "submit"; label: string }
+  | { kind: "button"; id: string; label: string; actionID: string }
+  | { kind: "submit"; id: string; label: string; actionID: string }
   | { kind: "html"; html: string };
 
 type InputType = Extract<FormElement, { kind: "input" }>["inputType"];
+export type FormAction = (api: FormActionAPI) => unknown | Promise<unknown>;
 
 export type FormRenderResult = {
   elements: FormElement[];
   table?: string;
   fields?: Record<string, string>;
+  actions: Record<string, FormAction>;
   error?: string;
 };
 
@@ -23,6 +28,8 @@ type InputConfig = {
   field: string;
   label?: string;
   type?: string;
+  scanner?: boolean;
+  onChange?: FormAction;
 };
 
 type SelectConfig = {
@@ -38,10 +45,33 @@ type RelationConfig = {
   view?: string;
 };
 
+type ButtonConfig = {
+  id?: string;
+  label: string;
+  action: FormAction;
+};
+
+export type FormRowsAPI = {
+  create(table: string, values: Record<string, unknown>): Promise<unknown>;
+  update(table: string, recordID: number, values: Record<string, unknown>): Promise<unknown>;
+  upsert(table: string, input: { match_field: string; values: Record<string, unknown> }): Promise<unknown>;
+  list(table: string, options?: unknown): Promise<unknown>;
+};
+
+export type FormActionAPI = {
+  value(field: string): string;
+  values(): Record<string, string>;
+  setValue(field: string, value: string): void;
+  rows: FormRowsAPI;
+  show(value: unknown): void;
+};
+
 const inputTypes = new Set<InputType>(["text", "email", "search", "tel", "url", "password"]);
 
 export function renderFormScript(script: string): FormRenderResult {
   const elements: FormElement[] = [];
+  const actions: Record<string, FormAction> = {};
+  let nextActionID = 1;
   const rootElement = typeof document === "undefined" ? undefined : document.createElement("div");
   const root = {
     element: rootElement,
@@ -57,11 +87,14 @@ export function renderFormScript(script: string): FormRenderResult {
   const api = {
     input: (config: InputConfig): FormElement => {
       const field = formControlField(config);
+      const onChangeActionID = typeof config.onChange === "function" ? registerAction(actions, `change_${field}`, config.onChange) : undefined;
       return {
         kind: "input",
         field,
         label: config.label ?? field,
-        inputType: normalizeInputType(config.type)
+        inputType: normalizeInputType(config.type),
+        scanner: Boolean(config.scanner),
+        onChangeActionID
       };
     },
     select: (config: SelectConfig): FormElement => {
@@ -83,9 +116,21 @@ export function renderFormScript(script: string): FormRenderResult {
         view: config.view ? String(config.view) : undefined
       };
     },
+    button: (labelOrConfig: string | ButtonConfig, action?: FormAction): FormElement => {
+      const config = normalizeButtonConfig(labelOrConfig, action);
+      const actionID = registerAction(actions, config.id ?? `button_${nextActionID++}`, config.action);
+      return {
+        kind: "button",
+        id: config.id ?? actionID,
+        label: config.label,
+        actionID
+      };
+    },
     submit: (label: string): FormElement => ({
       kind: "submit",
-      label: String(label)
+      id: "submit",
+      label: String(label),
+      actionID: "submit"
     })
   };
 
@@ -97,10 +142,14 @@ export function renderFormScript(script: string): FormRenderResult {
       elements.push({ kind: "html", html: rootElement.innerHTML });
     }
     const fields = Object.fromEntries(elements.flatMap((element) => ("field" in element ? [[element.field, element.field]] : [])));
-    return { elements, table: definition.table, fields };
+    if (!actions.submit && definition.table) {
+      actions.submit = async (actionAPI) => actionAPI.rows.create(definition.table, actionAPI.values());
+    }
+    return { elements, table: definition.table, fields, actions };
   } catch (error) {
     return {
       elements: [],
+      actions: {},
       error: error instanceof Error ? error.message : "Form script failed"
     };
   }
@@ -183,6 +232,30 @@ function formControlField(config: unknown): string {
   return field;
 }
 
+function registerAction(actions: Record<string, FormAction>, requestedID: string, action: FormAction): string {
+  let actionID = requestedID || "action";
+  let suffix = 2;
+  while (actions[actionID]) {
+    actionID = `${requestedID}_${suffix}`;
+    suffix += 1;
+  }
+  actions[actionID] = action;
+  return actionID;
+}
+
+function normalizeButtonConfig(labelOrConfig: string | ButtonConfig, action?: FormAction): ButtonConfig {
+  if (typeof labelOrConfig === "string") {
+    if (typeof action !== "function") {
+      throw new Error("button action is required");
+    }
+    return { label: labelOrConfig, action };
+  }
+  if (!labelOrConfig || typeof labelOrConfig !== "object" || typeof labelOrConfig.action !== "function") {
+    throw new Error("button action is required");
+  }
+  return { ...labelOrConfig, label: String(labelOrConfig.label) };
+}
+
 function appendFormItem(elements: FormElement[], rootElement: HTMLDivElement | undefined, item: FormElement | string | Node) {
   if (isFormElement(item)) {
     elements.push(item);
@@ -202,5 +275,5 @@ function isFormElement(value: unknown): value is FormElement {
     return false;
   }
   const kind = (value as { kind?: unknown }).kind;
-  return kind === "input" || kind === "select" || kind === "relation" || kind === "submit" || kind === "html";
+  return kind === "input" || kind === "select" || kind === "relation" || kind === "button" || kind === "submit" || kind === "html";
 }

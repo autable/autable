@@ -1,4 +1,4 @@
-import { type FormEvent, useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Button, Text } from "@fluentui/react-components";
 import { useTranslation } from "react-i18next";
 import {
@@ -9,15 +9,14 @@ import {
   login,
   oidcStartURL,
   register,
-  createRow,
   type AuthUser,
   type FormDefinition,
   type OIDCProvider,
   type TableMetadata
 } from "../api";
-import { renderFormScript, type FormElement } from "../formRuntime";
+import { useFormRunner } from "../hooks/useFormRunner";
 import { AuthDialog } from "./AuthDialog";
-import { FormPreviewFields } from "./FormPreviewFields";
+import { FormRunner } from "./FormRunner";
 
 type PublishedFormPageProps = {
   token: string;
@@ -32,10 +31,14 @@ export function PublishedFormPage({ token }: PublishedFormPageProps) {
   const [authDialogOpen, setAuthDialogOpen] = useState(false);
   const [oidcProviders, setOIDCProviders] = useState<OIDCProvider[]>([]);
   const [form, setForm] = useState<FormDefinition | null>(null);
-  const [formValues, setFormValues] = useState<Record<string, string>>({});
   const [tables, setTables] = useState<TableMetadata[]>([]);
   const [status, setStatus] = useState(t("status.loadingForm"));
-  const renderedForm = useMemo(() => renderFormScript(form?.script ?? ""), [form?.script]);
+  const formRunner = useFormRunner({
+    databaseName: form?.database_name ?? "",
+    script: form?.script ?? "",
+    onStatus: setStatus,
+    onRowCreated: (_table, row) => setStatus(t("status.publishedFormSubmitted", { id: row.record_id }))
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -94,7 +97,6 @@ export function PublishedFormPage({ token }: PublishedFormPageProps) {
         }
         setForm(loadedForm);
         setTables(loadedTables);
-        setFormValues({});
         setStatus(t("status.openedForm", { name: loadedForm.name }));
       })
       .catch((error) => {
@@ -135,38 +137,6 @@ export function PublishedFormPage({ token }: PublishedFormPageProps) {
     window.location.assign(oidcStartURL(providerName));
   }
 
-  async function submitForm(submitElement?: Extract<FormElement, { kind: "submit" }>, event?: FormEvent<HTMLFormElement>) {
-    event?.preventDefault();
-    if (!form) {
-      return;
-    }
-    if (!submitElement && !renderedForm.elements.some((element) => element.kind === "submit")) {
-      return;
-    }
-    if (!renderedForm.table) {
-      setStatus(t("status.publishedFormDefinitionRequired"));
-      return;
-    }
-    const values = Object.fromEntries(
-      renderedForm.elements.flatMap((element) => {
-        if (element.kind === "input" || element.kind === "relation") {
-          return [[element.field, formValues[element.field] ?? ""]];
-        }
-        if (element.kind === "select") {
-          return [[element.field, formValues[element.field] ?? element.options[0] ?? ""]];
-        }
-        return [];
-      })
-    );
-    try {
-      const saved = await createRow(form.database_name, renderedForm.table, values);
-      setFormValues({});
-      setStatus(t("status.publishedFormSubmitted", { id: saved.record_id }));
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : t("status.publishedFormSubmitFailed"));
-    }
-  }
-
   return (
     <div className="published-form-shell">
       <main className="published-form-main">
@@ -182,17 +152,17 @@ export function PublishedFormPage({ token }: PublishedFormPageProps) {
           )}
         </div>
         {form ? (
-          <form className="form-preview published-form-card" onSubmit={(event) => void submitForm(undefined, event)}>
-            {renderedForm.error && <Text className="form-error">{renderedForm.error}</Text>}
-            <FormPreviewFields
-              databaseName={form.database_name}
-              elements={renderedForm.elements}
-              formValues={formValues}
-              onFormValueChange={(name, value) => setFormValues((current) => ({ ...current, [name]: value }))}
-              onSubmit={submitForm}
-              tables={tables}
-            />
-          </form>
+          <FormRunner
+            className="form-preview published-form-card"
+            databaseName={form.database_name}
+            renderedForm={formRunner.rendered}
+            result={formRunner.result}
+            tables={tables}
+            values={formRunner.values}
+            onAction={formRunner.execute}
+            onSubmit={formRunner.submit}
+            onValueChange={formRunner.updateValue}
+          />
         ) : (
           <div className="empty-state">
             <Text>{status}</Text>

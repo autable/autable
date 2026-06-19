@@ -184,6 +184,13 @@ export type RowRecord = {
   values: Record<string, unknown>;
 };
 
+export type RowListOptions = {
+  view?: string;
+  query?: TableViewQuery | { field: string; op?: string; operator?: string; value?: unknown };
+  sorts?: TableViewSort[];
+  limit?: number;
+};
+
 export type RowMutation = RowRecord & {
   operation: "create" | "update" | "noop";
 };
@@ -365,8 +372,26 @@ export async function listRows(
   dbName: string,
   tableName: string,
   viewName?: string,
-  sort?: TableViewSort
+  sort?: TableViewSort,
+  options?: RowListOptions
 ): Promise<RowRecord[]> {
+  if (options?.query || options?.limit || options?.sorts?.length || options?.view) {
+    const response = await fetch(`/api/tables/${dbName}/${tableName}/rows/query`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        view: options.view ?? viewName,
+        query: normalizeRowListQuery(options.query),
+        sorts: options.sorts ?? (sort ? [sort] : undefined),
+        limit: options.limit
+      })
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: response.statusText }));
+      throw new Error(error.error ?? `row query failed: ${response.status}`);
+    }
+    return response.json() as Promise<RowRecord[]>;
+  }
   const params = new URLSearchParams();
   if (viewName && viewName !== "all") {
     params.set("view", viewName);
@@ -382,6 +407,19 @@ export async function listRows(
     throw new Error(error.error ?? `row list failed: ${response.status}`);
   }
   return response.json() as Promise<RowRecord[]>;
+}
+
+function normalizeRowListQuery(query: RowListOptions["query"]): TableViewQuery | undefined {
+  if (!query) {
+    return undefined;
+  }
+  if ("rules" in query) {
+    return query;
+  }
+  return {
+    combinator: "and",
+    rules: [{ field: query.field, operator: query.operator ?? query.op ?? "=", value: query.value }]
+  };
 }
 
 export async function listRowHistory(

@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Button,
+  Caption1,
   Dialog,
   DialogActions,
   DialogBody,
@@ -22,8 +23,9 @@ type FormPreviewFieldsProps = {
   databaseName: string;
   elements: FormElement[];
   formValues: Record<string, string>;
+  result?: unknown;
+  onAction: (actionID: string, valueOverrides?: Record<string, string>) => void | Promise<void>;
   onFormValueChange: (name: string, value: string) => void;
-  onSubmit: (submitElement?: Extract<FormElement, { kind: "submit" }>, event?: FormEvent<HTMLFormElement>) => void | Promise<void>;
   tables?: TableMetadata[];
 };
 
@@ -31,10 +33,12 @@ export function FormPreviewFields({
   databaseName,
   elements,
   formValues,
+  result,
+  onAction,
   onFormValueChange,
-  onSubmit,
   tables = []
 }: FormPreviewFieldsProps) {
+  const { t } = useTranslation();
   return (
     <>
       {elements.map((element) => {
@@ -45,8 +49,14 @@ export function FormPreviewFields({
               <Input
                 type={element.inputType}
                 value={formValues[element.field] ?? ""}
-                onChange={(_, data) => onFormValueChange(element.field, data.value)}
+                onChange={(_, data) => {
+                  onFormValueChange(element.field, data.value);
+                  if (element.onChangeActionID) {
+                    void onAction(element.onChangeActionID, { [element.field]: data.value });
+                  }
+                }}
               />
+              {element.scanner && <Caption1>{t("form.scannerInput")}</Caption1>}
             </label>
           );
         }
@@ -81,13 +91,90 @@ export function FormPreviewFields({
         if (element.kind === "html") {
           return <div key={element.html} className="form-html" dangerouslySetInnerHTML={{ __html: element.html }} />;
         }
+        if (element.kind === "button") {
+          return (
+            <Button key={element.id} type="button" appearance="primary" onClick={() => void onAction(element.actionID)}>
+              {element.label}
+            </Button>
+          );
+        }
         return (
-          <Button key={element.label} type="button" appearance="primary" onClick={() => void onSubmit(element)}>
+          <Button key={element.id} type="button" appearance="primary" onClick={() => void onAction(element.actionID)}>
             {element.label}
           </Button>
         );
       })}
+      <FormResultView result={result} tables={tables} />
     </>
+  );
+}
+
+function FormResultView({ result, tables }: { result?: unknown; tables: TableMetadata[] }) {
+  if (result === undefined || result === null) {
+    return null;
+  }
+  if (typeof result === "string" || typeof result === "number" || typeof result === "boolean") {
+    return <Text>{String(result)}</Text>;
+  }
+  if (Array.isArray(result) && result.every(isRowRecord)) {
+    if (result.length === 1) {
+      return <RecordDetail row={result[0]} tables={tables} />;
+    }
+    return <RowsResult rows={result} tables={tables} />;
+  }
+  if (isRowRecord(result)) {
+    return <RecordDetail row={result} tables={tables} />;
+  }
+  return <pre className="form-result-json">{JSON.stringify(result, null, 2)}</pre>;
+}
+
+function RowsResult({ rows, tables }: { rows: RowRecord[]; tables: TableMetadata[] }) {
+  if (rows.length === 0) {
+    return <Text>No records</Text>;
+  }
+  const fieldNames = formResultFieldNames(rows, tables);
+  const columns: Column<TableGridRow>[] = fieldNames.map((fieldName) => ({
+    key: fieldName,
+    name: fieldName,
+    minWidth: Math.max(128, fieldName.length * 14),
+    resizable: true,
+    renderCell: ({ row }) => String(row[fieldName] ?? "")
+  }));
+  return (
+    <div className="grid-host relation-picker-grid">
+      <RecordDataGrid columns={columns} rows={rows.map(rowRecordToValues)} rowKeyGetter={(row) => row.ct_record_id} />
+    </div>
+  );
+}
+
+function RecordDetail({ row, tables }: { row: RowRecord; tables: TableMetadata[] }) {
+  const fieldNames = formResultFieldNames([row], tables);
+  return (
+    <div className="form-record-detail">
+      {fieldNames.map((fieldName) => (
+        <div key={fieldName} className="form-record-detail-row">
+          <Text size={200} weight="semibold">{fieldName}</Text>
+          <Text>{String(row.values[fieldName] ?? "")}</Text>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function formResultFieldNames(rows: RowRecord[], tables: TableMetadata[]): string[] {
+  const tableFields = [...new Set(tables.flatMap((table) => table.fields.filter((field) => !field.deleted).map((field) => field.name)))];
+  const rowFields = [...new Set(rows.flatMap((row) => Object.keys(row.values)))];
+  const ordered = tableFields.filter((field) => rowFields.includes(field));
+  return ordered.length > 0 ? ordered : rowFields;
+}
+
+function isRowRecord(value: unknown): value is RowRecord {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      typeof (value as RowRecord).record_id === "number" &&
+      (value as RowRecord).values &&
+      typeof (value as RowRecord).values === "object"
   );
 }
 

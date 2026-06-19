@@ -526,7 +526,9 @@ function WorkspaceApp() {
             <FormWorkspace
               databaseName={database.name}
               form={selectedForm}
+              formResult={workflowFormWorkspace.formResult}
               formValues={formValues}
+              onAction={workflowFormWorkspace.executeFormAction}
               onFormValueChange={workflowFormWorkspace.updateFormValue}
               onPublish={workflowFormWorkspace.publishSelectedForm}
               onSave={workflowFormWorkspace.persistForm}
