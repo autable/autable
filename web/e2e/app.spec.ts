@@ -379,6 +379,72 @@ test("hides workflow and form resources without resource permission", async ({ p
   await expect(page.getByRole("button", { name: formName })).toHaveCount(0);
 });
 
+test("prevents partial field readers from mutating table metadata", async ({ page }) => {
+  const reader = await registerUser(page);
+  await api(page, "POST", "/api/auth/logout");
+  const owner = await registerUser(page);
+  const suffix = `${Date.now()}-${sequence}`;
+  const databaseName = `partial${suffix}`;
+  const tableName = "contacts";
+
+  await api(page, "POST", "/api/databases", {
+    name: databaseName,
+    sqlite_path: `./data/${databaseName}.sqlite`
+  });
+  await api(page, "POST", `/api/databases/${databaseName}/tables`, {
+    name: tableName,
+    display_name: "Contacts",
+    fields: [
+      { name: "name", type: "string", deleted: false },
+      { name: "email", type: "string", deleted: false }
+    ],
+    views: []
+  });
+  await api(page, "POST", "/api/permissions/grants", {
+    subject_id: reader.id,
+    scope: "field",
+    resource: `${databaseName}.${tableName}`,
+    field: "email",
+    level: 1
+  });
+
+  await api(page, "POST", "/api/auth/logout");
+  await loginUser(page, reader.email);
+  await page.goto("/");
+  await expect(page.getByRole("button", { name: databaseName })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Contacts/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Add field" })).toBeDisabled();
+  await expect(page.getByText("+ View")).not.toBeVisible();
+
+  const updateStatus = await page.evaluate(
+    async ({ databaseName: dbName, tableName: targetTable }) => {
+      const response = await fetch(`/api/databases/${dbName}/tables/${targetTable}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: targetTable,
+          fields: [
+            { name: "email", type: "string", deleted: false },
+            { name: "phone", type: "string", deleted: false }
+          ]
+        })
+      });
+      return response.status;
+    },
+    { databaseName, tableName }
+  );
+  expect(updateStatus).toBe(403);
+
+  await loginUser(page, owner.email);
+  const catalog = (await api(page, "GET", "/api/metadata")) as {
+    databases: Array<{ name: string; tables: Array<{ name: string; fields: Array<{ name: string }> }> }>;
+  };
+  const contacts = catalog.databases.find((item) => item.name === databaseName)?.tables.find((item) => item.name === tableName);
+  const fieldNames = contacts?.fields.map((field) => field.name) ?? [];
+  expect(fieldNames).toEqual(expect.arrayContaining(["name", "email"]));
+  expect(fieldNames).not.toContain("phone");
+});
+
 test("renders read-only workflow and form resources as non-editable", async ({ page }) => {
   const readOnlyUser = await registerUser(page);
   await api(page, "POST", "/api/auth/logout");
