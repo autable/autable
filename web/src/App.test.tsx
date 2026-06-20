@@ -335,7 +335,7 @@ describe("App", () => {
   it("disables row creation outside all records", async () => {
     renderApp();
     await screen.findByRole("button", { name: authUserFixture.email });
-    await userEvent.click(screen.getByRole("button", { name: "Active" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Active" }));
 
     expect(screen.getByRole("button", { name: "Row" })).toBeDisabled();
   });
