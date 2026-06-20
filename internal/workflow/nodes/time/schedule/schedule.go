@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"codetable/internal/workflow"
+	"autable/internal/workflow"
 )
 
 type Node struct{}

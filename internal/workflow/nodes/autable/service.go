@@ -1,9 +1,9 @@
-package codetable
+package autable
 
 import (
 	"context"
 
-	"codetable/internal/workflow"
+	"autable/internal/workflow"
 )
 
 type Service interface {

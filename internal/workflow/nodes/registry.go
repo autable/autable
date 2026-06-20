@@ -1,25 +1,25 @@
 package nodes
 
 import (
-	"codetable/internal/history"
-	"codetable/internal/workflow"
-	"codetable/internal/workflow/nodes/codetable"
-	"codetable/internal/workflow/nodes/dingtalk/notable/listrecords"
-	"codetable/internal/workflow/nodes/dingtalk/robot"
-	"codetable/internal/workflow/nodes/echo"
-	"codetable/internal/workflow/nodes/table/field"
-	"codetable/internal/workflow/nodes/table/recordchanged"
-	rowcreate "codetable/internal/workflow/nodes/table/row/create"
-	rowdelete "codetable/internal/workflow/nodes/table/row/delete"
-	rowlist "codetable/internal/workflow/nodes/table/row/list"
-	rowupdate "codetable/internal/workflow/nodes/table/row/update"
-	rowupsert "codetable/internal/workflow/nodes/table/row/upsert"
-	"codetable/internal/workflow/nodes/time/schedule"
+	"autable/internal/history"
+	"autable/internal/workflow"
+	"autable/internal/workflow/nodes/autable"
+	"autable/internal/workflow/nodes/dingtalk/notable/listrecords"
+	"autable/internal/workflow/nodes/dingtalk/robot"
+	"autable/internal/workflow/nodes/echo"
+	"autable/internal/workflow/nodes/table/field"
+	"autable/internal/workflow/nodes/table/recordchanged"
+	rowcreate "autable/internal/workflow/nodes/table/row/create"
+	rowdelete "autable/internal/workflow/nodes/table/row/delete"
+	rowlist "autable/internal/workflow/nodes/table/row/list"
+	rowupdate "autable/internal/workflow/nodes/table/row/update"
+	rowupsert "autable/internal/workflow/nodes/table/row/upsert"
+	"autable/internal/workflow/nodes/time/schedule"
 )
 
 type Dependencies struct {
 	History   history.Store
-	CodeTable codetable.Service
+	Autable autable.Service
 }
 
 func All(deps Dependencies) []workflow.Node {
@@ -30,11 +30,11 @@ func All(deps Dependencies) []workflow.Node {
 		robot.NewNode(),
 		listrecords.NewNode(),
 	}
-	nodes = append(nodes, CodeTableNodes(deps.CodeTable)...)
+	nodes = append(nodes, AutableNodes(deps.Autable)...)
 	return nodes
 }
 
-func CodeTableNodes(service codetable.Service) []workflow.Node {
+func AutableNodes(service autable.Service) []workflow.Node {
 	if service == nil {
 		return nil
 	}

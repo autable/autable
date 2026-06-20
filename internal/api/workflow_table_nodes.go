@@ -7,41 +7,41 @@ import (
 	"fmt"
 	"strings"
 
-	"codetable/internal/metadata"
-	"codetable/internal/permission"
-	"codetable/internal/table"
-	"codetable/internal/workflow"
+	"autable/internal/metadata"
+	"autable/internal/permission"
+	"autable/internal/table"
+	"autable/internal/workflow"
 )
 
-type workflowCodeTableService struct {
+type workflowAutableService struct {
 	server *Server
 }
 
-func (server *Server) workflowCodeTableService() workflowCodeTableService {
-	return workflowCodeTableService{server: server}
+func (server *Server) workflowAutableService() workflowAutableService {
+	return workflowAutableService{server: server}
 }
 
-func (service workflowCodeTableService) CreateRow(ctx context.Context, input map[string]any, info workflow.RuntimeInfo) (map[string]any, error) {
+func (service workflowAutableService) CreateRow(ctx context.Context, input map[string]any, info workflow.RuntimeInfo) (map[string]any, error) {
 	return service.runRow(ctx, "create", input, info)
 }
 
-func (service workflowCodeTableService) UpdateRow(ctx context.Context, input map[string]any, info workflow.RuntimeInfo) (map[string]any, error) {
+func (service workflowAutableService) UpdateRow(ctx context.Context, input map[string]any, info workflow.RuntimeInfo) (map[string]any, error) {
 	return service.runRow(ctx, "update", input, info)
 }
 
-func (service workflowCodeTableService) UpsertRow(ctx context.Context, input map[string]any, info workflow.RuntimeInfo) (map[string]any, error) {
+func (service workflowAutableService) UpsertRow(ctx context.Context, input map[string]any, info workflow.RuntimeInfo) (map[string]any, error) {
 	return service.runRow(ctx, "upsert", input, info)
 }
 
-func (service workflowCodeTableService) DeleteRow(ctx context.Context, input map[string]any, info workflow.RuntimeInfo) (map[string]any, error) {
+func (service workflowAutableService) DeleteRow(ctx context.Context, input map[string]any, info workflow.RuntimeInfo) (map[string]any, error) {
 	return service.runRow(ctx, "delete", input, info)
 }
 
-func (service workflowCodeTableService) ListRows(ctx context.Context, input map[string]any, info workflow.RuntimeInfo) (map[string]any, error) {
+func (service workflowAutableService) ListRows(ctx context.Context, input map[string]any, info workflow.RuntimeInfo) (map[string]any, error) {
 	return service.runRow(ctx, "list", input, info)
 }
 
-func (service workflowCodeTableService) runRow(ctx context.Context, kind string, input map[string]any, info workflow.RuntimeInfo) (map[string]any, error) {
+func (service workflowAutableService) runRow(ctx context.Context, kind string, input map[string]any, info workflow.RuntimeInfo) (map[string]any, error) {
 	if info.CreatorID == "" {
 		return nil, errors.New("workflow creator is required")
 	}

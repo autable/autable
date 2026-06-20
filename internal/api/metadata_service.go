@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	"codetable/internal/metadata"
+	"autable/internal/metadata"
 )
 
 func (server *Server) createDatabase(ctx context.Context, database metadata.Database) error {

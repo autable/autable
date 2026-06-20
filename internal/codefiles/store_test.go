@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"codetable/internal/systemdb"
+	"autable/internal/systemdb"
 )
 
 func TestStoreWritesWorkflowAndFormScripts(t *testing.T) {

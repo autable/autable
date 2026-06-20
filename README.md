@@ -1,6 +1,6 @@
-# codetable
+# autable
 
-codetable is a code-first alternative to multidimensional tables. The project is not a no-code or low-code builder: tables, forms, and workflows are stored as code-managed artifacts so AI-assisted development can work directly with the source of truth.
+autable is a code-first alternative to multidimensional tables. The project is not a no-code or low-code builder: tables, forms, and workflows are stored as code-managed artifacts so AI-assisted development can work directly with the source of truth.
 
 ## Direction
 
@@ -55,7 +55,7 @@ go test ./...
 Run the API server with git-managed config. The server loads metadata from `repository.path/metadata/main.yml`:
 
 ```sh
-go run ./cmd/codetable -config examples/config.yml
+go run ./cmd/autable -config examples/config.yml
 ```
 
 Run the frontend:

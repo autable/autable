@@ -27,20 +27,20 @@ It does not use DingTalk signing. Store the access token as an instance secret.
 
 ```js
 /**
- * @param {CodeTableWorkflowDefinitionInfo} info
- * @returns {Record<string, string | CodeTableWorkflowInstanceDeclaration>}
+ * @param {AutableWorkflowDefinitionInfo} info
+ * @returns {Record<string, string | AutableWorkflowInstanceDeclaration>}
  */
 function instances(info) {
   return { ding: "dingtalk.robot.send" };
 }
 
 /**
- * @param {CodeTableWorkflowRunInfo} info
+ * @param {AutableWorkflowRunInfo} info
  * @returns {Record<string, unknown>}
  */
 function run(info) {
   return info.instance("ding").exec({
-    content: "Codetable alert",
+    content: "Autable alert",
     at_user_ids: ["user123"]
   });
 }

@@ -78,7 +78,7 @@
     "toggleLabel": "中文"
   },
   "nav": {
-    "codetable": "codetable",
+    "autable": "autable",
     "createDb": "创建数据库",
     "createForm": "创建表单",
     "createRole": "创建角色",

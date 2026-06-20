@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"codetable/internal/workflow"
+	"autable/internal/workflow"
 )
 
 type fakeTableFieldRunner struct {

@@ -8,23 +8,23 @@ import (
 	"os"
 	"time"
 
-	"codetable/internal/api"
-	"codetable/internal/codefiles"
-	"codetable/internal/config"
-	"codetable/internal/history"
-	"codetable/internal/metadata"
-	"codetable/internal/recorddb"
-	"codetable/internal/repository"
-	"codetable/internal/systemdb"
-	"codetable/internal/table"
+	"autable/internal/api"
+	"autable/internal/codefiles"
+	"autable/internal/config"
+	"autable/internal/history"
+	"autable/internal/metadata"
+	"autable/internal/recorddb"
+	"autable/internal/repository"
+	"autable/internal/systemdb"
+	"autable/internal/table"
 )
 
 func main() {
-	configPath := flag.String("config", "config.yml", "path to codetable config.yml")
+	configPath := flag.String("config", "config.yml", "path to autable config.yml")
 	flag.Parse()
 
 	if err := run(context.Background(), *configPath); err != nil {
-		slog.Error("codetable stopped", "error", err)
+		slog.Error("autable stopped", "error", err)
 		os.Exit(1)
 	}
 }
@@ -74,6 +74,6 @@ func run(ctx context.Context, configPath string) error {
 	server.SetCodeFileStore(codefiles.NewStore(cfg.Repository.Path))
 	server.StartWorkflowWorkers(ctx)
 	server.StartWorkflowScheduler(ctx, 15*time.Second)
-	slog.Info("codetable listening", "address", address)
+	slog.Info("autable listening", "address", address)
 	return http.ListenAndServe(address, server)
 }

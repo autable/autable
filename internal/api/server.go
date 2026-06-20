@@ -15,15 +15,15 @@ import (
 	"github.com/coreos/go-oidc/v3/oidc"
 	"golang.org/x/oauth2"
 
-	"codetable/internal/auth"
-	"codetable/internal/config"
-	"codetable/internal/history"
-	"codetable/internal/metadata"
-	"codetable/internal/permission"
-	"codetable/internal/systemdb"
-	"codetable/internal/table"
-	"codetable/internal/workflow"
-	"codetable/internal/workflow/nodes"
+	"autable/internal/auth"
+	"autable/internal/config"
+	"autable/internal/history"
+	"autable/internal/metadata"
+	"autable/internal/permission"
+	"autable/internal/systemdb"
+	"autable/internal/table"
+	"autable/internal/workflow"
+	"autable/internal/workflow/nodes"
 )
 
 type Server struct {
@@ -182,8 +182,8 @@ type roleMembersRequest struct {
 }
 
 const (
-	sessionCookieName   = "codetable_session"
-	oidcStateCookieName = "codetable_oidc_state"
+	sessionCookieName   = "autable_session"
+	oidcStateCookieName = "autable_oidc_state"
 	sessionTTL          = 14 * 24 * time.Hour
 	oidcStateTTL        = 10 * time.Minute
 )
@@ -226,10 +226,10 @@ func NewServerWithWorkflowRunnerAndOIDC(catalog metadata.Catalog, system *system
 	if runner == nil {
 		runner = workflow.NewRunner(historyStore, nodes.All(nodes.Dependencies{
 			History:   historyStore,
-			CodeTable: server.workflowCodeTableService(),
+			Autable: server.workflowAutableService(),
 		})...)
 	} else {
-		for _, node := range nodes.CodeTableNodes(server.workflowCodeTableService()) {
+		for _, node := range nodes.AutableNodes(server.workflowAutableService()) {
 			runner.Register(node)
 		}
 	}

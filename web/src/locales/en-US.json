@@ -78,7 +78,7 @@
     "toggleLabel": "EN"
   },
   "nav": {
-    "codetable": "codetable",
+    "autable": "autable",
     "createDb": "Create DB",
     "createForm": "Create Form",
     "createRole": "Create Role",

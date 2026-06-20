@@ -16,15 +16,15 @@
 
 ```js
 /**
- * @param {CodeTableWorkflowDefinitionInfo} info
- * @returns {Record<string, string | CodeTableWorkflowInstanceDeclaration>}
+ * @param {AutableWorkflowDefinitionInfo} info
+ * @returns {Record<string, string | AutableWorkflowInstanceDeclaration>}
  */
 function instances(info) {
   return { list_contacts: "table.row.list" };
 }
 
 /**
- * @param {CodeTableWorkflowRunInfo} info
+ * @param {AutableWorkflowRunInfo} info
  * @returns {Record<string, unknown>}
  */
 function run(info) {

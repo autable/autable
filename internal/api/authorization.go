@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"net/http"
 
-	"codetable/internal/permission"
-	"codetable/internal/table"
+	"autable/internal/permission"
+	"autable/internal/table"
 )
 
 type accessAction string

@@ -3,15 +3,15 @@ package listrow
 import (
 	"context"
 
-	"codetable/internal/workflow"
-	"codetable/internal/workflow/nodes/codetable"
+	"autable/internal/workflow"
+	"autable/internal/workflow/nodes/autable"
 )
 
 type Node struct {
-	service codetable.Service
+	service autable.Service
 }
 
-func NewNode(service codetable.Service) Node {
+func NewNode(service autable.Service) Node {
 	return Node{service: service}
 }
 

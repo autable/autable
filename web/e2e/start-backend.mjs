@@ -34,7 +34,7 @@ writeFileSync(
 
 const child = spawn(
   "go",
-  ["run", "./cmd/codetable", "-config", configPath],
+  ["run", "./cmd/autable", "-config", configPath],
   {
     cwd: rootDir,
     env: { ...process.env, GOTOOLCHAIN: "local" },

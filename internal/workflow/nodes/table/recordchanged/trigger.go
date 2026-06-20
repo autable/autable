@@ -5,8 +5,8 @@ import (
 	"errors"
 	"fmt"
 
-	"codetable/internal/history"
-	"codetable/internal/workflow"
+	"autable/internal/history"
+	"autable/internal/workflow"
 )
 
 type Node struct {

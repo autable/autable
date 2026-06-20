@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"strings"
 
-	"codetable/internal/metadata"
-	"codetable/internal/workflow"
+	"autable/internal/metadata"
+	"autable/internal/workflow"
 )
 
 type workflowFieldMutation struct {
@@ -18,7 +18,7 @@ type workflowFieldMutation struct {
 	Fields   []metadata.Field
 }
 
-func (service workflowCodeTableService) CreateFields(ctx context.Context, input map[string]any, info workflow.RuntimeInfo) (map[string]any, error) {
+func (service workflowAutableService) CreateFields(ctx context.Context, input map[string]any, info workflow.RuntimeInfo) (map[string]any, error) {
 	if info.CreatorID == "" {
 		return nil, errors.New("workflow creator is required")
 	}

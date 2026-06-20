@@ -8,7 +8,7 @@ import (
 	oauth2 "github.com/alibabacloud-go/dingtalk/oauth2_1_0"
 	util "github.com/alibabacloud-go/tea-utils/v2/service"
 
-	"codetable/internal/workflow"
+	"autable/internal/workflow"
 )
 
 type fakeNotableListRecordsClient struct {

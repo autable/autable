@@ -20,7 +20,7 @@ export default defineConfig({
     },
     {
       command: "npm run dev -- --port 5175 --strictPort",
-      env: { CODETABLE_API_PROXY: "http://127.0.0.1:18081" },
+      env: { AUTABLE_API_PROXY: "http://127.0.0.1:18081" },
       url: "http://127.0.0.1:5175",
       reuseExistingServer: false,
       timeout: 30_000

@@ -13,15 +13,15 @@ export function workflowEditorExtraLibs(options: {
 }): EditorExtraLib[] {
   return [
     {
-      filePath: "inmemory://codetable/workflow-runtime.d.ts",
+      filePath: "inmemory://autable/workflow-runtime.d.ts",
       content: workflowRuntimeTypes()
     },
     {
-      filePath: "inmemory://codetable/workflow-nodes.generated.d.ts",
+      filePath: "inmemory://autable/workflow-nodes.generated.d.ts",
       content: workflowNodeTypes(options.workflowNodes)
     },
     {
-      filePath: "inmemory://codetable/workflow-instances.generated.d.ts",
+      filePath: "inmemory://autable/workflow-instances.generated.d.ts",
       content: workflowInstanceTypes(
         options.workflowInstances ?? {},
         options.workflowNodes,
@@ -34,30 +34,30 @@ export function workflowEditorExtraLibs(options: {
 export function formEditorExtraLibs(): EditorExtraLib[] {
   return [
     {
-      filePath: "inmemory://codetable/form-runtime.d.ts",
+      filePath: "inmemory://autable/form-runtime.d.ts",
       content: `export {};
 
 declare global {
-  type CodeTableFormInputType = "text" | "email" | "search" | "tel" | "url" | "password";
-  type CodeTableFormScannerConfig = { confirm?: boolean };
+  type AutableFormInputType = "text" | "email" | "search" | "tel" | "url" | "password";
+  type AutableFormScannerConfig = { confirm?: boolean };
 
-  type CodeTableFormElement =
-    | { kind: "input"; field: string; label: string; inputType: CodeTableFormInputType; scanner?: boolean | CodeTableFormScannerConfig; onChangeActionID?: string }
+  type AutableFormElement =
+    | { kind: "input"; field: string; label: string; inputType: AutableFormInputType; scanner?: boolean | AutableFormScannerConfig; onChangeActionID?: string }
     | { kind: "select"; field: string; label: string; options: string[] }
     | { kind: "relation"; field: string; label: string; table: string; view?: string }
     | { kind: "button"; id: string; label: string; actionID: string }
     | { kind: "submit"; id: string; label: string; actionID: string }
     | { kind: "html"; html: string };
 
-  interface CodeTableRowRecord {
+  interface AutableRowRecord {
     record_id: number;
     values: Record<string, unknown>;
   }
 
-  interface CodeTableFormRowsAPI {
-    create(table: string, values: Record<string, unknown>): Promise<CodeTableRowRecord>;
-    update(table: string, recordID: number, values: Record<string, unknown>): Promise<CodeTableRowRecord>;
-    upsert(table: string, input: { match_field: string; values: Record<string, unknown> }): Promise<CodeTableRowRecord & { operation: "create" | "update" | "noop" }>;
+  interface AutableFormRowsAPI {
+    create(table: string, values: Record<string, unknown>): Promise<AutableRowRecord>;
+    update(table: string, recordID: number, values: Record<string, unknown>): Promise<AutableRowRecord>;
+    upsert(table: string, input: { match_field: string; values: Record<string, unknown> }): Promise<AutableRowRecord & { operation: "create" | "update" | "noop" }>;
     list(table: string, options?: {
       view?: string;
       query?: { field: string; op?: string; operator?: string; value?: unknown } | {
@@ -67,40 +67,40 @@ declare global {
       };
       sorts?: Array<{ field: string; direction: "asc" | "desc" }>;
       limit?: number;
-    }): Promise<CodeTableRowRecord[]>;
+    }): Promise<AutableRowRecord[]>;
   }
 
-  interface CodeTableFormActionAPI {
+  interface AutableFormActionAPI {
     value(field: string): string;
     values(): Record<string, string>;
     setValue(field: string, value: string): void;
-    rows: CodeTableFormRowsAPI;
+    rows: AutableFormRowsAPI;
     show(value: unknown): void;
   }
 
-  type CodeTableFormAction = (api: CodeTableFormActionAPI) => unknown | Promise<unknown>;
+  type AutableFormAction = (api: AutableFormActionAPI) => unknown | Promise<unknown>;
 
-  interface CodeTableFormAPI {
-    input(config: { field: string; label?: string; type?: CodeTableFormInputType; scanner?: boolean | CodeTableFormScannerConfig; onChange?: CodeTableFormAction }): CodeTableFormElement;
-    relation(config: { field: string; label?: string; table: string; view?: string }): CodeTableFormElement;
-    select(config: { field: string; label?: string; options: string[] }): CodeTableFormElement;
-    button(label: string, action: CodeTableFormAction): CodeTableFormElement;
-    button(config: { id?: string; label: string; action: CodeTableFormAction }): CodeTableFormElement;
-    submit(label: string): CodeTableFormElement;
+  interface AutableFormAPI {
+    input(config: { field: string; label?: string; type?: AutableFormInputType; scanner?: boolean | AutableFormScannerConfig; onChange?: AutableFormAction }): AutableFormElement;
+    relation(config: { field: string; label?: string; table: string; view?: string }): AutableFormElement;
+    select(config: { field: string; label?: string; options: string[] }): AutableFormElement;
+    button(label: string, action: AutableFormAction): AutableFormElement;
+    button(config: { id?: string; label: string; action: AutableFormAction }): AutableFormElement;
+    submit(label: string): AutableFormElement;
   }
 
-  interface CodeTableFormRoot {
+  interface AutableFormRoot {
     element?: HTMLDivElement;
-    append(...items: Array<CodeTableFormElement | CodeTableFormElement[] | string | Node>): void;
-    appendChild(item: CodeTableFormElement | string | Node): void;
+    append(...items: Array<AutableFormElement | AutableFormElement[] | string | Node>): void;
+    appendChild(item: AutableFormElement | string | Node): void;
   }
 
-  interface CodeTableFormDefinition {
+  interface AutableFormDefinition {
     table: string;
   }
 
   function stableStringify(value: unknown): string;
-  function render(api: CodeTableFormAPI, root: CodeTableFormRoot): CodeTableFormDefinition;
+  function render(api: AutableFormAPI, root: AutableFormRoot): AutableFormDefinition;
 }
 `
     }
@@ -111,16 +111,16 @@ function workflowRuntimeTypes() {
   return `export {};
 
 declare global {
-  type CodeTablePrimitive = string | number | boolean | null;
-  type CodeTableJSON = CodeTablePrimitive | CodeTableJSON[] | { [key: string]: CodeTableJSON };
-  type CodeTableRecordValues = Record<string, unknown>;
+  type AutablePrimitive = string | number | boolean | null;
+  type AutableJSON = AutablePrimitive | AutableJSON[] | { [key: string]: AutableJSON };
+  type AutableRecordValues = Record<string, unknown>;
 
-  interface CodeTableRowRecord {
+  interface AutableRowRecord {
     record_id: number;
-    values: CodeTableRecordValues;
+    values: AutableRecordValues;
   }
 
-  interface CodeTableTriggerRecord {
+  interface AutableTriggerRecord {
     history_key: string;
     database: string;
     table: string;
@@ -128,47 +128,47 @@ declare global {
     timestamp: number;
   }
 
-  interface CodeTableWorkflowDefinitionInfo {
+  interface AutableWorkflowDefinitionInfo {
     workflow_id?: number;
     database_name: string;
   }
 
-  interface CodeTableWorkflowRunInputs extends Record<string, unknown> {}
+  interface AutableWorkflowRunInputs extends Record<string, unknown> {}
 
-  interface CodeTableWorkflowRunInfo extends CodeTableWorkflowDefinitionInfo {
-    inputs: CodeTableWorkflowRunInputs;
+  interface AutableWorkflowRunInfo extends AutableWorkflowDefinitionInfo {
+    inputs: AutableWorkflowRunInputs;
     run_id?: string;
-    instance(id: string): CodeTableWorkflowInstance<Record<string, unknown>, Record<string, unknown>>;
+    instance(id: string): AutableWorkflowInstance<Record<string, unknown>, Record<string, unknown>>;
   }
 
-  interface CodeTableWorkflowInstance<Input, Output> {
+  interface AutableWorkflowInstance<Input, Output> {
     id: string;
     node: string;
     exec(input: Input): Output;
   }
 
-  interface CodeTableWorkflowPort {
+  interface AutableWorkflowPort {
     name: string;
     type: string;
     description?: string;
   }
 
-  interface CodeTableWorkflowInstanceDeclaration {
+  interface AutableWorkflowInstanceDeclaration {
     node: string;
-    variables?: CodeTableWorkflowPort[];
-    secrets?: CodeTableWorkflowPort[];
+    variables?: AutableWorkflowPort[];
+    secrets?: AutableWorkflowPort[];
     params?: Record<string, unknown>;
   }
 
-  interface CodeTableWorkflowTriggerDeclaration {
+  interface AutableWorkflowTriggerDeclaration {
     instance: string;
     params?: Record<string, unknown>;
   }
 
-  function instances(info: CodeTableWorkflowDefinitionInfo): Record<string, string | CodeTableWorkflowInstanceDeclaration>;
-  function trigger(info: CodeTableWorkflowDefinitionInfo): CodeTableWorkflowTriggerDeclaration;
+  function instances(info: AutableWorkflowDefinitionInfo): Record<string, string | AutableWorkflowInstanceDeclaration>;
+  function trigger(info: AutableWorkflowDefinitionInfo): AutableWorkflowTriggerDeclaration;
   function stableStringify(value: unknown): string;
-  function run(info: CodeTableWorkflowRunInfo): Record<string, unknown>;
+  function run(info: AutableWorkflowRunInfo): Record<string, unknown>;
 }
 `;
 }
@@ -202,7 +202,7 @@ function workflowInstanceTypes(
     }
     const typeName = nodeTypeName(node.type);
     return [
-      `    instance(id: ${JSON.stringify(instanceID)}): CodeTableWorkflowInstance<${typeName}Input, ${typeName}Output>;`
+      `    instance(id: ${JSON.stringify(instanceID)}): AutableWorkflowInstance<${typeName}Input, ${typeName}Output>;`
     ];
   });
   const runInputType = workflowRunInputType(workflowInstances, nodeByType, workflowTrigger);
@@ -210,9 +210,9 @@ function workflowInstanceTypes(
     return `export {};
 `;
   }
-  const inputOverride = runInputType ? [`  interface CodeTableWorkflowRunInputs extends ${runInputType} {}`] : [];
+  const inputOverride = runInputType ? [`  interface AutableWorkflowRunInputs extends ${runInputType} {}`] : [];
   const infoBlock = overloads.length > 0
-    ? [`  interface CodeTableWorkflowRunInfo {`, ...overloads, `  }`]
+    ? [`  interface AutableWorkflowRunInfo {`, ...overloads, `  }`]
     : [];
   return `export {};
 
@@ -269,9 +269,9 @@ function portType(type: string): string {
     case "object":
       return "Record<string, unknown>";
     case "RowRecord":
-      return "CodeTableRowRecord";
+      return "AutableRowRecord";
     case "TriggerRecord":
-      return "CodeTableTriggerRecord";
+      return "AutableTriggerRecord";
     default:
       return "unknown";
   }
@@ -280,7 +280,7 @@ function portType(type: string): string {
 function nodeTypeName(nodeType: string) {
   const words = nodeType.split(/[^A-Za-z0-9]+/).filter(Boolean);
   const suffix = words.map((word) => word.charAt(0).toUpperCase() + word.slice(1)).join("");
-  return `CodeTableNode${suffix || "Unknown"}`;
+  return `AutableNode${suffix || "Unknown"}`;
 }
 
 function propertyName(name: string) {

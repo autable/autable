@@ -3,7 +3,7 @@ package echo
 import (
 	"context"
 
-	"codetable/internal/workflow"
+	"autable/internal/workflow"
 )
 
 type Node struct{}

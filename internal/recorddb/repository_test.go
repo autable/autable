@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"codetable/internal/metadata"
-	"codetable/internal/table"
+	"autable/internal/metadata"
+	"autable/internal/table"
 )
 
 func TestRepositoryCreatesOneSQLiteFilePerMetadataDatabase(t *testing.T) {
@@ -490,12 +490,12 @@ func TestRepositoryUpdateRowReplacesProvidedValuesAcrossReopen(t *testing.T) {
 	}
 	updated, err := repository.UpdateRow(ctx, "workspace", contacts, row.RecordID, map[string]any{
 		"name":  "Ada",
-		"email": "ada@codetable.test",
+		"email": "ada@autable.test",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if updated.Values["name"] != "Ada" || updated.Values["email"] != "ada@codetable.test" {
+	if updated.Values["name"] != "Ada" || updated.Values["email"] != "ada@autable.test" {
 		t.Fatalf("unexpected updated row: %#v", updated)
 	}
 	if err := repository.Close(); err != nil {
@@ -515,7 +515,7 @@ func TestRepositoryUpdateRowReplacesProvidedValuesAcrossReopen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loaded.Values["name"] != "Ada" || loaded.Values["email"] != "ada@codetable.test" {
+	if loaded.Values["name"] != "Ada" || loaded.Values["email"] != "ada@autable.test" {
 		t.Fatalf("unexpected persisted update: %#v", loaded)
 	}
 }

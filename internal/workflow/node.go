@@ -3,7 +3,7 @@ package workflow
 import (
 	"context"
 
-	"codetable/internal/history"
+	"autable/internal/history"
 )
 
 type NodeInfo struct {

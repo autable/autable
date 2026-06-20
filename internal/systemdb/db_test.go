@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"codetable/internal/auth"
-	"codetable/internal/permission"
+	"autable/internal/auth"
+	"autable/internal/permission"
 	"gorm.io/gorm"
 )
 

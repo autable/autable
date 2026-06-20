@@ -14,15 +14,15 @@
 
 ```js
 /**
- * @param {CodeTableWorkflowDefinitionInfo} info
- * @returns {Record<string, string | CodeTableWorkflowInstanceDeclaration>}
+ * @param {AutableWorkflowDefinitionInfo} info
+ * @returns {Record<string, string | AutableWorkflowInstanceDeclaration>}
  */
 function instances(info) {
   return { echo_1: "echo" };
 }
 
 /**
- * @param {CodeTableWorkflowRunInfo} info
+ * @param {AutableWorkflowRunInfo} info
  * @returns {Record<string, unknown>}
  */
 function run(info) {

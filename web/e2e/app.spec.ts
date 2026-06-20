@@ -559,7 +559,7 @@ test("covers table views, row creation, and row history through the real backend
   await expect(recordsGrid).toBeVisible();
   await expect
     .poll(async () =>
-      tableCanvas.locator(".codetable-grid").evaluate((element) => {
+      tableCanvas.locator(".autable-grid").evaluate((element) => {
         const grid = element as HTMLElement;
         return grid.scrollHeight > grid.clientHeight;
       })
@@ -567,7 +567,7 @@ test("covers table views, row creation, and row history through the real backend
     .toBe(true);
   const gridLayout = await tableCanvas.locator(".grid-host").evaluate((element) => {
     const host = element as HTMLElement;
-    const grid = host.querySelector(".codetable-grid") as HTMLElement | null;
+    const grid = host.querySelector(".autable-grid") as HTMLElement | null;
     const hostStyle = window.getComputedStyle(host);
     const gridStyle = grid ? window.getComputedStyle(grid) : null;
     const documentElement = document.documentElement;
@@ -763,7 +763,7 @@ test("covers workflow editor, node list, and run history through the real backen
     script: string;
   }>;
   const defaultWorkflowScript = createdWorkflows.find((workflow) => workflow.name === workflowName)?.script ?? "";
-  expect(defaultWorkflowScript).toContain("@param {CodeTableWorkflowRunInfo} info");
+  expect(defaultWorkflowScript).toContain("@param {AutableWorkflowRunInfo} info");
   expect(defaultWorkflowScript).toContain("function trigger(info)");
   expect(defaultWorkflowScript).toContain('table: "contacts"');
   expect(defaultWorkflowScript).toContain("table.record.changed");
@@ -1004,8 +1004,8 @@ test("covers form runtime preview and submit through the real backend", async ({
   await expect(page.getByText(`Created form ${formName}`)).toBeVisible();
   await expect(page.getByRole("button", { name: formName })).toBeVisible();
   const defaultFormScript = await monacoEditorValue(page, "Form JavaScript");
-  expect(defaultFormScript).toContain("@param {CodeTableFormAPI} api");
-  expect(defaultFormScript).toContain("@param {CodeTableFormRoot} root");
+  expect(defaultFormScript).toContain("@param {AutableFormAPI} api");
+  expect(defaultFormScript).toContain("@param {AutableFormRoot} root");
   await fillMonacoEditor(
     page,
     "Form JavaScript",

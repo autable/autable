@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"codetable/internal/history"
+	"autable/internal/history"
 )
 
 type testEchoNode struct{}

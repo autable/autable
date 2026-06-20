@@ -17,15 +17,15 @@
 
 ```js
 /**
- * @param {CodeTableWorkflowDefinitionInfo} info
- * @returns {Record<string, string | CodeTableWorkflowInstanceDeclaration>}
+ * @param {AutableWorkflowDefinitionInfo} info
+ * @returns {Record<string, string | AutableWorkflowInstanceDeclaration>}
  */
 function instances(info) {
   return { update_contact: "table.row.update" };
 }
 
 /**
- * @param {CodeTableWorkflowRunInfo} info
+ * @param {AutableWorkflowRunInfo} info
  * @returns {Record<string, unknown>}
  */
 function run(info) {

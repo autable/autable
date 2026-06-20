@@ -138,7 +138,7 @@ test("capture workspace screenshots", async ({ page }) => {
 
   // Table view.
   await page.getByRole("button", { name: /Contacts/ }).click();
-  await page.locator(".codetable-grid").waitFor();
+  await page.locator(".autable-grid").waitFor();
   await page.waitForTimeout(400);
   await shot(page, "02-table-view");
   await navShot(page, "nav-01-table");

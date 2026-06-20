@@ -168,7 +168,7 @@ export function WorkspaceNavigation({
       <NavDrawer className="primary-sidebar" type="inline" open>
         <NavDrawerHeader>
           <div className="primary-header">
-            <AppItemStatic icon={<DatabaseRegular />}>{t("nav.codetable")}</AppItemStatic>
+            <AppItemStatic icon={<DatabaseRegular />}>{t("nav.autable")}</AppItemStatic>
             <Tooltip content={t("nav.collapseSidebar", "Collapse")} relationship="label">
               <Button
                 appearance="subtle"

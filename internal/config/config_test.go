@@ -20,7 +20,7 @@ oidc:
   providers:
     - name: main
       issuer_url: https://issuer.example
-      client_id: codetable
+      client_id: autable
 `)
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		t.Fatal(err)

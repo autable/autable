@@ -14,7 +14,7 @@ export function RecordDataGrid<R extends TableGridRow>({
   return (
     <DataGrid
       {...props}
-      className={["codetable-grid", "rdg-light", className].filter(Boolean).join(" ")}
+      className={["autable-grid", "rdg-light", className].filter(Boolean).join(" ")}
       defaultColumnOptions={{ resizable: true, ...defaultColumnOptions }}
     />
   );

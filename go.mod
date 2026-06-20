@@ -1,4 +1,4 @@
-module codetable
+module autable
 
 go 1.24.0
 

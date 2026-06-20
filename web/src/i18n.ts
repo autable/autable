@@ -12,7 +12,7 @@ const resources = {
 };
 
 function initialLanguage(): AppLanguage {
-  const savedLanguage = window.localStorage.getItem("codetable.language");
+  const savedLanguage = window.localStorage.getItem("autable.language");
   if (isAppLanguage(savedLanguage)) {
     return savedLanguage;
   }
@@ -44,7 +44,7 @@ void i18n.use(initReactI18next).init({
 });
 
 i18n.on("languageChanged", (language) => {
-  window.localStorage.setItem("codetable.language", normalizeLanguage(language));
+  window.localStorage.setItem("autable.language", normalizeLanguage(language));
 });
 
 export default i18n;

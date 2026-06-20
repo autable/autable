@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"codetable/internal/workflow"
+	"autable/internal/workflow"
 )
 
 func TestScheduleTriggerNodeEchoesScheduledAt(t *testing.T) {

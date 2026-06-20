@@ -7,11 +7,11 @@ import (
 	"path/filepath"
 	"testing"
 
-	"codetable/internal/history"
-	"codetable/internal/metadata"
-	"codetable/internal/permission"
-	"codetable/internal/recorddb"
-	"codetable/internal/table"
+	"autable/internal/history"
+	"autable/internal/metadata"
+	"autable/internal/permission"
+	"autable/internal/recorddb"
+	"autable/internal/table"
 )
 
 func TestCreateRowAssignsRecordIDAndWritesHistory(t *testing.T) {
@@ -256,12 +256,12 @@ func TestUpdateRowMergesValuesAndWritesHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 	updated, err := service.UpdateRow(ctx, catalog, perms, "u1", false, "db", "contacts", row.RecordID, map[string]any{
-		"email": "ada@codetable.test",
+		"email": "ada@autable.test",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if updated.Values["name"] != "Ada" || updated.Values["email"] != "ada@codetable.test" {
+	if updated.Values["name"] != "Ada" || updated.Values["email"] != "ada@autable.test" {
 		t.Fatalf("expected merged values, got %#v", updated.Values)
 	}
 	entries, err := store.GetPrefix(ctx, history.RowPrefix("db", "contacts", row.RecordID))
@@ -275,13 +275,13 @@ func TestUpdateRowMergesValuesAndWritesHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if change.Values["email"] != "ada@codetable.test" || change.Values["name"] != "Ada" {
+	if change.Values["email"] != "ada@autable.test" || change.Values["name"] != "Ada" {
 		t.Fatalf("unexpected update history: %#v", change)
 	}
 	if _, ok := change.Diff["name"]; ok {
 		t.Fatalf("unchanged field should not be in diff: %#v", change.Diff)
 	}
-	if change.Diff["email"].Old != "ada@example.com" || change.Diff["email"].New != "ada@codetable.test" {
+	if change.Diff["email"].Old != "ada@example.com" || change.Diff["email"].New != "ada@autable.test" {
 		t.Fatalf("unexpected update diff: %#v", change.Diff)
 	}
 }

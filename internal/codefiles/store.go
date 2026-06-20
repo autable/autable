@@ -8,8 +8,8 @@ import (
 	"regexp"
 	"strings"
 
-	"codetable/internal/repository"
-	"codetable/internal/systemdb"
+	"autable/internal/repository"
+	"autable/internal/systemdb"
 )
 
 type Store struct {

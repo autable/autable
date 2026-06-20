@@ -11,7 +11,7 @@ import (
 	"net/url"
 	"strings"
 
-	"codetable/internal/workflow"
+	"autable/internal/workflow"
 )
 
 const dingtalkRobotEndpoint = "https://oapi.dingtalk.com/robot/send"

@@ -11,10 +11,10 @@ import (
 	"sync"
 	"time"
 
-	"codetable/internal/history"
-	"codetable/internal/jsruntime"
-	"codetable/internal/metadata"
-	"codetable/internal/permission"
+	"autable/internal/history"
+	"autable/internal/jsruntime"
+	"autable/internal/metadata"
+	"autable/internal/permission"
 
 	"github.com/dop251/goja"
 )

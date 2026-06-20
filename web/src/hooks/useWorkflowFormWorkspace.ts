@@ -492,8 +492,8 @@ export function useWorkflowFormWorkspace({
 
 function defaultWorkflowScript(targetTable: string) {
   return `/**
- * @param {CodeTableWorkflowDefinitionInfo} info
- * @returns {Record<string, string | CodeTableWorkflowInstanceDeclaration>}
+ * @param {AutableWorkflowDefinitionInfo} info
+ * @returns {Record<string, string | AutableWorkflowInstanceDeclaration>}
  */
 function instances(info) {
   return {
@@ -502,8 +502,8 @@ function instances(info) {
 }
 
 /**
- * @param {CodeTableWorkflowDefinitionInfo} info
- * @returns {CodeTableWorkflowTriggerDeclaration}
+ * @param {AutableWorkflowDefinitionInfo} info
+ * @returns {AutableWorkflowTriggerDeclaration}
  */
 function trigger(info) {
   return {
@@ -516,7 +516,7 @@ function trigger(info) {
 }
 
 /**
- * @param {CodeTableWorkflowRunInfo} info
+ * @param {AutableWorkflowRunInfo} info
  * @returns {Record<string, unknown>}
  */
 function run(info) {
@@ -532,9 +532,9 @@ function run(info) {
 
 function defaultFormScript(targetTable: string) {
   return `/**
- * @param {CodeTableFormAPI} api
- * @param {CodeTableFormRoot} root
- * @returns {CodeTableFormDefinition}
+ * @param {AutableFormAPI} api
+ * @param {AutableFormRoot} root
+ * @returns {AutableFormDefinition}
  */
 function render(api, root) {
   root.append(

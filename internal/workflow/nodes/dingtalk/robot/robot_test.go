@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"codetable/internal/workflow"
+	"autable/internal/workflow"
 )
 
 func TestDingTalkRobotNodeSendsWebhookTextMessage(t *testing.T) {
@@ -38,7 +38,7 @@ func TestDingTalkRobotNodeSendsWebhookTextMessage(t *testing.T) {
 
 	node := NewNodeForTest(server.Client(), server.URL)
 	output, err := node.Run(ctx, map[string]any{
-		"content":     "Codetable alert",
+		"content":     "Autable alert",
 		"at_user_ids": []any{"user-a", "user-b"},
 		"at_all":      true,
 	}, workflow.RuntimeInfo{
@@ -56,7 +56,7 @@ func TestDingTalkRobotNodeSendsWebhookTextMessage(t *testing.T) {
 		t.Fatalf("node output leaked secret values: %#v", output)
 	}
 	text, ok := requestBody["text"].(map[string]any)
-	if !ok || text["content"] != "Codetable alert" {
+	if !ok || text["content"] != "Autable alert" {
 		t.Fatalf("unexpected text body: %#v", requestBody)
 	}
 	at, ok := requestBody["at"].(map[string]any)

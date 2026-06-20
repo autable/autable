@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"codetable/internal/history"
-	"codetable/internal/workflow"
+	"autable/internal/history"
+	"autable/internal/workflow"
 )
 
 func TestRecordChangedTriggerNodeLoadsRowHistory(t *testing.T) {

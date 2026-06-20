@@ -16,23 +16,23 @@ Trigger node for backend schedule ticks. The trigger input is the `params` objec
 
 ```js
 /**
- * @param {CodeTableWorkflowDefinitionInfo} info
- * @returns {Record<string, string | CodeTableWorkflowInstanceDeclaration>}
+ * @param {AutableWorkflowDefinitionInfo} info
+ * @returns {Record<string, string | AutableWorkflowInstanceDeclaration>}
  */
 function instances(info) {
   return { every_minute: "time.schedule" };
 }
 
 /**
- * @param {CodeTableWorkflowDefinitionInfo} info
- * @returns {CodeTableWorkflowTriggerDeclaration}
+ * @param {AutableWorkflowDefinitionInfo} info
+ * @returns {AutableWorkflowTriggerDeclaration}
  */
 function trigger(info) {
   return { instance: "every_minute", params: { interval_ms: 60000 } };
 }
 
 /**
- * @param {CodeTableWorkflowRunInfo} info
+ * @param {AutableWorkflowRunInfo} info
  * @returns {Record<string, unknown>}
  */
 function run(info) {

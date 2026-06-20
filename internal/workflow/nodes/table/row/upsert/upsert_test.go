@@ -4,40 +4,40 @@ import (
 	"context"
 	"testing"
 
-	"codetable/internal/workflow"
+	"autable/internal/workflow"
 )
 
-type fakeCodeTableService struct {
+type fakeAutableService struct {
 	operation string
 	input     map[string]any
 	info      workflow.RuntimeInfo
 }
 
-func (service *fakeCodeTableService) CreateRow(_ context.Context, input map[string]any, info workflow.RuntimeInfo) (map[string]any, error) {
+func (service *fakeAutableService) CreateRow(_ context.Context, input map[string]any, info workflow.RuntimeInfo) (map[string]any, error) {
 	return service.capture("create", input, info)
 }
 
-func (service *fakeCodeTableService) UpdateRow(_ context.Context, input map[string]any, info workflow.RuntimeInfo) (map[string]any, error) {
+func (service *fakeAutableService) UpdateRow(_ context.Context, input map[string]any, info workflow.RuntimeInfo) (map[string]any, error) {
 	return service.capture("update", input, info)
 }
 
-func (service *fakeCodeTableService) UpsertRow(_ context.Context, input map[string]any, info workflow.RuntimeInfo) (map[string]any, error) {
+func (service *fakeAutableService) UpsertRow(_ context.Context, input map[string]any, info workflow.RuntimeInfo) (map[string]any, error) {
 	return service.capture("upsert", input, info)
 }
 
-func (service *fakeCodeTableService) DeleteRow(_ context.Context, input map[string]any, info workflow.RuntimeInfo) (map[string]any, error) {
+func (service *fakeAutableService) DeleteRow(_ context.Context, input map[string]any, info workflow.RuntimeInfo) (map[string]any, error) {
 	return service.capture("delete", input, info)
 }
 
-func (service *fakeCodeTableService) ListRows(_ context.Context, input map[string]any, info workflow.RuntimeInfo) (map[string]any, error) {
+func (service *fakeAutableService) ListRows(_ context.Context, input map[string]any, info workflow.RuntimeInfo) (map[string]any, error) {
 	return service.capture("list", input, info)
 }
 
-func (service *fakeCodeTableService) CreateFields(_ context.Context, input map[string]any, info workflow.RuntimeInfo) (map[string]any, error) {
+func (service *fakeAutableService) CreateFields(_ context.Context, input map[string]any, info workflow.RuntimeInfo) (map[string]any, error) {
 	return service.capture("fields", input, info)
 }
 
-func (service *fakeCodeTableService) capture(operation string, input map[string]any, info workflow.RuntimeInfo) (map[string]any, error) {
+func (service *fakeAutableService) capture(operation string, input map[string]any, info workflow.RuntimeInfo) (map[string]any, error) {
 	service.operation = operation
 	service.input = input
 	service.info = info
@@ -45,7 +45,7 @@ func (service *fakeCodeTableService) capture(operation string, input map[string]
 }
 
 func TestNodeCallsService(t *testing.T) {
-	service := &fakeCodeTableService{}
+	service := &fakeAutableService{}
 	node := NewNode(service)
 	output, err := node.Run(context.Background(), map[string]any{
 		"table":       "contacts",
@@ -64,7 +64,7 @@ func TestNodeCallsService(t *testing.T) {
 }
 
 func TestNodeInfo(t *testing.T) {
-	info := NewNode(&fakeCodeTableService{}).Info()
+	info := NewNode(&fakeAutableService{}).Info()
 	if info.Type != "table.row.upsert" || len(info.Inputs) != 4 || info.Inputs[2].Name != "match_field" {
 		t.Fatalf("unexpected upsert node info: %#v", info)
 	}

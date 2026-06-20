@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"codetable/internal/auth"
-	"codetable/internal/permission"
+	"autable/internal/auth"
+	"autable/internal/permission"
 
 	"github.com/google/uuid"
 	"gorm.io/driver/sqlite"

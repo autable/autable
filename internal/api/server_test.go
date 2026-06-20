@@ -22,16 +22,16 @@ import (
 	"testing"
 	"time"
 
-	"codetable/internal/auth"
-	"codetable/internal/codefiles"
-	"codetable/internal/config"
-	"codetable/internal/history"
-	"codetable/internal/metadata"
-	"codetable/internal/permission"
-	"codetable/internal/recorddb"
-	"codetable/internal/systemdb"
-	"codetable/internal/table"
-	"codetable/internal/workflow"
+	"autable/internal/auth"
+	"autable/internal/codefiles"
+	"autable/internal/config"
+	"autable/internal/history"
+	"autable/internal/metadata"
+	"autable/internal/permission"
+	"autable/internal/recorddb"
+	"autable/internal/systemdb"
+	"autable/internal/table"
+	"autable/internal/workflow"
 )
 
 func metadataFieldNames(fields []metadata.Field) []string {
@@ -172,7 +172,7 @@ func TestOIDCProvidersExposePublicConfig(t *testing.T) {
 		{
 			Name:         "main",
 			IssuerURL:    "https://issuer.example",
-			ClientID:     "codetable",
+			ClientID:     "autable",
 			ClientSecret: "secret",
 			Scopes:       []string{"email"},
 		},
@@ -209,7 +209,7 @@ func TestOIDCStartRedirectsToAuthorizeEndpoint(t *testing.T) {
 		{
 			Name:      "main",
 			IssuerURL: "https://issuer.example/",
-			ClientID:  "codetable",
+			ClientID:  "autable",
 		},
 	})
 
@@ -231,7 +231,7 @@ func TestOIDCStartRedirectsToAuthorizeEndpoint(t *testing.T) {
 		t.Fatalf("unexpected authorize url: %s", location)
 	}
 	query := authorizeURL.Query()
-	if query.Get("response_type") != "code" || query.Get("client_id") != "codetable" {
+	if query.Get("response_type") != "code" || query.Get("client_id") != "autable" {
 		t.Fatalf("unexpected authorize query: %s", authorizeURL.RawQuery)
 	}
 	if query.Get("scope") != "openid email profile" {
@@ -254,13 +254,13 @@ func TestOIDCStartRedirectsToAuthorizeEndpoint(t *testing.T) {
 }
 
 func TestOIDCCallbackCreatesSessionWithVerifiedIDToken(t *testing.T) {
-	issuer := newFakeOIDCIssuer(t, "codetable", "sub-123", "Person@Example.com")
+	issuer := newFakeOIDCIssuer(t, "autable", "sub-123", "Person@Example.com")
 	defer issuer.Close()
 	server, _ := newTestServerWithOIDC(t, []config.OIDCProvider{
 		{
 			Name:         "main",
 			IssuerURL:    issuer.URL,
-			ClientID:     "codetable",
+			ClientID:     "autable",
 			ClientSecret: "secret",
 		},
 	})
@@ -595,7 +595,7 @@ func TestUpdateRowAPIEnforcesPermissionsAndWritesHistory(t *testing.T) {
 	}
 
 	updateRequest := httptest.NewRequest(http.MethodPatch, "/api/tables/db/contacts/rows/1", bytes.NewBufferString(`{
-		"values":{"email":"ada@codetable.test"}
+		"values":{"email":"ada@autable.test"}
 	}`))
 	updateRequest.AddCookie(testSessionCookie(t, system, "u1"))
 	updateRecorder := httptest.NewRecorder()
@@ -607,7 +607,7 @@ func TestUpdateRowAPIEnforcesPermissionsAndWritesHistory(t *testing.T) {
 	if err := json.NewDecoder(updateRecorder.Body).Decode(&updated); err != nil {
 		t.Fatal(err)
 	}
-	if updated.Values["name"] != "Ada" || updated.Values["email"] != "ada@codetable.test" {
+	if updated.Values["name"] != "Ada" || updated.Values["email"] != "ada@autable.test" {
 		t.Fatalf("unexpected updated row: %#v", updated)
 	}
 
@@ -625,7 +625,7 @@ func TestUpdateRowAPIEnforcesPermissionsAndWritesHistory(t *testing.T) {
 	if len(changes) != 2 {
 		t.Fatalf("expected create and update history entries, got %#v", changes)
 	}
-	if changes[1].Values["email"] != "ada@codetable.test" || changes[1].Values["name"] != "Ada" {
+	if changes[1].Values["email"] != "ada@autable.test" || changes[1].Values["name"] != "Ada" {
 		t.Fatalf("unexpected update history: %#v", changes[1])
 	}
 }
@@ -1332,8 +1332,8 @@ func TestWorkflowFieldCreateNodeAddsMissingFields(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	codeTable := server.workflowCodeTableService()
-	output, err := codeTable.CreateFields(ctx, map[string]any{
+	autable := server.workflowAutableService()
+	output, err := autable.CreateFields(ctx, map[string]any{
 		"table": "contacts",
 		"fields": []any{
 			"name",
@@ -1374,7 +1374,7 @@ func TestWorkflowFieldCreateNodeAddsMissingFields(t *testing.T) {
 		t.Fatalf("expected legacy field to be restored, got %#v", legacy)
 	}
 
-	output, err = codeTable.CreateFields(ctx, map[string]any{
+	output, err = autable.CreateFields(ctx, map[string]any{
 		"table": "contacts",
 		"fields": []any{
 			"email",
@@ -1391,7 +1391,7 @@ func TestWorkflowFieldCreateNodeAddsMissingFields(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	output, err = codeTable.CreateFields(ctx, map[string]any{
+	output, err = autable.CreateFields(ctx, map[string]any{
 		"table":  "contacts",
 		"fields": []any{"email"},
 	}, workflow.RuntimeInfo{DatabaseName: "workspace", CreatorID: "owner"})
@@ -1432,7 +1432,7 @@ func TestWorkflowFieldCreateNodeRejectsUnsafeFieldNames(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		_, err = server.workflowCodeTableService().CreateFields(ctx, map[string]any{
+		_, err = server.workflowAutableService().CreateFields(ctx, map[string]any{
 			"table": "contacts",
 			"fields": map[string]any{
 				fieldName: "string",
@@ -1471,7 +1471,7 @@ func TestWorkflowFieldCreateNodeAllowsReadableBusinessFieldNames(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := server.workflowCodeTableService().CreateFields(ctx, map[string]any{
+	_, err := server.workflowAutableService().CreateFields(ctx, map[string]any{
 		"table": "contacts",
 		"fields": map[string]any{
 			"当前负责人（人员）": "string",
@@ -1520,7 +1520,7 @@ func TestWorkflowFieldCreateNodeAddsExternalCreatedFieldsOnFirstRun(t *testing.T
 		t.Fatal(err)
 	}
 
-	output, err := server.workflowCodeTableService().CreateFields(ctx, map[string]any{
+	output, err := server.workflowAutableService().CreateFields(ctx, map[string]any{
 		"table": "b表",
 		"fields": map[string]any{
 			"Assignees":                   "string",
@@ -1589,7 +1589,7 @@ func TestWorkflowFieldCreateNodeRequiresTableWrite(t *testing.T) {
 	}}}
 	server, _, _ := newTestServerWithMetadataFile(t, catalog)
 
-	if _, err := server.workflowCodeTableService().CreateFields(ctx, map[string]any{
+	if _, err := server.workflowAutableService().CreateFields(ctx, map[string]any{
 		"table":  "contacts",
 		"fields": []any{"email"},
 	}, workflow.RuntimeInfo{DatabaseName: "workspace", CreatorID: "viewer"}); !errors.Is(err, table.ErrPermissionDenied) {
@@ -1610,8 +1610,8 @@ func TestWorkflowRowUpsertUpdatesFirstMatchOrCreates(t *testing.T) {
 	}
 	saveTestRecordCreateGrant(t, system, "owner", "db.contacts")
 
-	codeTable := server.workflowCodeTableService()
-	created, err := codeTable.CreateRow(ctx, map[string]any{
+	autable := server.workflowAutableService()
+	created, err := autable.CreateRow(ctx, map[string]any{
 		"table":  "contacts",
 		"values": map[string]any{"name": "Old", "email": "remote-1", "status": "todo"},
 	}, workflow.RuntimeInfo{DatabaseName: "db", CreatorID: "owner"})
@@ -1620,7 +1620,7 @@ func TestWorkflowRowUpsertUpdatesFirstMatchOrCreates(t *testing.T) {
 	}
 	original := created["record"].(map[string]any)
 
-	updated, err := codeTable.UpsertRow(ctx, map[string]any{
+	updated, err := autable.UpsertRow(ctx, map[string]any{
 		"table":       "contacts",
 		"match_field": "email",
 		"values":      map[string]any{"name": "Updated", "email": "remote-1", "status": "done"},
@@ -1645,7 +1645,7 @@ func TestWorkflowRowUpsertUpdatesFirstMatchOrCreates(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	nooped, err := codeTable.UpsertRow(ctx, map[string]any{
+	nooped, err := autable.UpsertRow(ctx, map[string]any{
 		"table":       "contacts",
 		"match_field": "email",
 		"values":      map[string]any{"name": "Updated", "email": "remote-1", "status": "done"},
@@ -1664,7 +1664,7 @@ func TestWorkflowRowUpsertUpdatesFirstMatchOrCreates(t *testing.T) {
 		t.Fatalf("noop upsert should not create row history: before=%d after=%d", len(historyBefore), len(historyAfter))
 	}
 
-	upserted, err := codeTable.UpsertRow(ctx, map[string]any{
+	upserted, err := autable.UpsertRow(ctx, map[string]any{
 		"table":       "contacts",
 		"match_field": "email",
 		"values":      map[string]any{"name": "Created", "email": "remote-2", "status": "todo"},
@@ -1689,7 +1689,7 @@ func TestWorkflowRowUpsertRequiresMatchValue(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := server.workflowCodeTableService().UpsertRow(ctx, map[string]any{
+	_, err := server.workflowAutableService().UpsertRow(ctx, map[string]any{
 		"table":       "contacts",
 		"match_field": "email",
 		"values":      map[string]any{"name": "Ada"},

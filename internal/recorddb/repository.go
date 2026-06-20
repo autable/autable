@@ -14,8 +14,8 @@ import (
 	"sync"
 	"time"
 
-	"codetable/internal/metadata"
-	"codetable/internal/table"
+	"autable/internal/metadata"
+	"autable/internal/table"
 
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"

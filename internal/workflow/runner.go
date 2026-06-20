@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"codetable/internal/history"
-	"codetable/internal/jsruntime"
+	"autable/internal/history"
+	"autable/internal/jsruntime"
 
 	"github.com/dop251/goja"
 	"github.com/google/uuid"
