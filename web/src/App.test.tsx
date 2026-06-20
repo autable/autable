@@ -9,7 +9,6 @@ const catalogFixture = {
   databases: [
     {
       name: "workspace",
-      sqlite_path: "./data/workspace.sqlite",
       permission_level: 2,
       tables: [
         {
@@ -353,7 +352,7 @@ describe("App", () => {
         return new Response(JSON.stringify({ error: "permission denied" }), { status: 403 });
       }
       if (url === "/api/databases" && init?.method === "POST") {
-        return new Response(JSON.stringify({ name: "sales", sqlite_path: "./data/sales.sqlite", tables: [] }), {
+        return new Response(JSON.stringify({ name: "sales", tables: [] }), {
           status: 201
         });
       }
@@ -363,7 +362,6 @@ describe("App", () => {
             databases: [
               {
                 name: "sales",
-                sqlite_path: "./data/sales.sqlite",
                 tables: []
               }
             ]
@@ -416,7 +414,6 @@ describe("App", () => {
             databases: [
               {
                 name: "workspace",
-                sqlite_path: "./data/workspace.sqlite",
                 tables: [
                   {
                     name: "projects",
@@ -708,7 +705,6 @@ describe("App", () => {
           databases: [
             {
               name: "workspace",
-              sqlite_path: "./data/workspace.sqlite",
               tables: [
                 {
                   name: "projects",

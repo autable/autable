@@ -3,7 +3,6 @@ package recorddb
 import (
 	"context"
 	"errors"
-	"path/filepath"
 	"testing"
 
 	"autable/internal/metadata"
@@ -12,13 +11,13 @@ import (
 
 func TestRepositoryCreatesOneSQLiteFilePerMetadataDatabase(t *testing.T) {
 	ctx := context.Background()
-	dir := t.TempDir()
+	dataDir := t.TempDir()
 	catalog := metadata.Catalog{Databases: []metadata.Database{
-		{Name: "sales", SQLitePath: filepath.Join(dir, "sales.sqlite")},
-		{Name: "ops", SQLitePath: filepath.Join(dir, "ops.sqlite")},
+		{Name: "sales"},
+		{Name: "ops"},
 	}}
 
-	repository, err := OpenCatalog(ctx, catalog)
+	repository, err := OpenCatalog(ctx, catalog, dataDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,11 +157,11 @@ func TestRepositoryRowsRejectsUnsafeViewFields(t *testing.T) {
 
 func TestRepositoryPersistsRowsAcrossReopenWithRealColumns(t *testing.T) {
 	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "workspace.sqlite")
-	catalog := metadata.Catalog{Databases: []metadata.Database{{Name: "workspace", SQLitePath: path}}}
+	dataDir := t.TempDir()
+	catalog := metadata.Catalog{Databases: []metadata.Database{{Name: "workspace"}}}
 	contacts := contactsTable()
 
-	repository, err := OpenCatalog(ctx, catalog)
+	repository, err := OpenCatalog(ctx, catalog, dataDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -191,7 +190,7 @@ func TestRepositoryPersistsRowsAcrossReopenWithRealColumns(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	reopened, err := OpenCatalog(ctx, catalog)
+	reopened, err := OpenCatalog(ctx, catalog, dataDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -211,11 +210,11 @@ func TestRepositoryPersistsRowsAcrossReopenWithRealColumns(t *testing.T) {
 
 func TestRepositorySupportsUnsafeLogicalTableNames(t *testing.T) {
 	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "workspace.sqlite")
-	catalog := metadata.Catalog{Databases: []metadata.Database{{Name: "workspace", SQLitePath: path}}}
+	dataDir := t.TempDir()
+	catalog := metadata.Catalog{Databases: []metadata.Database{{Name: "workspace"}}}
 	tableMeta := metadata.Table{Name: "测试表", Fields: []metadata.Field{{Name: "name", Type: "string"}, {Name: "count", Type: "int"}}}
 
-	repository, err := OpenCatalog(ctx, catalog)
+	repository, err := OpenCatalog(ctx, catalog, dataDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -246,15 +245,15 @@ func TestRepositorySupportsUnsafeLogicalTableNames(t *testing.T) {
 
 func TestRepositorySupportsExternalFieldsNamedCreatedAndUpdated(t *testing.T) {
 	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "workspace.sqlite")
-	catalog := metadata.Catalog{Databases: []metadata.Database{{Name: "workspace", SQLitePath: path}}}
+	dataDir := t.TempDir()
+	catalog := metadata.Catalog{Databases: []metadata.Database{{Name: "workspace"}}}
 	tableMeta := metadata.Table{Name: "b表", Fields: []metadata.Field{
 		{Name: "Created", Type: "string"},
 		{Name: "Updated", Type: "string"},
 		{Name: "Created By", Type: "string"},
 	}}
 
-	repository, err := OpenCatalog(ctx, catalog)
+	repository, err := OpenCatalog(ctx, catalog, dataDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -278,11 +277,11 @@ func TestRepositorySupportsExternalFieldsNamedCreatedAndUpdated(t *testing.T) {
 
 func TestRepositoryAllowsUserRecordIDField(t *testing.T) {
 	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "workspace.sqlite")
-	catalog := metadata.Catalog{Databases: []metadata.Database{{Name: "workspace", SQLitePath: path}}}
+	dataDir := t.TempDir()
+	catalog := metadata.Catalog{Databases: []metadata.Database{{Name: "workspace"}}}
 	tableMeta := metadata.Table{Name: "tasks", Fields: []metadata.Field{{Name: "record_id", Type: "string"}}}
 
-	repository, err := OpenCatalog(ctx, catalog)
+	repository, err := OpenCatalog(ctx, catalog, dataDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -313,10 +312,10 @@ func TestRepositoryAllowsUserRecordIDField(t *testing.T) {
 
 func TestRepositoryAutoMigrateHandlesExistingPhysicalExternalField(t *testing.T) {
 	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "workspace.sqlite")
-	catalog := metadata.Catalog{Databases: []metadata.Database{{Name: "workspace", SQLitePath: path}}}
+	dataDir := t.TempDir()
+	catalog := metadata.Catalog{Databases: []metadata.Database{{Name: "workspace"}}}
 
-	repository, err := OpenCatalog(ctx, catalog)
+	repository, err := OpenCatalog(ctx, catalog, dataDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -345,10 +344,10 @@ func TestRepositoryAutoMigrateHandlesExistingPhysicalExternalField(t *testing.T)
 
 func TestRepositoryReadsExistingPhysicalColumnWithDifferentCase(t *testing.T) {
 	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "workspace.sqlite")
-	catalog := metadata.Catalog{Databases: []metadata.Database{{Name: "workspace", SQLitePath: path}}}
+	dataDir := t.TempDir()
+	catalog := metadata.Catalog{Databases: []metadata.Database{{Name: "workspace"}}}
 
-	repository, err := OpenCatalog(ctx, catalog)
+	repository, err := OpenCatalog(ctx, catalog, dataDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -381,12 +380,12 @@ func TestRepositoryReadsExistingPhysicalColumnWithDifferentCase(t *testing.T) {
 
 func TestRepositoryAllocatesRecordIDsPerTableAcrossReopen(t *testing.T) {
 	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "workspace.sqlite")
-	catalog := metadata.Catalog{Databases: []metadata.Database{{Name: "workspace", SQLitePath: path}}}
+	dataDir := t.TempDir()
+	catalog := metadata.Catalog{Databases: []metadata.Database{{Name: "workspace"}}}
 	contacts := contactsTable()
 	projects := metadata.Table{Name: "projects", Fields: []metadata.Field{{Name: "name", Type: "string"}}}
 
-	repository, err := OpenCatalog(ctx, catalog)
+	repository, err := OpenCatalog(ctx, catalog, dataDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -405,7 +404,7 @@ func TestRepositoryAllocatesRecordIDsPerTableAcrossReopen(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	reopened, err := OpenCatalog(ctx, catalog)
+	reopened, err := OpenCatalog(ctx, catalog, dataDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -429,11 +428,11 @@ func TestRepositoryAllocatesRecordIDsPerTableAcrossReopen(t *testing.T) {
 
 func TestRepositoryRestoresRowsWithOriginalRecordID(t *testing.T) {
 	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "workspace.sqlite")
-	catalog := metadata.Catalog{Databases: []metadata.Database{{Name: "workspace", SQLitePath: path}}}
+	dataDir := t.TempDir()
+	catalog := metadata.Catalog{Databases: []metadata.Database{{Name: "workspace"}}}
 	contacts := contactsTable()
 
-	repository, err := OpenCatalog(ctx, catalog)
+	repository, err := OpenCatalog(ctx, catalog, dataDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -473,11 +472,11 @@ func TestRepositoryRestoresRowsWithOriginalRecordID(t *testing.T) {
 
 func TestRepositoryUpdateRowReplacesProvidedValuesAcrossReopen(t *testing.T) {
 	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "workspace.sqlite")
-	catalog := metadata.Catalog{Databases: []metadata.Database{{Name: "workspace", SQLitePath: path}}}
+	dataDir := t.TempDir()
+	catalog := metadata.Catalog{Databases: []metadata.Database{{Name: "workspace"}}}
 	contacts := contactsTable()
 
-	repository, err := OpenCatalog(ctx, catalog)
+	repository, err := OpenCatalog(ctx, catalog, dataDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -502,7 +501,7 @@ func TestRepositoryUpdateRowReplacesProvidedValuesAcrossReopen(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	reopened, err := OpenCatalog(ctx, catalog)
+	reopened, err := OpenCatalog(ctx, catalog, dataDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -522,11 +521,11 @@ func TestRepositoryUpdateRowReplacesProvidedValuesAcrossReopen(t *testing.T) {
 
 func TestRepositoryDeleteRowRemovesPersistedRecord(t *testing.T) {
 	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "workspace.sqlite")
-	catalog := metadata.Catalog{Databases: []metadata.Database{{Name: "workspace", SQLitePath: path}}}
+	dataDir := t.TempDir()
+	catalog := metadata.Catalog{Databases: []metadata.Database{{Name: "workspace"}}}
 	contacts := contactsTable()
 
-	repository, err := OpenCatalog(ctx, catalog)
+	repository, err := OpenCatalog(ctx, catalog, dataDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -545,7 +544,7 @@ func TestRepositoryDeleteRowRemovesPersistedRecord(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	reopened, err := OpenCatalog(ctx, catalog)
+	reopened, err := OpenCatalog(ctx, catalog, dataDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -565,12 +564,12 @@ func TestRepositoryDeleteRowRemovesPersistedRecord(t *testing.T) {
 
 func openTestRepository(t *testing.T, ctx context.Context, tableMeta metadata.Table) *Repository {
 	t.Helper()
+	dataDir := t.TempDir()
 	catalog := metadata.Catalog{Databases: []metadata.Database{{
-		Name:       "workspace",
-		SQLitePath: filepath.Join(t.TempDir(), "workspace.sqlite"),
-		Tables:     []metadata.Table{tableMeta},
+		Name:   "workspace",
+		Tables: []metadata.Table{tableMeta},
 	}}}
-	repository, err := OpenCatalog(ctx, catalog)
+	repository, err := OpenCatalog(ctx, catalog, dataDir)
 	if err != nil {
 		t.Fatal(err)
 	}

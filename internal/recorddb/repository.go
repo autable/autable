@@ -35,10 +35,10 @@ type Repository struct {
 	dbs map[string]*gorm.DB
 }
 
-func OpenCatalog(ctx context.Context, catalog metadata.Catalog) (*Repository, error) {
+func OpenCatalog(ctx context.Context, catalog metadata.Catalog, dataPath string) (*Repository, error) {
 	repository := &Repository{dbs: map[string]*gorm.DB{}}
 	for _, database := range catalog.Databases {
-		if err := repository.OpenDatabase(ctx, database.Name, database.SQLitePath); err != nil {
+		if err := repository.OpenDatabase(ctx, database.Name, filepath.Join(dataPath, database.Name+".sqlite")); err != nil {
 			_ = repository.Close()
 			return nil, err
 		}

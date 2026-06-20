@@ -8,8 +8,7 @@ import (
 
 func TestCatalogValidateRejectsReservedCTPrefix(t *testing.T) {
 	catalog := Catalog{Databases: []Database{{
-		Name:       "main",
-		SQLitePath: "./main.sqlite",
+		Name: "main",
 		Tables: []Table{{
 			Name: "tasks",
 			Fields: []Field{
@@ -33,8 +32,7 @@ func fieldNames(fields []Field) []string {
 
 func TestCatalogValidateAllowsUserRecordID(t *testing.T) {
 	catalog := Catalog{Databases: []Database{{
-		Name:       "main",
-		SQLitePath: "./main.sqlite",
+		Name: "main",
 		Tables: []Table{{
 			Name: "tasks",
 			Fields: []Field{
@@ -123,7 +121,7 @@ func TestValidateRejectsViewCycles(t *testing.T) {
 
 func TestAddDatabaseAddTableAndSave(t *testing.T) {
 	catalog := Catalog{}
-	catalog, err := catalog.AddDatabase(Database{Name: "workspace", SQLitePath: "./data/workspace.sqlite"})
+	catalog, err := catalog.AddDatabase(Database{Name: "workspace"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,8 +171,7 @@ func TestLoadOrCreateCreatesMissingCatalogFile(t *testing.T) {
 
 func TestUpdateTableCanSoftDeleteFieldAndAddBasedView(t *testing.T) {
 	catalog := Catalog{Databases: []Database{{
-		Name:       "workspace",
-		SQLitePath: "./data/workspace.sqlite",
+		Name: "workspace",
 		Tables: []Table{{
 			Name: "contacts",
 			Fields: []Field{
@@ -236,8 +233,7 @@ func TestUpdateTableCanSoftDeleteFieldAndAddBasedView(t *testing.T) {
 
 func TestUpdateTableRejectsFieldTypeChange(t *testing.T) {
 	catalog := Catalog{Databases: []Database{{
-		Name:       "workspace",
-		SQLitePath: "./data/workspace.sqlite",
+		Name: "workspace",
 		Tables: []Table{{
 			Name:   "contacts",
 			Fields: []Field{{Name: "priority", Type: "string"}},
@@ -269,8 +265,7 @@ func TestUpdateTableRejectsFieldTypeChange(t *testing.T) {
 
 func TestMoveFieldPreservesUnmentionedFields(t *testing.T) {
 	catalog := Catalog{Databases: []Database{{
-		Name:       "workspace",
-		SQLitePath: "./data/workspace.sqlite",
+		Name: "workspace",
 		Tables: []Table{{
 			Name: "contacts",
 			Fields: []Field{
@@ -315,8 +310,7 @@ func TestMoveFieldPreservesUnmentionedFields(t *testing.T) {
 
 func TestFormulaFieldValidationAndEditableExpression(t *testing.T) {
 	catalog := Catalog{Databases: []Database{{
-		Name:       "workspace",
-		SQLitePath: "./data/workspace.sqlite",
+		Name: "workspace",
 		Tables: []Table{{
 			Name: "contacts",
 			Fields: []Field{
@@ -358,8 +352,7 @@ func TestFormulaFieldValidationAndEditableExpression(t *testing.T) {
 	}
 
 	invalid := Catalog{Databases: []Database{{
-		Name:       "workspace",
-		SQLitePath: "./data/workspace.sqlite",
+		Name: "workspace",
 		Tables: []Table{{
 			Name:   "contacts",
 			Fields: []Field{{Name: "bad_formula", Type: "formula"}},
@@ -370,8 +363,7 @@ func TestFormulaFieldValidationAndEditableExpression(t *testing.T) {
 	}
 
 	invalid = Catalog{Databases: []Database{{
-		Name:       "workspace",
-		SQLitePath: "./data/workspace.sqlite",
+		Name: "workspace",
 		Tables: []Table{{
 			Name:   "contacts",
 			Fields: []Field{{Name: "name", Type: "string", Formula: "field_score + 1"}},

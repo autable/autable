@@ -19,7 +19,7 @@ func (server *Server) createDatabase(ctx context.Context, database metadata.Data
 		return err
 	}
 	if server.openDatabase != nil {
-		if err := server.openDatabase(ctx, database.Name, database.SQLitePath); err != nil {
+		if err := server.openDatabase(ctx, database.Name); err != nil {
 			return err
 		}
 	}

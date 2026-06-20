@@ -20,10 +20,8 @@ writeFileSync(
   [
     "server:",
     '  address: "127.0.0.1:18081"',
-    "system_db:",
-    `  path: "${join(runtimeDir, "data", "system.sqlite")}"`,
-    "history:",
-    `  path: "${join(runtimeDir, "data", "leveldb")}"`,
+    "data:",
+    `  path: "${join(runtimeDir, "data")}"`,
     "repository:",
     `  path: "${repositoryPath}"`,
     "oidc:",

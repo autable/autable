@@ -394,8 +394,7 @@ func TestCreateRowAPIEnforcesPermissionsAndWritesHistory(t *testing.T) {
 func TestCreateFieldsAPIUsesTablePermissions(t *testing.T) {
 	ctx := context.Background()
 	catalog := metadata.Catalog{Databases: []metadata.Database{{
-		Name:       "workspace",
-		SQLitePath: filepath.Join(t.TempDir(), "workspace.sqlite"),
+		Name: "workspace",
 		Tables: []metadata.Table{{
 			Name:   "contacts",
 			Fields: []metadata.Field{{Name: "name", Type: "string"}},
@@ -854,8 +853,7 @@ func TestMetadataAPIOnlyReturnsVisibleDatabasesAndTables(t *testing.T) {
 	ctx := context.Background()
 	catalog := metadata.Catalog{Databases: []metadata.Database{
 		{
-			Name:       "workspace",
-			SQLitePath: "./data/workspace.sqlite",
+			Name: "workspace",
 			Tables: []metadata.Table{
 				{
 					Name: "contacts",
@@ -885,9 +883,8 @@ func TestMetadataAPIOnlyReturnsVisibleDatabasesAndTables(t *testing.T) {
 			},
 		},
 		{
-			Name:       "hidden",
-			SQLitePath: "./data/hidden.sqlite",
-			Tables:     []metadata.Table{{Name: "secrets", Fields: []metadata.Field{{Name: "value", Type: "string"}}}},
+			Name:   "hidden",
+			Tables: []metadata.Table{{Name: "secrets", Fields: []metadata.Field{{Name: "value", Type: "string"}}}},
 		},
 	}}
 	server, system, _ := newTestServerWithMetadataFile(t, catalog)
@@ -958,8 +955,7 @@ func TestMetadataAPIOnlyReturnsVisibleDatabasesAndTables(t *testing.T) {
 func TestCreateDatabaseAPIWritesMetadataAndStoresOwner(t *testing.T) {
 	server, system, metadataPath := newTestServerWithMetadataFile(t, metadata.Catalog{})
 	request := httptest.NewRequest(http.MethodPost, "/api/databases", bytes.NewBufferString(`{
-		"name":"sales",
-		"sqlite_path":"./data/sales.sqlite"
+		"name":"sales"
 	}`))
 	request.AddCookie(testSessionCookie(t, system, "owner"))
 	recorder := httptest.NewRecorder()
@@ -973,7 +969,7 @@ func TestCreateDatabaseAPIWritesMetadataAndStoresOwner(t *testing.T) {
 		t.Fatal(err)
 	}
 	db, ok := loaded.Database("sales")
-	if !ok || db.SQLitePath != "./data/sales.sqlite" {
+	if !ok || db.Name != "sales" {
 		t.Fatalf("expected sales database in metadata, got %#v", loaded)
 	}
 	isOwner, err := system.IsDatabaseOwner(context.Background(), "owner", "sales")
@@ -986,7 +982,7 @@ func TestCreateDatabaseAPIWritesMetadataAndStoresOwner(t *testing.T) {
 }
 
 func TestDatabaseOwnerCanCreateTable(t *testing.T) {
-	catalog := metadata.Catalog{Databases: []metadata.Database{{Name: "workspace", SQLitePath: "./data/workspace.sqlite"}}}
+	catalog := metadata.Catalog{Databases: []metadata.Database{{Name: "workspace"}}}
 	server, system, metadataPath := newTestServerWithMetadataFile(t, catalog)
 	saveTestDatabaseOwners(t, system, "workspace", "owner")
 
@@ -1021,7 +1017,7 @@ func TestDatabaseOwnerCanCreateTable(t *testing.T) {
 }
 
 func TestDatabaseOwnerCanCreateEmptyTable(t *testing.T) {
-	catalog := metadata.Catalog{Databases: []metadata.Database{{Name: "workspace", SQLitePath: "./data/workspace.sqlite"}}}
+	catalog := metadata.Catalog{Databases: []metadata.Database{{Name: "workspace"}}}
 	server, system, metadataPath := newTestServerWithMetadataFile(t, catalog)
 	saveTestDatabaseOwners(t, system, "workspace", "owner")
 
@@ -1053,8 +1049,7 @@ func TestDatabaseOwnerCanCreateEmptyTable(t *testing.T) {
 func TestTableOwnerCanUpdateFieldsAndViews(t *testing.T) {
 	ctx := context.Background()
 	catalog := metadata.Catalog{Databases: []metadata.Database{{
-		Name:       "workspace",
-		SQLitePath: "./data/workspace.sqlite",
+		Name: "workspace",
 		Tables: []metadata.Table{{
 			Name: "contacts",
 			Fields: []metadata.Field{
@@ -1134,8 +1129,7 @@ func TestTableOwnerCanUpdateFieldsAndViews(t *testing.T) {
 
 func TestTableMetadataUpdatePreservesOmittedFieldsAndViews(t *testing.T) {
 	catalog := metadata.Catalog{Databases: []metadata.Database{{
-		Name:       "workspace",
-		SQLitePath: "./data/workspace.sqlite",
+		Name: "workspace",
 		Tables: []metadata.Table{{
 			Name: "contacts",
 			Fields: []metadata.Field{
@@ -1196,8 +1190,7 @@ func TestTableMetadataUpdatePreservesOmittedFieldsAndViews(t *testing.T) {
 
 func TestFieldSetWriterCannotDeleteField(t *testing.T) {
 	catalog := metadata.Catalog{Databases: []metadata.Database{{
-		Name:       "workspace",
-		SQLitePath: "./data/workspace.sqlite",
+		Name: "workspace",
 		Tables: []metadata.Table{{
 			Name:   "contacts",
 			Fields: []metadata.Field{{Name: "name", Type: "string"}, {Name: "status", Type: "string"}},
@@ -1220,8 +1213,7 @@ func TestFieldSetWriterCannotDeleteField(t *testing.T) {
 
 func TestViewWriterCanUpdateOnlyGrantedExistingView(t *testing.T) {
 	catalog := metadata.Catalog{Databases: []metadata.Database{{
-		Name:       "workspace",
-		SQLitePath: "./data/workspace.sqlite",
+		Name: "workspace",
 		Tables: []metadata.Table{{
 			Name:   "contacts",
 			Fields: []metadata.Field{{Name: "name", Type: "string"}, {Name: "status", Type: "string"}},
@@ -1266,8 +1258,7 @@ func TestViewWriterCanUpdateOnlyGrantedExistingView(t *testing.T) {
 func TestTableOwnerCanMoveFieldPosition(t *testing.T) {
 	ctx := context.Background()
 	catalog := metadata.Catalog{Databases: []metadata.Database{{
-		Name:       "workspace",
-		SQLitePath: "./data/workspace.sqlite",
+		Name: "workspace",
 		Tables: []metadata.Table{{
 			Name: "contacts",
 			Fields: []metadata.Field{
@@ -1312,8 +1303,7 @@ func TestTableOwnerCanMoveFieldPosition(t *testing.T) {
 func TestWorkflowFieldCreateNodeAddsMissingFields(t *testing.T) {
 	ctx := context.Background()
 	catalog := metadata.Catalog{Databases: []metadata.Database{{
-		Name:       "workspace",
-		SQLitePath: filepath.Join(t.TempDir(), "workspace.sqlite"),
+		Name: "workspace",
 		Tables: []metadata.Table{{
 			Name: "contacts",
 			Fields: []metadata.Field{
@@ -1411,8 +1401,7 @@ func TestWorkflowFieldCreateNodeRejectsUnsafeFieldNames(t *testing.T) {
 	ctx := context.Background()
 	for _, fieldName := range []string{"单位.采购明细", "bad;name", "bad`name", "bad\nname"} {
 		catalog := metadata.Catalog{Databases: []metadata.Database{{
-			Name:       "workspace",
-			SQLitePath: filepath.Join(t.TempDir(), "workspace.sqlite"),
+			Name: "workspace",
 			Tables: []metadata.Table{{
 				Name:   "contacts",
 				Fields: []metadata.Field{{Name: "name", Type: "string"}},
@@ -1454,8 +1443,7 @@ func TestWorkflowFieldCreateNodeRejectsUnsafeFieldNames(t *testing.T) {
 func TestWorkflowFieldCreateNodeAllowsReadableBusinessFieldNames(t *testing.T) {
 	ctx := context.Background()
 	catalog := metadata.Catalog{Databases: []metadata.Database{{
-		Name:       "workspace",
-		SQLitePath: filepath.Join(t.TempDir(), "workspace.sqlite"),
+		Name: "workspace",
 		Tables: []metadata.Table{{
 			Name:   "contacts",
 			Fields: []metadata.Field{{Name: "name", Type: "string"}},
@@ -1499,10 +1487,8 @@ func TestWorkflowFieldCreateNodeAllowsReadableBusinessFieldNames(t *testing.T) {
 
 func TestWorkflowFieldCreateNodeAddsExternalCreatedFieldsOnFirstRun(t *testing.T) {
 	ctx := context.Background()
-	sqlitePath := filepath.Join(t.TempDir(), "workspace.sqlite")
 	catalog := metadata.Catalog{Databases: []metadata.Database{{
-		Name:       "workspace",
-		SQLitePath: sqlitePath,
+		Name: "workspace",
 		Tables: []metadata.Table{{
 			Name: "b表",
 			Fields: []metadata.Field{
@@ -1559,7 +1545,7 @@ func TestWorkflowFieldCreateNodeAddsExternalCreatedFieldsOnFirstRun(t *testing.T
 	if _, ok := tableMeta.Field("Created"); !ok {
 		t.Fatalf("expected Created in metadata, got %#v", tableMeta.Fields)
 	}
-	repository, err := recorddb.OpenCatalog(ctx, loaded)
+	repository, err := recorddb.OpenCatalog(ctx, loaded, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1580,8 +1566,7 @@ func TestWorkflowFieldCreateNodeAddsExternalCreatedFieldsOnFirstRun(t *testing.T
 func TestWorkflowFieldCreateNodeRequiresTableWrite(t *testing.T) {
 	ctx := context.Background()
 	catalog := metadata.Catalog{Databases: []metadata.Database{{
-		Name:       "workspace",
-		SQLitePath: filepath.Join(t.TempDir(), "workspace.sqlite"),
+		Name: "workspace",
 		Tables: []metadata.Table{{
 			Name:   "contacts",
 			Fields: []metadata.Field{{Name: "name", Type: "string"}},
@@ -1702,8 +1687,7 @@ func TestWorkflowRowUpsertRequiresMatchValue(t *testing.T) {
 func TestDatabaseOwnerCanManageRoles(t *testing.T) {
 	ctx := context.Background()
 	catalog := metadata.Catalog{Databases: []metadata.Database{{
-		Name:       "workspace",
-		SQLitePath: "./data/workspace.sqlite",
+		Name: "workspace",
 		Tables: []metadata.Table{{
 			Name: "contacts",
 			Fields: []metadata.Field{
@@ -1789,8 +1773,7 @@ func TestRoleGrantValidationKeepsResourcesInsideDatabase(t *testing.T) {
 	ctx := context.Background()
 	catalog := metadata.Catalog{Databases: []metadata.Database{
 		{
-			Name:       "workspace",
-			SQLitePath: "./data/workspace.sqlite",
+			Name: "workspace",
 			Tables: []metadata.Table{{
 				Name: "contacts",
 				Fields: []metadata.Field{
@@ -1800,8 +1783,7 @@ func TestRoleGrantValidationKeepsResourcesInsideDatabase(t *testing.T) {
 			}},
 		},
 		{
-			Name:       "other",
-			SQLitePath: "./data/other.sqlite",
+			Name: "other",
 			Tables: []metadata.Table{{
 				Name:   "contacts",
 				Fields: []metadata.Field{{Name: "name", Type: "string"}},
@@ -1895,8 +1877,8 @@ func TestRoleGrantValidationKeepsResourcesInsideDatabase(t *testing.T) {
 func TestRoleGrantAPIRejectsCrossDatabaseResources(t *testing.T) {
 	ctx := context.Background()
 	catalog := metadata.Catalog{Databases: []metadata.Database{
-		{Name: "workspace", SQLitePath: "./data/workspace.sqlite", Tables: []metadata.Table{{Name: "contacts", Fields: []metadata.Field{{Name: "name", Type: "string"}}}}},
-		{Name: "other", SQLitePath: "./data/other.sqlite", Tables: []metadata.Table{{Name: "contacts", Fields: []metadata.Field{{Name: "name", Type: "string"}}}}},
+		{Name: "workspace", Tables: []metadata.Table{{Name: "contacts", Fields: []metadata.Field{{Name: "name", Type: "string"}}}}},
+		{Name: "other", Tables: []metadata.Table{{Name: "contacts", Fields: []metadata.Field{{Name: "name", Type: "string"}}}}},
 	}}
 	server, system, _ := newTestServerWithMetadataFile(t, catalog)
 	saveTestDatabaseOwners(t, system, "workspace", "owner")
@@ -2012,7 +1994,7 @@ func TestRoleFieldGrantAllowsOnlyGrantedFields(t *testing.T) {
 }
 
 func TestRoleManagementRequiresDatabaseWrite(t *testing.T) {
-	catalog := metadata.Catalog{Databases: []metadata.Database{{Name: "workspace", SQLitePath: "./data/workspace.sqlite"}}}
+	catalog := metadata.Catalog{Databases: []metadata.Database{{Name: "workspace"}}}
 	server, system, _ := newTestServerWithMetadataFile(t, catalog)
 
 	request := httptest.NewRequest(http.MethodPost, "/api/databases/workspace/roles", bytes.NewBufferString(`{
@@ -2027,7 +2009,7 @@ func TestRoleManagementRequiresDatabaseWrite(t *testing.T) {
 }
 
 func TestNonDatabaseOwnerCannotCreateTable(t *testing.T) {
-	catalog := metadata.Catalog{Databases: []metadata.Database{{Name: "workspace", SQLitePath: "./data/workspace.sqlite"}}}
+	catalog := metadata.Catalog{Databases: []metadata.Database{{Name: "workspace"}}}
 	server, system, _ := newTestServerWithMetadataFile(t, catalog)
 	request := httptest.NewRequest(http.MethodPost, "/api/databases/workspace/tables", bytes.NewBufferString(`{
 		"name":"contacts",
@@ -2184,7 +2166,7 @@ func TestCreateRowAPICanUsePersistentRepository(t *testing.T) {
 	})
 
 	catalog := testCatalog(filepath.Join(t.TempDir(), "workspace.sqlite"))
-	repository, err := recorddb.OpenCatalog(ctx, catalog)
+	repository, err := recorddb.OpenCatalog(ctx, catalog, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2600,8 +2582,8 @@ func TestDatabaseOwnerCanManageDatabaseWorkflowsAndForms(t *testing.T) {
 func TestWorkflowAndFormUpdatesCannotMoveAcrossDatabases(t *testing.T) {
 	ctx := context.Background()
 	catalog := metadata.Catalog{Databases: []metadata.Database{
-		{Name: "db", SQLitePath: "./data/db.sqlite", Tables: []metadata.Table{{Name: "contacts", Fields: []metadata.Field{{Name: "name", Type: "string"}}}}},
-		{Name: "other", SQLitePath: "./data/other.sqlite", Tables: []metadata.Table{{Name: "contacts", Fields: []metadata.Field{{Name: "name", Type: "string"}}}}},
+		{Name: "db", Tables: []metadata.Table{{Name: "contacts", Fields: []metadata.Field{{Name: "name", Type: "string"}}}}},
+		{Name: "other", Tables: []metadata.Table{{Name: "contacts", Fields: []metadata.Field{{Name: "name", Type: "string"}}}}},
 	}}
 	server, system, _ := newTestServerWithMetadataFile(t, catalog)
 	if err := system.SaveGrant(ctx, permission.Grant{
@@ -3519,7 +3501,7 @@ func newTestServerWithOIDC(t *testing.T, providers []config.OIDCProvider) (*Serv
 	})
 	historyStore := history.NewMemoryStore()
 	catalog := testCatalog(filepath.Join(t.TempDir(), "db.sqlite"))
-	repository, err := recorddb.OpenCatalog(context.Background(), catalog)
+	repository, err := recorddb.OpenCatalog(context.Background(), catalog, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3587,7 +3569,7 @@ func newTestServerWithMetadataFile(t *testing.T, catalog metadata.Catalog) (*Ser
 		t.Fatal(err)
 	}
 	historyStore := history.NewMemoryStore()
-	repository, err := recorddb.OpenCatalog(context.Background(), catalog)
+	repository, err := recorddb.OpenCatalog(context.Background(), catalog, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3603,8 +3585,7 @@ func newTestServerWithMetadataFile(t *testing.T, catalog metadata.Catalog) (*Ser
 
 func testCatalog(sqlitePath string) metadata.Catalog {
 	return metadata.Catalog{Databases: []metadata.Database{{
-		Name:       "db",
-		SQLitePath: sqlitePath,
+		Name: "db",
 		Tables: []metadata.Table{{
 			Name: "contacts",
 			Fields: []metadata.Field{

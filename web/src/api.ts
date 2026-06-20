@@ -50,7 +50,6 @@ export type TableMetadata = {
 
 export type DatabaseMetadata = {
   name: string;
-  sqlite_path: string;
   tables: TableMetadata[];
   permission_level?: 0 | 1 | 2;
   workflow_permission_level?: 0 | 1 | 2;
@@ -216,9 +215,7 @@ export async function loadMetadata(): Promise<Catalog> {
   return response.json() as Promise<Catalog>;
 }
 
-export async function createDatabase(
-  database: Pick<DatabaseMetadata, "name" | "sqlite_path">
-): Promise<DatabaseMetadata> {
+export async function createDatabase(database: Pick<DatabaseMetadata, "name">): Promise<DatabaseMetadata> {
   const response = await fetch("/api/databases", {
     method: "POST",
     headers: { "Content-Type": "application/json" },

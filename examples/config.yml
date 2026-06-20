@@ -1,9 +1,7 @@
 server:
   address: "127.0.0.1:8080"
-system_db:
-  path: "./data/system.sqlite"
-history:
-  path: "./data/leveldb"
+data:
+  path: "./data"
 repository:
   path: "./examples"
 oidc:

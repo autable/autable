@@ -1,6 +1,5 @@
 databases:
   - name: workspace
-    sqlite_path: ./web/e2e/.runtime/data/workspace.sqlite
     tables:
       - name: contacts
         display_name: Contacts

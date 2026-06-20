@@ -34,6 +34,7 @@ This repository currently contains the backend core primitives:
 - Git-managed artifacts live under `repository.path`: table metadata at `metadata/main.yml`, workflow JavaScript at `workflow/<database>/<workflow>.js`, and form JavaScript at `form/<database>/<form>.js`.
 - A form JavaScript runtime that requires `function render(api, root)` to render controls with `field` configs and return `{ table }`.
 - Form submissions send input JSON; the backend executes the form JavaScript to resolve the target table and field-bound controls before writing records.
+- Runtime data is rooted at `data.path`: `system.sqlite`, `leveldb`, and per-database `<database>.sqlite` files are derived from that directory instead of being configured separately.
 
 ## Development Rules
 
@@ -52,7 +53,7 @@ This repository currently contains the backend core primitives:
 go test ./...
 ```
 
-Run the API server with git-managed config. The server loads metadata from `repository.path/metadata/main.yml`:
+Run the API server with git-managed config. The server loads metadata from `repository.path/metadata/main.yml` and stores runtime data under `data.path`:
 
 ```sh
 go run ./cmd/autable -config examples/config.yml

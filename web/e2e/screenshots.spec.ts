@@ -86,7 +86,6 @@ test("capture workspace screenshots", async ({ page }) => {
   const tableName = "contacts";
   await api(page, "POST", "/api/databases", {
     name: databaseName,
-    sqlite_path: `./data/${databaseName}.sqlite`
   });
   await api(page, "POST", `/api/databases/${databaseName}/tables`, {
     name: tableName,

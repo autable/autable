@@ -33,7 +33,7 @@ import { appLanguages, normalizeLanguage, type AppLanguage } from "./i18n";
 
 type View = WorkspaceView;
 
-const emptyDatabase: DatabaseMetadata = { name: "", sqlite_path: "", tables: [] };
+const emptyDatabase: DatabaseMetadata = { name: "", tables: [] };
 const emptyTable: TableMetadata = { name: "", display_name: "", fields: [], views: [] };
 const emptyCatalog: Catalog = { databases: [] };
 
@@ -237,7 +237,7 @@ function WorkspaceApp() {
       return;
     }
     try {
-      const saved = await createDatabase({ name, sqlite_path: `./data/${name}.sqlite` });
+      const saved = await createDatabase({ name });
       const nextCatalog = await loadMetadata();
       setCatalog(nextCatalog);
       setSelectedDatabaseName(saved.name);

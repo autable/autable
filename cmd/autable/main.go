@@ -48,19 +48,19 @@ func run(ctx context.Context, configPath string) error {
 	if err != nil {
 		return err
 	}
-	system, err := systemdb.Open(ctx, cfg.SystemDB.Path)
+	system, err := systemdb.Open(ctx, cfg.SystemDBPath())
 	if err != nil {
 		return err
 	}
 	defer system.Close()
 
-	historyStore, err := history.OpenLevelDB(cfg.History.Path)
+	historyStore, err := history.OpenLevelDB(cfg.HistoryPath())
 	if err != nil {
 		return err
 	}
 	defer historyStore.Close()
 
-	rowRepository, err := recorddb.OpenCatalog(ctx, catalog)
+	rowRepository, err := recorddb.OpenCatalog(ctx, catalog, cfg.Data.Path)
 	if err != nil {
 		return err
 	}
@@ -78,7 +78,9 @@ func run(ctx context.Context, configPath string) error {
 		cfg.OIDC.Providers,
 	)
 	server.EnableMetadataWrites(metadataPath)
-	server.SetDatabaseOpener(rowRepository.OpenDatabase)
+	server.SetDatabaseOpener(func(ctx context.Context, name string) error {
+		return rowRepository.OpenDatabase(ctx, name, cfg.DatabasePath(name))
+	})
 	server.SetCodeFileStore(codefiles.NewStore(cfg.Repository.Path))
 	server.StartWorkflowWorkers(ctx)
 	server.StartWorkflowScheduler(ctx, 15*time.Second)

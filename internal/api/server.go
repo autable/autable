@@ -30,7 +30,7 @@ type Server struct {
 	catalogMu        sync.RWMutex
 	catalog          metadata.Catalog
 	metadataPath     string
-	openDatabase     func(context.Context, string, string) error
+	openDatabase     func(context.Context, string) error
 	codeFiles        codeFileStore
 	system           *systemdb.DB
 	tables           *table.Service
@@ -53,8 +53,7 @@ type codeFileStore interface {
 }
 
 type createDatabaseRequest struct {
-	Name       string `json:"name"`
-	SQLitePath string `json:"sqlite_path"`
+	Name string `json:"name"`
 }
 
 type createRowRequest struct {
@@ -225,7 +224,7 @@ func NewServerWithWorkflowRunnerAndOIDC(catalog metadata.Catalog, system *system
 	}
 	if runner == nil {
 		runner = workflow.NewRunner(historyStore, nodes.All(nodes.Dependencies{
-			History:   historyStore,
+			History: historyStore,
 			Autable: server.workflowAutableService(),
 		})...)
 	} else {
@@ -243,7 +242,7 @@ func (server *Server) EnableMetadataWrites(path string) {
 	server.metadataPath = path
 }
 
-func (server *Server) SetDatabaseOpener(openDatabase func(context.Context, string, string) error) {
+func (server *Server) SetDatabaseOpener(openDatabase func(context.Context, string) error) {
 	server.openDatabase = openDatabase
 }
 
@@ -530,10 +529,7 @@ func (server *Server) handleCreateDatabase(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	if request.SQLitePath == "" {
-		request.SQLitePath = fmt.Sprintf("./data/%s.sqlite", request.Name)
-	}
-	database := metadata.Database{Name: request.Name, SQLitePath: request.SQLitePath, Tables: []metadata.Table{}}
+	database := metadata.Database{Name: request.Name, Tables: []metadata.Table{}}
 	if err := server.createDatabase(r.Context(), database); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return

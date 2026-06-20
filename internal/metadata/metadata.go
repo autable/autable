@@ -17,7 +17,6 @@ type Catalog struct {
 
 type Database struct {
 	Name                    string  `yaml:"name" json:"name"`
-	SQLitePath              string  `yaml:"sqlite_path" json:"sqlite_path"`
 	Tables                  []Table `yaml:"tables" json:"tables"`
 	PermissionLevel         int     `yaml:"-" json:"permission_level"`
 	WorkflowPermissionLevel int     `yaml:"-" json:"workflow_permission_level"`
@@ -136,10 +135,6 @@ func (catalog Catalog) Validate() error {
 			return fmt.Errorf("database %q is duplicated", db.Name)
 		}
 		seenDBs[db.Name] = struct{}{}
-		if db.SQLitePath == "" {
-			return fmt.Errorf("database %q sqlite_path is required", db.Name)
-		}
-
 		seenTables := map[string]struct{}{}
 		for tableIndex, table := range db.Tables {
 			if err := table.validate(db.Name, tableIndex); err != nil {
@@ -175,9 +170,6 @@ func (catalog Catalog) Database(name string) (Database, bool) {
 func (catalog Catalog) AddDatabase(database Database) (Catalog, error) {
 	if database.Name == "" {
 		return Catalog{}, errors.New("database name is required")
-	}
-	if database.SQLitePath == "" {
-		return Catalog{}, errors.New("database sqlite_path is required")
 	}
 	if _, ok := catalog.Database(database.Name); ok {
 		return Catalog{}, fmt.Errorf("database %q already exists", database.Name)

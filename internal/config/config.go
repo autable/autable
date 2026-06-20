@@ -4,14 +4,14 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"gopkg.in/yaml.v3"
 )
 
 type Config struct {
 	Server     ServerConfig     `yaml:"server"`
-	SystemDB   SystemDBConfig   `yaml:"system_db"`
-	History    HistoryConfig    `yaml:"history"`
+	Data       DataConfig       `yaml:"data"`
 	Repository RepositoryConfig `yaml:"repository"`
 	OIDC       OIDCConfig       `yaml:"oidc"`
 }
@@ -20,11 +20,7 @@ type ServerConfig struct {
 	Address string `yaml:"address"`
 }
 
-type SystemDBConfig struct {
-	Path string `yaml:"path"`
-}
-
-type HistoryConfig struct {
+type DataConfig struct {
 	Path string `yaml:"path"`
 }
 
@@ -62,11 +58,8 @@ func Load(path string) (Config, error) {
 }
 
 func (cfg Config) Validate() error {
-	if cfg.SystemDB.Path == "" {
-		return errors.New("system_db.path is required")
-	}
-	if cfg.History.Path == "" {
-		return errors.New("history.path is required")
+	if cfg.Data.Path == "" {
+		return errors.New("data.path is required")
 	}
 	if cfg.Repository.Path == "" {
 		return errors.New("repository.path is required")
@@ -83,4 +76,16 @@ func (cfg Config) Validate() error {
 		}
 	}
 	return nil
+}
+
+func (cfg Config) SystemDBPath() string {
+	return filepath.Join(cfg.Data.Path, "system.sqlite")
+}
+
+func (cfg Config) HistoryPath() string {
+	return filepath.Join(cfg.Data.Path, "leveldb")
+}
+
+func (cfg Config) DatabasePath(name string) string {
+	return filepath.Join(cfg.Data.Path, name+".sqlite")
 }

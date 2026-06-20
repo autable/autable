@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"testing"
 
 	"autable/internal/history"
@@ -18,8 +17,7 @@ func TestCreateRowAssignsRecordIDAndWritesHistory(t *testing.T) {
 	ctx := context.Background()
 	store := history.NewMemoryStore()
 	catalog := metadata.Catalog{Databases: []metadata.Database{{
-		Name:       "db",
-		SQLitePath: "./db.sqlite",
+		Name: "db",
 		Tables: []metadata.Table{{
 			Name: "contacts",
 			Fields: []metadata.Field{
@@ -69,8 +67,7 @@ func TestCreateRowNotifiesHistoryBackedRowChange(t *testing.T) {
 	ctx := context.Background()
 	store := history.NewMemoryStore()
 	catalog := metadata.Catalog{Databases: []metadata.Database{{
-		Name:       "db",
-		SQLitePath: "./db.sqlite",
+		Name: "db",
 		Tables: []metadata.Table{{
 			Name:   "contacts",
 			Fields: []metadata.Field{{Name: "name", Type: "string"}},
@@ -111,8 +108,7 @@ func TestCreateRowNotifiesHistoryBackedRowChange(t *testing.T) {
 func TestCreateRowRejectsDeletedField(t *testing.T) {
 	ctx := context.Background()
 	catalog := metadata.Catalog{Databases: []metadata.Database{{
-		Name:       "db",
-		SQLitePath: "./db.sqlite",
+		Name: "db",
 		Tables: []metadata.Table{{
 			Name: "contacts",
 			Fields: []metadata.Field{
@@ -138,8 +134,7 @@ func TestCreateRowRejectsDeletedField(t *testing.T) {
 func TestCreateRowEnforcesFieldWritePermission(t *testing.T) {
 	ctx := context.Background()
 	catalog := metadata.Catalog{Databases: []metadata.Database{{
-		Name:       "db",
-		SQLitePath: "./db.sqlite",
+		Name: "db",
 		Tables: []metadata.Table{{
 			Name:   "contacts",
 			Fields: []metadata.Field{{Name: "name", Type: "string"}},
@@ -162,8 +157,7 @@ func TestCreateRowEnforcesFieldWritePermission(t *testing.T) {
 func TestCreateRowRequiresRecordCreatePermission(t *testing.T) {
 	ctx := context.Background()
 	catalog := metadata.Catalog{Databases: []metadata.Database{{
-		Name:       "db",
-		SQLitePath: "./db.sqlite",
+		Name: "db",
 		Tables: []metadata.Table{{
 			Name:   "contacts",
 			Fields: []metadata.Field{{Name: "name", Type: "string"}},
@@ -186,8 +180,7 @@ func TestCreateRowRequiresRecordCreatePermission(t *testing.T) {
 func TestCreateRowHonorsPartialFieldWriteGrant(t *testing.T) {
 	ctx := context.Background()
 	catalog := metadata.Catalog{Databases: []metadata.Database{{
-		Name:       "db",
-		SQLitePath: "./db.sqlite",
+		Name: "db",
 		Tables: []metadata.Table{{
 			Name: "contacts",
 			Fields: []metadata.Field{
@@ -231,8 +224,7 @@ func TestUpdateRowMergesValuesAndWritesHistory(t *testing.T) {
 	ctx := context.Background()
 	store := history.NewMemoryStore()
 	catalog := metadata.Catalog{Databases: []metadata.Database{{
-		Name:       "db",
-		SQLitePath: "./db.sqlite",
+		Name: "db",
 		Tables: []metadata.Table{{
 			Name: "contacts",
 			Fields: []metadata.Field{
@@ -289,8 +281,7 @@ func TestUpdateRowMergesValuesAndWritesHistory(t *testing.T) {
 func TestUpdateRowRejectsRecordIDAndReadOnlyField(t *testing.T) {
 	ctx := context.Background()
 	catalog := metadata.Catalog{Databases: []metadata.Database{{
-		Name:       "db",
-		SQLitePath: "./db.sqlite",
+		Name: "db",
 		Tables: []metadata.Table{{
 			Name:   "contacts",
 			Fields: []metadata.Field{{Name: "name", Type: "string"}},
@@ -327,8 +318,7 @@ func TestUpdateRowRejectsRecordIDAndReadOnlyField(t *testing.T) {
 func TestUpdateRowHonorsPartialFieldWriteGrant(t *testing.T) {
 	ctx := context.Background()
 	catalog := metadata.Catalog{Databases: []metadata.Database{{
-		Name:       "db",
-		SQLitePath: "./db.sqlite",
+		Name: "db",
 		Tables: []metadata.Table{{
 			Name: "contacts",
 			Fields: []metadata.Field{
@@ -381,8 +371,7 @@ func TestDeleteRowRequiresRecordDeletePermissionRemovesRowAndWritesHistory(t *te
 	ctx := context.Background()
 	store := history.NewMemoryStore()
 	catalog := metadata.Catalog{Databases: []metadata.Database{{
-		Name:       "db",
-		SQLitePath: "./db.sqlite",
+		Name: "db",
 		Tables: []metadata.Table{{
 			Name:   "contacts",
 			Fields: []metadata.Field{{Name: "name", Type: "string"}},
@@ -445,8 +434,7 @@ func TestCreateRowUsesInjectedRepository(t *testing.T) {
 	ctx := context.Background()
 	store := history.NewMemoryStore()
 	catalog := metadata.Catalog{Databases: []metadata.Database{{
-		Name:       "db",
-		SQLitePath: "./db.sqlite",
+		Name: "db",
 		Tables: []metadata.Table{{
 			Name:   "contacts",
 			Fields: []metadata.Field{{Name: "name", Type: "string"}},
@@ -557,8 +545,7 @@ func TestDeleteRowDoesNotMutateWhenHistoryWriteFails(t *testing.T) {
 func TestRowsAppliesComposedViewQueryAndSorts(t *testing.T) {
 	ctx := context.Background()
 	catalog := metadata.Catalog{Databases: []metadata.Database{{
-		Name:       "db",
-		SQLitePath: "./db.sqlite",
+		Name: "db",
 		Tables: []metadata.Table{{
 			Name: "contacts",
 			Fields: []metadata.Field{
@@ -617,8 +604,7 @@ func TestFormulaFieldsAreComputedAndNotWritable(t *testing.T) {
 	ctx := context.Background()
 	store := history.NewMemoryStore()
 	catalog := metadata.Catalog{Databases: []metadata.Database{{
-		Name:       "db",
-		SQLitePath: "./db.sqlite",
+		Name: "db",
 		Tables: []metadata.Table{{
 			Name: "contacts",
 			Fields: []metadata.Field{
@@ -700,8 +686,7 @@ func TestSyncTableRecomputesFormulaFieldsWithoutHistory(t *testing.T) {
 	ctx := context.Background()
 	store := history.NewMemoryStore()
 	catalog := metadata.Catalog{Databases: []metadata.Database{{
-		Name:       "db",
-		SQLitePath: "./db.sqlite",
+		Name: "db",
 		Tables: []metadata.Table{{
 			Name: "contacts",
 			Fields: []metadata.Field{
@@ -726,8 +711,7 @@ func TestSyncTableRecomputesFormulaFieldsWithoutHistory(t *testing.T) {
 		t.Fatalf("expected initial formula value, got %#v", row.Values)
 	}
 	updatedCatalog := metadata.Catalog{Databases: []metadata.Database{{
-		Name:       "db",
-		SQLitePath: catalog.Databases[0].SQLitePath,
+		Name: "db",
 		Tables: []metadata.Table{{
 			Name: "contacts",
 			Fields: []metadata.Field{
@@ -759,8 +743,7 @@ func TestFormulaErrorsClearValueInsteadOfFailingWrite(t *testing.T) {
 	ctx := context.Background()
 	store := history.NewMemoryStore()
 	catalog := metadata.Catalog{Databases: []metadata.Database{{
-		Name:       "db",
-		SQLitePath: "./db.sqlite",
+		Name: "db",
 		Tables: []metadata.Table{{
 			Name: "contacts",
 			Fields: []metadata.Field{
@@ -794,8 +777,7 @@ func TestFormulaErrorsClearValueInsteadOfFailingWrite(t *testing.T) {
 	}
 
 	updatedCatalog := metadata.Catalog{Databases: []metadata.Database{{
-		Name:       "db",
-		SQLitePath: catalog.Databases[0].SQLitePath,
+		Name: "db",
 		Tables: []metadata.Table{{
 			Name: "contacts",
 			Fields: []metadata.Field{
@@ -820,8 +802,7 @@ func TestInvalidTypedFieldInputClearsValueInsteadOfKeepingOldValue(t *testing.T)
 	ctx := context.Background()
 	store := history.NewMemoryStore()
 	catalog := metadata.Catalog{Databases: []metadata.Database{{
-		Name:       "db",
-		SQLitePath: "./db.sqlite",
+		Name: "db",
 		Tables: []metadata.Table{{
 			Name: "contacts",
 			Fields: []metadata.Field{
@@ -877,8 +858,7 @@ func (failingHistoryStore) GetPrefix(context.Context, string) ([]history.Entry, 
 
 func testTableCatalog() metadata.Catalog {
 	return metadata.Catalog{Databases: []metadata.Database{{
-		Name:       "db",
-		SQLitePath: "./db.sqlite",
+		Name: "db",
 		Tables: []metadata.Table{{
 			Name:   "contacts",
 			Fields: []metadata.Field{{Name: "name", Type: "string"}},
@@ -919,8 +899,7 @@ func testWritePerms() permission.Set {
 
 func newSQLiteService(t *testing.T, store history.Store, catalog metadata.Catalog) (*table.Service, metadata.Catalog, *recorddb.Repository) {
 	t.Helper()
-	catalog = withTempSQLitePaths(t, catalog)
-	repository, err := recorddb.OpenCatalog(context.Background(), catalog)
+	repository, err := recorddb.OpenCatalog(context.Background(), catalog, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -932,20 +911,10 @@ func newSQLiteService(t *testing.T, store history.Store, catalog metadata.Catalo
 	return table.NewServiceWithRepository(store, repository), catalog, repository
 }
 
-func withTempSQLitePaths(t *testing.T, catalog metadata.Catalog) metadata.Catalog {
-	t.Helper()
-	dir := t.TempDir()
-	for index := range catalog.Databases {
-		catalog.Databases[index].SQLitePath = filepath.Join(dir, catalog.Databases[index].Name+".sqlite")
-	}
-	return catalog
-}
-
 func TestRowsRejectsViewsUsingUnreadableFields(t *testing.T) {
 	ctx := context.Background()
 	catalog := metadata.Catalog{Databases: []metadata.Database{{
-		Name:       "db",
-		SQLitePath: "./db.sqlite",
+		Name: "db",
 		Tables: []metadata.Table{{
 			Name: "contacts",
 			Fields: []metadata.Field{
@@ -1001,8 +970,7 @@ func TestRowsRejectsViewsUsingUnreadableFields(t *testing.T) {
 func TestRowsWithOptionsRejectsUnreadableQueryFields(t *testing.T) {
 	ctx := context.Background()
 	catalog := metadata.Catalog{Databases: []metadata.Database{{
-		Name:       "db",
-		SQLitePath: "./db.sqlite",
+		Name: "db",
 		Tables: []metadata.Table{{
 			Name: "contacts",
 			Fields: []metadata.Field{

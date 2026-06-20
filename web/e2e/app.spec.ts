@@ -206,7 +206,6 @@ async function setupWorkspace(page: Page): Promise<WorkspaceSetup> {
   const tableName = "contacts";
   await api(page, "POST", "/api/databases", {
     name: databaseName,
-    sqlite_path: `./data/${databaseName}.sqlite`
   });
   await api(page, "POST", `/api/databases/${databaseName}/tables`, {
     name: tableName,
@@ -278,7 +277,6 @@ test("shows database-owned workflow and form lists across table owners", async (
 
   await api(page, "POST", "/api/databases", {
     name: databaseName,
-    sqlite_path: `./data/${databaseName}.sqlite`
   });
   await api(page, "POST", `/api/databases/${databaseName}/tables`, {
     name: "contacts",
@@ -336,7 +334,6 @@ test("hides workflow and form resources without resource permission", async ({ p
 
   await api(page, "POST", "/api/databases", {
     name: databaseName,
-    sqlite_path: `./data/${databaseName}.sqlite`
   });
   await api(page, "POST", `/api/databases/${databaseName}/tables`, {
     name: "contacts",
@@ -389,7 +386,6 @@ test("prevents partial field readers from mutating table metadata", async ({ pag
 
   await api(page, "POST", "/api/databases", {
     name: databaseName,
-    sqlite_path: `./data/${databaseName}.sqlite`
   });
   await api(page, "POST", `/api/databases/${databaseName}/tables`, {
     name: tableName,
@@ -456,7 +452,6 @@ test("renders read-only workflow and form resources as non-editable", async ({ p
 
   await api(page, "POST", "/api/databases", {
     name: databaseName,
-    sqlite_path: `./data/${databaseName}.sqlite`
   });
   await api(page, "POST", `/api/databases/${databaseName}/tables`, {
     name: "contacts",
@@ -943,7 +938,6 @@ test("persists workflow and form JavaScript into the repository path", async ({ 
   const databaseName = `repo${suffix}`;
   await api(page, "POST", "/api/databases", {
     name: databaseName,
-    sqlite_path: `./data/${databaseName}.sqlite`
   });
 
   const workflowName = `repo-workflow-${suffix}`;
