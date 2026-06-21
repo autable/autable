@@ -1,3 +1,4 @@
+import type { Notify } from "../notifications";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -12,7 +13,7 @@ import { renderFormScript, type FormActionAPI } from "../formRuntime";
 type UseFormRunnerOptions = {
   databaseName: string;
   script: string;
-  onStatus: (message: string) => void;
+  onStatus: Notify;
   onRowCreated?: (tableName: string, row: Awaited<ReturnType<typeof createRow>>) => void;
 };
 
@@ -48,7 +49,7 @@ export function useFormRunner({ databaseName, script, onStatus, onRowCreated }: 
         setResult(actionResult);
       }
     } catch (error) {
-      onStatus(error instanceof Error ? error.message : t("status.formSubmitFailed"));
+      onStatus(error instanceof Error ? error.message : t("status.formSubmitFailed"), "error");
     }
   }
 

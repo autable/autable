@@ -15,6 +15,7 @@ import {
   type TableMetadata
 } from "../api";
 import { useFormRunner } from "../hooks/useFormRunner";
+import { useNotifier } from "../notifications";
 import { AuthDialog } from "./AuthDialog";
 import { FormRunner } from "./FormRunner";
 
@@ -34,11 +35,12 @@ export function PublishedFormPage({ token }: PublishedFormPageProps) {
   const [form, setForm] = useState<FormDefinition | null>(null);
   const [tables, setTables] = useState<TableMetadata[]>([]);
   const [status, setStatus] = useState(t("status.loadingForm"));
+  const { Toaster, notify } = useNotifier();
   const formRunner = useFormRunner({
     databaseName: form?.database_name ?? "",
     script: form?.script ?? "",
-    onStatus: setStatus,
-    onRowCreated: (_table, row) => setStatus(t("status.publishedFormSubmitted", { id: row.record_id }))
+    onStatus: notify,
+    onRowCreated: (_table, row) => notify(t("status.publishedFormSubmitted", { id: row.record_id }), "success")
   });
 
   useEffect(() => {
@@ -99,7 +101,6 @@ export function PublishedFormPage({ token }: PublishedFormPageProps) {
         }
         setForm(loadedForm);
         setTables(loadedTables);
-        setStatus(t("status.openedForm", { name: loadedForm.name }));
       })
       .catch((error) => {
         if (!cancelled) {
@@ -118,9 +119,9 @@ export function PublishedFormPage({ token }: PublishedFormPageProps) {
       const user = await register(authEmail, authPassword);
       setCurrentUser(user);
       setAuthDialogOpen(false);
-      setStatus(t("status.signedInAs", { email: user.email }));
+      notify(t("status.signedInAs", { email: user.email }), "success");
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : t("status.registrationFailed"));
+      notify(error instanceof Error ? error.message : t("status.registrationFailed"), "error");
     }
   }
 
@@ -129,9 +130,9 @@ export function PublishedFormPage({ token }: PublishedFormPageProps) {
       const user = await login(authEmail, authPassword);
       setCurrentUser(user);
       setAuthDialogOpen(false);
-      setStatus(t("status.signedInAs", { email: user.email }));
+      notify(t("status.signedInAs", { email: user.email }), "success");
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : t("status.loginFailed"));
+      notify(error instanceof Error ? error.message : t("status.loginFailed"), "error");
     }
   }
 
@@ -171,7 +172,7 @@ export function PublishedFormPage({ token }: PublishedFormPageProps) {
           </div>
         )}
       </main>
-      <footer className="statusbar">{status}</footer>
+      <Toaster />
       <AuthDialog
         email={authEmail}
         onEmailChange={setAuthEmail}

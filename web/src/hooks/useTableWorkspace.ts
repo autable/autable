@@ -1,3 +1,4 @@
+import type { Notify } from "../notifications";
 import { useEffect, useMemo, useState } from "react";
 import type { CellSelectArgs, RowsChangeData } from "react-data-grid";
 import { useTranslation } from "react-i18next";
@@ -29,7 +30,7 @@ type UseTableWorkspaceOptions = {
   table: TableMetadata;
   tables: TableMetadata[];
   onCatalogChanged: (catalog: Catalog, tableName: string, viewName: string) => void;
-  onStatus: (message: string) => void;
+  onStatus: Notify;
 };
 
 export function useTableWorkspace({
@@ -242,7 +243,7 @@ export function useTableWorkspace({
       setRowHistory([]);
       onStatus(t("status.updatedRecord", { id: saved.record_id }));
     } catch (error) {
-      onStatus(error instanceof Error ? error.message : t("status.rowUpdateFailed"));
+      onStatus(error instanceof Error ? error.message : t("status.rowUpdateFailed"), "error");
     }
   }
 
@@ -267,7 +268,7 @@ export function useTableWorkspace({
       onCatalogChanged(nextCatalog, table.name, selectedTableView);
       onStatus(t("status.reorderedField", { name: sourceFieldName }));
     } catch (error) {
-      onStatus(error instanceof Error ? error.message : t("status.fieldReorderFailed"));
+      onStatus(error instanceof Error ? error.message : t("status.fieldReorderFailed"), "error");
     }
   }
 
@@ -294,7 +295,7 @@ export function useTableWorkspace({
       setRowHistory([]);
       onStatus(successMessage);
     } catch (error) {
-      onStatus(error instanceof Error ? error.message : t("status.tableMetadataUpdateFailed"));
+      onStatus(error instanceof Error ? error.message : t("status.tableMetadataUpdateFailed"), "error");
     }
   }
 
@@ -414,7 +415,7 @@ export function useTableWorkspace({
       setRowHistory([]);
       onStatus(t("status.createdRecord", { id: saved.record_id }));
     } catch (error) {
-      onStatus(error instanceof Error ? error.message : t("status.rowCreationFailed"));
+      onStatus(error instanceof Error ? error.message : t("status.rowCreationFailed"), "error");
     }
   }
 
@@ -441,7 +442,7 @@ export function useTableWorkspace({
       setRowHistory([]);
       onStatus(t("status.updatedRecord", { id: saved.record_id }));
     } catch (error) {
-      onStatus(error instanceof Error ? error.message : t("status.rowUpdateFailed"));
+      onStatus(error instanceof Error ? error.message : t("status.rowUpdateFailed"), "error");
     }
   }
 
@@ -458,7 +459,7 @@ export function useTableWorkspace({
       setRowHistory([]);
       onStatus(t("status.deletedRecord", { id: deleted.record_id }));
     } catch (error) {
-      onStatus(error instanceof Error ? error.message : t("status.rowDeletionFailed"));
+      onStatus(error instanceof Error ? error.message : t("status.rowDeletionFailed"), "error");
     }
   }
 
@@ -473,7 +474,7 @@ export function useTableWorkspace({
       onStatus(t("status.loadedHistory", { count: changes.length, id: selectedRecordID }));
     } catch (error) {
       setRowHistory([]);
-      onStatus(error instanceof Error ? error.message : t("status.rowHistoryFailed"));
+      onStatus(error instanceof Error ? error.message : t("status.rowHistoryFailed"), "error");
     }
   }
 

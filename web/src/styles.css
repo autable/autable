@@ -313,7 +313,7 @@ select {
 
 .workspace {
   display: grid;
-  grid-template-rows: 58px minmax(0, 1fr) 32px;
+  grid-template-rows: 58px minmax(0, 1fr);
   min-width: 0;
   height: 100vh;
   min-height: 0;
@@ -792,7 +792,7 @@ select {
 
 .published-form-shell {
   display: grid;
-  grid-template-rows: minmax(0, 1fr) 32px;
+  grid-template-rows: minmax(0, 1fr);
   min-width: 0;
   min-height: 100vh;
   background: var(--colorNeutralBackground2);
@@ -1523,16 +1523,6 @@ select {
 .workspace-empty-icon svg {
   width: 40px;
   height: 40px;
-}
-
-.statusbar {
-  display: flex;
-  align-items: center;
-  padding: 0 18px;
-  border-top: 1px solid var(--colorNeutralStroke2);
-  color: var(--colorNeutralForeground3);
-  background: var(--colorNeutralBackground1);
-  font-size: 12px;
 }
 
 @media (max-width: 820px) {

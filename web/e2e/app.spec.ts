@@ -529,11 +529,11 @@ test("covers database and table creation through the real backend", async ({ pag
   const tableName = `projects${suffix}`;
   await createNamedResource(page, "Create DB", "New database name", databaseName);
   await expect(page.getByRole("button", { name: databaseName })).toHaveAttribute("aria-expanded", "true");
-  await expect(page.getByText(`Created database ${databaseName}`)).toBeVisible();
+  await expect(page.getByText(`Created database ${databaseName}`).first()).toBeVisible();
 
   await createNamedResource(page, "Create Table", "New table name", tableName);
   await expect(page.getByRole("button", { name: tableName })).toBeVisible();
-  await expect(page.getByText(`Created table ${databaseName}.${tableName}`)).toBeVisible();
+  await expect(page.getByText(`Created table ${databaseName}.${tableName}`).first()).toBeVisible();
 
   await page.getByRole("button", { name: workspace.databaseName, exact: true }).click();
   await waitForTableReady(page, workspace.databaseName);
@@ -593,7 +593,7 @@ test("covers table views, row creation, and row history through the real backend
   await addFieldEditor.getByLabel("Field name").fill("priority");
   await addFieldEditor.getByLabel("Field type").selectOption("string");
   await addFieldEditor.getByRole("button", { name: "Add" }).click();
-  await expect(page.getByText("Added field priority")).toBeVisible();
+  await expect(page.getByText("Added field priority").first()).toBeVisible();
   await expect(recordsGrid.getByRole("gridcell", { name: "Ada Lovelace", exact: true })).toBeVisible();
   await expect(page.getByText(/\d+ of \d+ records/).first()).not.toHaveText("0 of 0 records");
 
@@ -604,7 +604,7 @@ test("covers table views, row creation, and row history through the real backend
   await formulaFieldEditor.getByLabel("Formula value type").selectOption("string");
   await formulaFieldEditor.getByRole("textbox", { name: "Formula" }).fill("field_name + ' ' + field_status");
   await formulaFieldEditor.getByRole("button", { name: "Add" }).click();
-  await expect(page.getByText("Added field summary")).toBeVisible();
+  await expect(page.getByText("Added field summary").first()).toBeVisible();
 
   await recordsGrid.getByRole("button", { name: "Add field" }).click();
   const relationFieldEditor = page.getByLabel("Add field");
@@ -612,7 +612,7 @@ test("covers table views, row creation, and row history through the real backend
   await relationFieldEditor.getByLabel("Field type").selectOption("relation");
   await relationFieldEditor.getByLabel("Target table").selectOption("contacts");
   await relationFieldEditor.getByRole("button", { name: "Add" }).click();
-  await expect(page.getByText("Added field owner")).toBeVisible();
+  await expect(page.getByText("Added field owner").first()).toBeVisible();
 
   const relationRows = (await api(
     page,
@@ -648,7 +648,7 @@ test("covers table views, row creation, and row history through the real backend
   const formulaEditor = page.getByLabel("Edit formula");
   await formulaEditor.getByRole("textbox", { name: "Formula" }).fill("field_name + ' / ' + field_status");
   await formulaEditor.getByRole("button", { name: "Save" }).click();
-  await expect(page.getByText("Updated formula summary")).toBeVisible();
+  await expect(page.getByText("Updated formula summary").first()).toBeVisible();
   formulaRows = (await api(
     page,
     "GET",
@@ -658,10 +658,10 @@ test("covers table views, row creation, and row history through the real backend
 
   await recordsGrid.getByRole("button", { name: "Field actions email" }).click();
   await page.getByRole("menuitem", { name: "Delete field" }).click();
-  await expect(page.getByText("Deleted field email")).toBeVisible();
+  await expect(page.getByText("Deleted field email").first()).toBeVisible();
 
   await tableActions.getByRole("button", { name: "Row", exact: true }).click();
-  await expect(page.getByText(/Created record \d+/)).toBeVisible();
+  await expect(page.getByText(/Created record \d+/).first()).toBeVisible();
   await recordsGrid.evaluate((grid) => {
     grid.scrollTop = grid.scrollHeight;
     grid.dispatchEvent(new Event("scroll", { bubbles: true }));
@@ -669,19 +669,19 @@ test("covers table views, row creation, and row history through the real backend
   await recordsGrid.getByRole("gridcell", { name: /^New record \d+$/ }).dblclick();
   await recordsGrid.locator(".rdg-text-editor").fill("Grace Hopper");
   await page.keyboard.press("Enter");
-  await expect(page.getByText(/Updated record \d+/)).toBeVisible();
+  await expect(page.getByText(/Updated record \d+/).first()).toBeVisible();
 
   await recordsGrid.getByRole("gridcell", { name: "Review", exact: true }).last().dblclick();
   await recordsGrid.locator(".rdg-text-editor").fill("Active");
   await page.keyboard.press("Enter");
-  await expect(page.getByText(/Updated record \d+/)).toBeVisible();
+  await expect(page.getByText(/Updated record \d+/).first()).toBeVisible();
 
   const createViewButton = page.getByRole("button", { name: "Create View" });
   await expect(createViewButton).toBeVisible();
   await createViewButton.click();
   await page.getByRole("textbox", { name: "New view name" }).fill("View 2");
   await page.getByRole("button", { name: "Save" }).last().click();
-  await expect(page.getByText("Created view View 2")).toBeVisible();
+  await expect(page.getByText("Created view View 2").first()).toBeVisible();
   const viewFilters = page.getByLabel("View filters");
   await viewFilters.getByRole("button", { name: "Add rule" }).click();
   await viewFilters.locator(".rule-fields").selectOption("status");
@@ -690,7 +690,7 @@ test("covers table views, row creation, and row history through the real backend
   await viewFilters.getByLabel("View sort field").selectOption("name");
   await viewFilters.getByLabel("View sort direction").selectOption("desc");
   await viewFilters.getByRole("button", { name: "Save View" }).click();
-  await expect(page.getByText("Updated view View 2")).toBeVisible();
+  await expect(page.getByText("Updated view View 2").first()).toBeVisible();
 
   const createdViewName = encodeURIComponent("View 2");
   const viewRows = (await api(
@@ -733,7 +733,7 @@ test("covers table views, row creation, and row history through the real backend
 
   await recordsGrid.getByRole("gridcell", { name: "Grace Hopper", exact: true }).click({ button: "right" });
   await page.getByRole("menuitem", { name: "Delete record" }).click();
-  await expect(page.getByText(/Deleted record \d+/)).toBeVisible();
+  await expect(page.getByText(/Deleted record \d+/).first()).toBeVisible();
 
   const metadata = (await api(page, "GET", "/api/metadata")) as {
     databases: Array<{ name: string; tables: Array<{ name: string; fields: Array<{ name: string; type?: string; formula?: string; deleted: boolean }>; views: Array<{ name: string; query?: { rules: Array<{ field?: string; value?: string }> }; sorts: Array<{ field: string; direction: string }> }> }> }>;
@@ -766,7 +766,7 @@ test("covers workflow editor, node list, and run history through the real backen
   await page.getByRole("button", { name: "Workflow", exact: true }).click();
   const workflowName = `ui-workflow-${Date.now()}`;
   await createNamedResource(page, "Create Workflow", "New workflow name", workflowName);
-  await expect(page.getByText(`Created workflow ${workflowName}`)).toBeVisible();
+  await expect(page.getByText(`Created workflow ${workflowName}`).first()).toBeVisible();
   await expect(page.getByRole("button", { name: workflowName })).toBeVisible();
   const createdWorkflows = (await api(page, "GET", `/api/databases/${workspace.databaseName}/workflows`)) as Array<{
     name: string;
@@ -815,8 +815,8 @@ test("covers workflow editor, node list, and run history through the real backen
   await page.getByRole("button", { name: "dingtalk.robot.send" }).click();
   await expect(page.getByText("DingTalk robot").first()).toBeVisible();
   await page.getByRole("button", { name: /table\.record\.changed/ }).click();
-  await expect(page.getByText("Record changed")).toBeVisible();
-  await expect(page.getByText(/run\(info\)\.inputs/)).toBeVisible();
+  await expect(page.getByText("Record changed").first()).toBeVisible();
+  await expect(page.getByText(/run\(info\)\.inputs/).first()).toBeVisible();
   const nodeDialogLayout = await page.getByLabel("Workflow node documentation").evaluate((element) => {
     const list = element as HTMLElement;
     return {
@@ -831,7 +831,7 @@ test("covers workflow editor, node list, and run history through the real backen
   await page.getByRole("button", { name: "Switch language" }).click();
   await page.getByRole("button", { name: "工作流节点" }).click();
   await page.getByRole("button", { name: "dingtalk.robot.send" }).click();
-  await expect(page.getByText("钉钉机器人")).toBeVisible();
+  await expect(page.getByText("钉钉机器人").first()).toBeVisible();
   await page.keyboard.press("Escape");
   await page.getByRole("button", { name: "切换语言" }).click();
   await expect(page.getByLabel("Instances").getByText("row_change")).toBeVisible();
@@ -854,7 +854,7 @@ test("covers workflow editor, node list, and run history through the real backen
   await page.getByLabel("Variable row_change.label").fill("review");
   await page.getByLabel("Secret row_change.token").fill("hidden-token");
   await page.getByRole("button", { name: "Save config" }).click();
-  await expect(page.getByText("Saved instance config row_change")).toBeVisible();
+  await expect(page.getByText("Saved instance config row_change").first()).toBeVisible();
   const savedWorkflows = (await api(
     page,
     "GET",
@@ -875,7 +875,7 @@ test("covers workflow editor, node list, and run history through the real backen
   expect(typeof savedWorkflow?.created_at).toBe("number");
   expect(typeof savedWorkflow?.updated_at).toBe("number");
   await page.getByRole("switch", { name: "Enabled" }).click();
-  await expect(page.getByText(`${workflowName} disabled`)).toBeVisible();
+  await expect(page.getByText(`${workflowName} disabled`).first()).toBeVisible();
   const disabledWorkflows = (await api(
     page,
     "GET",
@@ -883,13 +883,13 @@ test("covers workflow editor, node list, and run history through the real backen
   )) as Array<{ id: number; enabled: boolean }>;
   expect(disabledWorkflows.find((item) => item.id === savedWorkflow?.id)?.enabled).toBe(false);
   await page.getByRole("switch", { name: "Enabled" }).click();
-  await expect(page.getByText(`${workflowName} enabled`)).toBeVisible();
+  await expect(page.getByText(`${workflowName} enabled`).first()).toBeVisible();
   await page.getByRole("button", { name: "Edit config row_change" }).click();
   await expect(page.getByLabel("Secret row_change.token")).toHaveValue("x".repeat("hidden-token".length));
   await expect(page.getByText(/Saved secret length/)).toHaveCount(0);
   await page.keyboard.press("Escape");
   await page.getByRole("button", { name: "Run" }).click();
-  await expect(page.getByText(/Workflow run saved: whistory_/)).toBeVisible();
+  await expect(page.getByText(/Workflow run saved: whistory_/).first()).toBeVisible();
   await page.getByRole("tab", { name: "History" }).click();
   await expect(page.getByRole("button", { name: "Workflow run history" })).toBeVisible();
   const runList = page.getByLabel("Workflow run nodes");
@@ -911,7 +911,7 @@ test("runs table row workflow nodes through the real backend", async ({ page }) 
   await page.getByRole("button", { name: "Workflow", exact: true }).click();
   const workflowName = `row-node-workflow-${Date.now()}`;
   await createNamedResource(page, "Create Workflow", "New workflow name", workflowName);
-  await expect(page.getByText(`Created workflow ${workflowName}`)).toBeVisible();
+  await expect(page.getByText(`Created workflow ${workflowName}`).first()).toBeVisible();
   await expect(page.getByRole("button", { name: workflowName })).toBeVisible();
   const rowNodeWorkflows = (await api(page, "GET", `/api/databases/${workspace.databaseName}/workflows`)) as Array<{
     id: number;
@@ -949,9 +949,9 @@ test("runs table row workflow nodes through the real backend", async ({ page }) 
   await page.waitForTimeout(workflowEvaluationDelayMs);
   await expect(page.getByLabel("Instances").getByText("create_contact")).toBeVisible();
   await page.getByRole("button", { name: "Save" }).click();
-  await expect(page.getByText(/Workflow saved as #/)).toBeVisible();
+  await expect(page.getByText(/Workflow saved as #/).first()).toBeVisible();
   await page.getByRole("button", { name: "Run" }).click();
-  await expect(page.getByText(/Workflow run saved: whistory_/)).toBeVisible();
+  await expect(page.getByText(/Workflow run saved: whistory_/).first()).toBeVisible();
   await page.getByRole("tab", { name: "History" }).click();
 
   const rows = (await api(
@@ -1038,7 +1038,7 @@ test("covers form runtime preview and submit through the real backend", async ({
   await page.getByRole("button", { name: "Form", exact: true }).click();
   const formName = `ui-form-${Date.now()}`;
   await createNamedResource(page, "Create Form", "New form name", formName);
-  await expect(page.getByText(`Created form ${formName}`)).toBeVisible();
+  await expect(page.getByText(`Created form ${formName}`).first()).toBeVisible();
   await expect(page.getByRole("button", { name: formName })).toBeVisible();
   const defaultFormScript = await monacoEditorValue(page, "Form JavaScript");
   expect(defaultFormScript).toContain("@param {AutableFormAPI} api");
@@ -1050,18 +1050,18 @@ test("covers form runtime preview and submit through the real backend", async ({
   );
   await expect(page.getByRole("textbox", { name: "Email", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Save" }).click();
-  await expect(page.getByText(/Form saved as #/)).toBeVisible();
+  await expect(page.getByText(/Form saved as #/).first()).toBeVisible();
   await page.getByRole("textbox", { name: "Name", exact: true }).fill("Margaret Hamilton");
   await page.getByRole("textbox", { name: "Email", exact: true }).fill("margaret@example.com");
   await page.getByRole("button", { name: "Submit" }).click();
-  await expect(page.getByText(/Form created contacts record \d+/)).toBeVisible();
+  await expect(page.getByText(/Form created contacts record \d+/).first()).toBeVisible();
 });
 
 test("publishes form links that require login and explicit form permission", async ({ page }) => {
   const workspace = await setupWorkspace(page);
   await page.getByRole("button", { name: "Form", exact: true }).click();
   await page.getByRole("button", { name: "Publish" }).click();
-  await expect(page.getByText(/Published form/)).toBeVisible();
+  await expect(page.getByText(/Published form/).first()).toBeVisible();
   const link = await page.getByLabel("Published form link").inputValue();
   expect(link).toContain("/forms/");
   const token = link.split("/forms/").at(-1) ?? "";
@@ -1112,12 +1112,12 @@ test("publishes form links that require login and explicit form permission", asy
   await dialog.getByLabel("Password").fill("correct horse");
   await dialog.getByRole("button", { name: "Login" }).click();
   await expect(dialog).toBeHidden();
-  await expect(page.getByText(/Opened/)).toBeVisible();
+  await expect(page.getByLabel("Name")).toBeVisible();
   await page.getByLabel("Name").fill("Published User");
   await page.getByLabel("Email").fill("published@example.com");
   await page.getByLabel("Status").selectOption("Review");
   await page.getByRole("button", { name: "Create record" }).click();
-  await expect(page.getByText(/Form submitted as record \d+/)).toBeVisible();
+  await expect(page.getByText(/Form submitted as record \d+/).first()).toBeVisible();
 
   await loginUser(page, workspace.user.email);
   const rows = (await api(page, "GET", `/api/tables/${workspace.databaseName}/${workspace.tableName}/rows`)) as Array<{
@@ -1132,7 +1132,7 @@ test("publishes form links that require login and explicit form permission", asy
   await waitForWorkspaceReady(page, workspace.databaseName);
   await page.getByRole("button", { name: "Form", exact: true }).click();
   await page.getByRole("button", { name: "Unpublish" }).click();
-  await expect(page.getByText(/Unpublished form/)).toBeVisible();
+  await expect(page.getByText(/Unpublished form/).first()).toBeVisible();
   const unpublishedForms = (await api(page, "GET", `/api/databases/${workspace.databaseName}/forms`)) as Array<{
     id: number;
     published_token?: string;
@@ -1178,7 +1178,7 @@ test("covers role members and resource permission grants through the real backen
   await page.getByLabel(`${form.name} permission`).selectOption("2");
   await page.keyboard.press("Escape");
   await permissionView.getByRole("button", { name: "Save" }).click();
-  await expect(page.getByText("Saved role editor")).toBeVisible();
+  await expect(page.getByText("Saved role editor").first()).toBeVisible();
 
   const roles = (await api(page, "GET", `/api/databases/${databaseName}/roles`)) as Array<{
     name: string;

@@ -16,6 +16,7 @@ import { TableWorkspace } from "./components/TableWorkspace";
 import { WorkflowWorkspace } from "./components/WorkflowWorkspace";
 import { WorkspaceEmptyState } from "./components/WorkspaceEmptyState";
 import { WorkspaceNavigation, type WorkspaceView } from "./components/WorkspaceNavigation";
+import { useNotifier } from "./notifications";
 import { usePermissionWorkspace } from "./hooks/usePermissionWorkspace";
 import { useTableWorkspace } from "./hooks/useTableWorkspace";
 import { useWorkflowFormWorkspace } from "./hooks/useWorkflowFormWorkspace";
@@ -67,7 +68,7 @@ function WorkspaceApp() {
   const [newDatabaseName, setNewDatabaseName] = useState("");
   const [newTableName, setNewTableName] = useState("");
   const [primaryNavCollapsed, setPrimaryNavCollapsed] = useState(false);
-  const [status, setStatus] = useState(t("status.ready"));
+  const { Toaster, notify } = useNotifier();
   const language = normalizeLanguage(i18n.resolvedLanguage ?? i18n.language);
 
   const database =
@@ -84,13 +85,13 @@ function WorkspaceApp() {
       setSelectedTable(tableName);
       setSelectedTableView(viewName);
     },
-    onStatus: setStatus
+    onStatus: notify
   });
   const workflowFormWorkspace = useWorkflowFormWorkspace({
     currentUserID: currentUser?.id,
     databaseName: database.name,
     tableName: table.name,
-    onStatus: setStatus,
+    onStatus: notify,
     onSubmittedRow: tableWorkspace.addSubmittedRow
   });
   const {
@@ -111,7 +112,7 @@ function WorkspaceApp() {
   const permissionWorkspace = usePermissionWorkspace({
     currentUserID: currentUser?.id,
     database,
-    onStatus: setStatus
+    onStatus: notify
   });
   const {
     memberSearchResults,
@@ -144,12 +145,12 @@ function WorkspaceApp() {
         }
         setCurrentUser(user);
         if (user) {
-          setStatus(t("status.signedInAs", { email: user.email }));
+          notify(t("status.signedInAs", { email: user.email }));
         }
       })
       .catch((error) => {
         if (!cancelled) {
-          setStatus(error instanceof Error ? error.message : t("status.currentUserLoadFailed"));
+          notify(error instanceof Error ? error.message : t("status.currentUserLoadFailed"), "error");
         }
       })
       .finally(() => {
@@ -193,7 +194,7 @@ function WorkspaceApp() {
       })
       .catch((error) => {
         if (!cancelled) {
-          setStatus(error instanceof Error ? error.message : t("status.metadataLoadFailed"));
+          notify(error instanceof Error ? error.message : t("status.metadataLoadFailed"), "error");
         }
       });
     return () => {
@@ -203,7 +204,7 @@ function WorkspaceApp() {
 
   async function refreshMetadata() {
     if (!currentUser) {
-      setStatus(t("status.loginBeforeRefresh"));
+      notify(t("status.loginBeforeRefresh"));
       return;
     }
     try {
@@ -215,9 +216,9 @@ function WorkspaceApp() {
           workflowFormWorkspace.refreshResources(dbName)
         ]);
       }
-      setStatus(t("status.metadataRefreshed"));
+      notify(t("status.metadataRefreshed"));
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : t("status.metadataRefreshFailed"));
+      notify(error instanceof Error ? error.message : t("status.metadataRefreshFailed"), "error");
     }
   }
 
@@ -242,7 +243,7 @@ function WorkspaceApp() {
   async function createDatabaseFromSidebar() {
     const name = newDatabaseName.trim();
     if (!name) {
-      setStatus(t("status.databaseNameRequired"));
+      notify(t("status.databaseNameRequired"));
       return;
     }
     try {
@@ -254,20 +255,20 @@ function WorkspaceApp() {
       setSelectedTableView("all");
       tableWorkspace.resetRows("all");
       setNewDatabaseName("");
-      setStatus(t("status.createdDatabase", { name: saved.name }));
+      notify(t("status.createdDatabase", { name: saved.name }));
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : t("status.databaseCreationFailed"));
+      notify(error instanceof Error ? error.message : t("status.databaseCreationFailed"), "error");
     }
   }
 
   async function createTableFromSidebar() {
     if (!database.name) {
-      setStatus(t("status.selectDatabaseBeforeTable"));
+      notify(t("status.selectDatabaseBeforeTable"));
       return;
     }
     const name = newTableName.trim();
     if (!name) {
-      setStatus(t("status.tableNameRequired"));
+      notify(t("status.tableNameRequired"));
       return;
     }
     try {
@@ -286,9 +287,9 @@ function WorkspaceApp() {
       setSelectedTableView("all");
       tableWorkspace.resetRows("all");
       setNewTableName("");
-      setStatus(t("status.createdTable", { database: database.name, table: saved.name }));
+      notify(t("status.createdTable", { database: database.name, table: saved.name }));
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : t("status.tableCreationFailed"));
+      notify(error instanceof Error ? error.message : t("status.tableCreationFailed"), "error");
     }
   }
 
@@ -298,9 +299,9 @@ function WorkspaceApp() {
       setCurrentUser(user);
       setAuthReady(true);
       await refreshCatalogAfterAuth();
-      setStatus(t("status.signedInAs", { email: user.email }));
+      notify(t("status.signedInAs", { email: user.email }));
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : t("status.registrationFailed"));
+      notify(error instanceof Error ? error.message : t("status.registrationFailed"), "error");
     }
   }
 
@@ -310,9 +311,9 @@ function WorkspaceApp() {
       setCurrentUser(user);
       setAuthReady(true);
       await refreshCatalogAfterAuth();
-      setStatus(t("status.signedInAs", { email: user.email }));
+      notify(t("status.signedInAs", { email: user.email }));
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : t("status.loginFailed"));
+      notify(error instanceof Error ? error.message : t("status.loginFailed"), "error");
     }
   }
 
@@ -322,9 +323,9 @@ function WorkspaceApp() {
       setCurrentUser(null);
       setAuthReady(true);
       applyCatalogSelection(emptyCatalog, "");
-      setStatus(t("status.signedOut"));
+      notify(t("status.signedOut"));
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : t("status.logoutFailed"));
+      notify(error instanceof Error ? error.message : t("status.logoutFailed"), "error");
     }
   }
 
@@ -356,16 +357,16 @@ function WorkspaceApp() {
   async function createTableViewFromSidebar(tableName: string, viewName: string) {
     const name = viewName.trim();
     if (!name) {
-      setStatus(t("status.viewNameRequired"));
+      notify(t("status.viewNameRequired"));
       return;
     }
     const targetTable = database.tables.find((item) => item.name === tableName);
     if (!database.name || !targetTable) {
-      setStatus(t("status.selectTableBeforeView"));
+      notify(t("status.selectTableBeforeView"));
       return;
     }
     if (name === "all" || (targetTable.views ?? []).some((viewDef) => viewDef.name === name)) {
-      setStatus(t("status.viewAlreadyExists", { name }));
+      notify(t("status.viewAlreadyExists", { name }));
       return;
     }
     const nextTable = {
@@ -379,9 +380,9 @@ function WorkspaceApp() {
       setSelectedTable(tableName);
       setSelectedTableView(name);
       tableWorkspace.resetRows(name);
-      setStatus(t("status.createdView", { name }));
+      notify(t("status.createdView", { name }));
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : t("status.tableMetadataUpdateFailed"));
+      notify(error instanceof Error ? error.message : t("status.tableMetadataUpdateFailed"), "error");
       return;
     }
     setView("table");
@@ -601,9 +602,9 @@ function WorkspaceApp() {
             </>
           )}
         </section>
-
-        <footer className="statusbar">{status}</footer>
       </main>
+
+      <Toaster />
 
       <AuthDialog
         email={authEmail}

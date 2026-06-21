@@ -1,3 +1,4 @@
+import type { Notify } from "../notifications";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { compactMembers, replaceRole } from "../appState";
@@ -19,7 +20,7 @@ import { compactRoleGrants } from "../permissionState";
 type UsePermissionWorkspaceOptions = {
   currentUserID?: string;
   database: DatabaseMetadata;
-  onStatus: (message: string) => void;
+  onStatus: Notify;
 };
 
 export function usePermissionWorkspace({ currentUserID, database, onStatus }: UsePermissionWorkspaceOptions) {
@@ -135,7 +136,7 @@ export function usePermissionWorkspace({ currentUserID, database, onStatus }: Us
       setNewRoleName("");
       onStatus(t("status.createdRole", { name: saved.name }));
     } catch (error) {
-      onStatus(error instanceof Error ? error.message : t("status.roleCreationFailed"));
+      onStatus(error instanceof Error ? error.message : t("status.roleCreationFailed"), "error");
     }
   }
 
@@ -154,7 +155,7 @@ export function usePermissionWorkspace({ currentUserID, database, onStatus }: Us
       setRoleDraftMemberWorkflows(saved.member_workflows ?? []);
       onStatus(t("status.savedRole", { name: saved.name }));
     } catch (error) {
-      onStatus(error instanceof Error ? error.message : t("status.roleSaveFailed"));
+      onStatus(error instanceof Error ? error.message : t("status.roleSaveFailed"), "error");
     }
   }
 

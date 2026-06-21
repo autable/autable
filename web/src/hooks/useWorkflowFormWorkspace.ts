@@ -1,3 +1,4 @@
+import type { Notify } from "../notifications";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { replaceResource } from "../appState";
@@ -31,7 +32,7 @@ type UseWorkflowFormWorkspaceOptions = {
   currentUserID?: string;
   databaseName: string;
   tableName: string;
-  onStatus: (message: string) => void;
+  onStatus: Notify;
   onSubmittedRow: (targetTableName: string, row: ReturnType<typeof rowRecordToValues>) => void;
 };
 
@@ -200,7 +201,7 @@ export function useWorkflowFormWorkspace({
       setSelectedWorkflowID(saved.id ?? 0);
       onStatus(t("status.savedWorkflow", { id: saved.id }));
     } catch (error) {
-      onStatus(error instanceof Error ? error.message : t("status.workflowSaveFailed"));
+      onStatus(error instanceof Error ? error.message : t("status.workflowSaveFailed"), "error");
     }
   }
 
@@ -231,7 +232,7 @@ export function useWorkflowFormWorkspace({
       setNewWorkflowName("");
       onStatus(t("status.createdWorkflow", { name: saved.name }));
     } catch (error) {
-      onStatus(error instanceof Error ? error.message : t("status.workflowCreationFailed"));
+      onStatus(error instanceof Error ? error.message : t("status.workflowCreationFailed"), "error");
     }
   }
 
@@ -250,7 +251,7 @@ export function useWorkflowFormWorkspace({
       }
       onStatus(t("status.workflowRunSaved", { key: response.history_key }));
     } catch (error) {
-      onStatus(error instanceof Error ? error.message : t("status.workflowRunFailed"));
+      onStatus(error instanceof Error ? error.message : t("status.workflowRunFailed"), "error");
     }
   }
 
@@ -264,7 +265,7 @@ export function useWorkflowFormWorkspace({
       setSelectedWorkflowID(saved.id ?? 0);
       onStatus(t("status.workflowStatus", { name: saved.name, status: enabled ? t("common.enabled") : t("common.disabled") }));
     } catch (error) {
-      onStatus(error instanceof Error ? error.message : t("status.workflowStatusUpdateFailed"));
+      onStatus(error instanceof Error ? error.message : t("status.workflowStatusUpdateFailed"), "error");
     }
   }
 
@@ -281,7 +282,7 @@ export function useWorkflowFormWorkspace({
       setSelectedWorkflowID(saved.id ?? 0);
       onStatus(t("status.renamedWorkflow", { name: saved.name }));
     } catch (error) {
-      onStatus(error instanceof Error ? error.message : t("status.workflowRenameFailed"));
+      onStatus(error instanceof Error ? error.message : t("status.workflowRenameFailed"), "error");
     }
   }
 
@@ -298,7 +299,7 @@ export function useWorkflowFormWorkspace({
       setSelectedWorkflowRunKey("");
       onStatus(t("status.deletedWorkflow", { name: workflow.name }));
     } catch (error) {
-      onStatus(error instanceof Error ? error.message : t("status.workflowDeleteFailed"));
+      onStatus(error instanceof Error ? error.message : t("status.workflowDeleteFailed"), "error");
     }
   }
 
@@ -312,7 +313,7 @@ export function useWorkflowFormWorkspace({
       setSelectedFormID(saved.id ?? 0);
       onStatus(t("status.savedForm", { id: saved.id }));
     } catch (error) {
-      onStatus(error instanceof Error ? error.message : t("status.formSaveFailed"));
+      onStatus(error instanceof Error ? error.message : t("status.formSaveFailed"), "error");
     }
   }
 
@@ -327,7 +328,7 @@ export function useWorkflowFormWorkspace({
       setSelectedFormID(saved.id ?? 0);
       onStatus(t("status.publishedForm", { name: saved.name }));
     } catch (error) {
-      onStatus(error instanceof Error ? error.message : t("status.formPublishFailed"));
+      onStatus(error instanceof Error ? error.message : t("status.formPublishFailed"), "error");
     }
   }
 
@@ -342,7 +343,7 @@ export function useWorkflowFormWorkspace({
       setSelectedFormID(saved.id ?? 0);
       onStatus(t("status.unpublishedForm", { name: saved.name }));
     } catch (error) {
-      onStatus(error instanceof Error ? error.message : t("status.formUnpublishFailed"));
+      onStatus(error instanceof Error ? error.message : t("status.formUnpublishFailed"), "error");
     }
   }
 
@@ -359,7 +360,7 @@ export function useWorkflowFormWorkspace({
       setSelectedFormID(saved.id ?? 0);
       onStatus(t("status.renamedForm", { name: saved.name }));
     } catch (error) {
-      onStatus(error instanceof Error ? error.message : t("status.formRenameFailed"));
+      onStatus(error instanceof Error ? error.message : t("status.formRenameFailed"), "error");
     }
   }
 
@@ -374,7 +375,7 @@ export function useWorkflowFormWorkspace({
       setSelectedFormID(forms.find((item) => item.id !== form.id)?.id ?? 0);
       onStatus(t("status.deletedForm", { name: form.name }));
     } catch (error) {
-      onStatus(error instanceof Error ? error.message : t("status.formDeleteFailed"));
+      onStatus(error instanceof Error ? error.message : t("status.formDeleteFailed"), "error");
     }
   }
 
@@ -400,7 +401,7 @@ export function useWorkflowFormWorkspace({
       setNewFormName("");
       onStatus(t("status.createdForm", { name: saved.name }));
     } catch (error) {
-      onStatus(error instanceof Error ? error.message : t("status.formCreationFailed"));
+      onStatus(error instanceof Error ? error.message : t("status.formCreationFailed"), "error");
     }
   }
 
@@ -439,7 +440,7 @@ export function useWorkflowFormWorkspace({
       setSelectedWorkflowID(saved.id ?? 0);
       onStatus(t("status.savedInstanceConfig", { id: instanceID }));
     } catch (error) {
-      onStatus(error instanceof Error ? error.message : t("status.workflowConfigSaveFailed"));
+      onStatus(error instanceof Error ? error.message : t("status.workflowConfigSaveFailed"), "error");
     }
   }
 

@@ -196,7 +196,7 @@ test("capture workspace screenshots", async ({ page }) => {
   // Workflow run + history.
   await capture(page, "08-workflow-history", async () => {
     await page.getByRole("button", { name: "Run" }).click(bestEffort);
-    await page.getByText(/Workflow run saved/).waitFor(bestEffort);
+    await page.getByText(/Workflow run saved/).first().waitFor(bestEffort);
     await page.getByRole("tab", { name: "History" }).click(bestEffort);
     await page.locator(".workflow-run-node-list").waitFor(bestEffort);
     await page.waitForTimeout(800);
