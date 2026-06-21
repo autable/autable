@@ -87,53 +87,51 @@ export function PermissionPanel({
   workflows
 }: PermissionPanelProps) {
   const { t } = useTranslation();
+  if (!role) {
+    return (
+      <WorkspaceEmptyState
+        icon={<PeopleRegular />}
+        title={t("empty.noRoleTitle")}
+        description={t("empty.noRoleDescription")}
+      />
+    );
+  }
   const dirty =
-    Boolean(role) &&
-    (normalizeGrants(grants) !== normalizeGrants(role?.grants ?? []) ||
-      normalizeMembers(members) !== normalizeMembers(role?.members ?? []));
+    normalizeGrants(grants) !== normalizeGrants(role.grants ?? []) ||
+    normalizeMembers(members) !== normalizeMembers(role.members ?? []);
   return (
     <div className="permission-view">
       <div className="section-header">
         <div>
-          <Text weight="semibold">{role?.name ?? t("permission.noRoleSelected")}</Text>
+          <Text weight="semibold">{role.name}</Text>
           <Text size={200}>{t("permission.roleAccessMatrix", { database: database.name })}</Text>
         </div>
-        {role && (
-          <div className="permission-actions">
-            <MembersControl
-              members={members}
-              memberOptions={memberOptions}
-              memberUsers={memberUsers}
-              memberWorkflows={memberWorkflows}
-              newMemberEmail={newMemberEmail}
-              onAddMember={onAddMember}
-              onAddWorkflowMember={onAddWorkflowMember}
-              onMemberRemove={onMemberRemove}
-              onNewMemberEmailChange={onNewMemberEmailChange}
-              workflows={workflows}
-            />
-            <Button icon={<SaveRegular />} appearance="primary" onClick={onSave} disabled={!dirty}>
-              {t("common.save")}
-            </Button>
-          </div>
-        )}
+        <div className="permission-actions">
+          <MembersControl
+            members={members}
+            memberOptions={memberOptions}
+            memberUsers={memberUsers}
+            memberWorkflows={memberWorkflows}
+            newMemberEmail={newMemberEmail}
+            onAddMember={onAddMember}
+            onAddWorkflowMember={onAddWorkflowMember}
+            onMemberRemove={onMemberRemove}
+            onNewMemberEmailChange={onNewMemberEmailChange}
+            workflows={workflows}
+          />
+          <Button icon={<SaveRegular />} appearance="primary" onClick={onSave} disabled={!dirty}>
+            {t("common.save")}
+          </Button>
+        </div>
       </div>
-      {role ? (
-        <PermissionMatrix
-          key={role.name}
-          database={database}
-          forms={forms}
-          grants={grants}
-          onGrantChange={onGrantChange}
-          workflows={workflows}
-        />
-      ) : (
-        <WorkspaceEmptyState
-          icon={<PeopleRegular />}
-          title={t("permission.noRoleSelected")}
-          description={t("permission.empty")}
-        />
-      )}
+      <PermissionMatrix
+        key={role.name}
+        database={database}
+        forms={forms}
+        grants={grants}
+        onGrantChange={onGrantChange}
+        workflows={workflows}
+      />
     </div>
   );
 }

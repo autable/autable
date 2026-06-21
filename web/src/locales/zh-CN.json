@@ -48,7 +48,9 @@
     "noWorkflowTitle": "还没有工作流",
     "noWorkflowDescription": "在「工作流」列表点 + 用代码创建自动化。",
     "noFormTitle": "还没有表单",
-    "noFormDescription": "在「表单」列表点 + 创建一个收集记录的表单。"
+    "noFormDescription": "在「表单」列表点 + 创建一个收集记录的表单。",
+    "noRoleTitle": "还没有角色",
+    "noRoleDescription": "在「角色」列表点 + 新建第一个角色。"
   },
   "form": {
     "chooseRelation": "选择",

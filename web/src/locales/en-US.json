@@ -48,7 +48,9 @@
     "noWorkflowTitle": "No workflows yet",
     "noWorkflowDescription": "Use + in the Workflows list to automate tasks with code.",
     "noFormTitle": "No forms yet",
-    "noFormDescription": "Use + in the Forms list to collect records with a form."
+    "noFormDescription": "Use + in the Forms list to collect records with a form.",
+    "noRoleTitle": "No roles yet",
+    "noRoleDescription": "Use + in the Roles list to create your first role."
   },
   "form": {
     "chooseRelation": "Choose",
