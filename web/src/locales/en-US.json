@@ -40,6 +40,16 @@
     "or": "or",
     "password": "Password"
   },
+  "empty": {
+    "noDatabaseTitle": "No database selected",
+    "noDatabaseDescription": "Create or pick a database on the left to start building.",
+    "noTableTitle": "No tables yet",
+    "noTableDescription": "Use + in the Tables list to create your first table.",
+    "noWorkflowTitle": "No workflows yet",
+    "noWorkflowDescription": "Use + in the Workflows list to automate tasks with code.",
+    "noFormTitle": "No forms yet",
+    "noFormDescription": "Use + in the Forms list to collect records with a form."
+  },
   "form": {
     "chooseRelation": "Choose",
     "databaseMetadataMissing": "Database metadata is missing: {{database}}",

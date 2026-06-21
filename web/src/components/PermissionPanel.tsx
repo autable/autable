@@ -38,6 +38,7 @@ import {
   type WorkflowDefinition
 } from "../api";
 import { compactRoleGrants } from "../permissionState";
+import { WorkspaceEmptyState } from "./WorkspaceEmptyState";
 
 export { compactRoleGrants };
 
@@ -127,9 +128,11 @@ export function PermissionPanel({
           workflows={workflows}
         />
       ) : (
-        <div className="empty-state">
-          <Text>{t("permission.empty")}</Text>
-        </div>
+        <WorkspaceEmptyState
+          icon={<PeopleRegular />}
+          title={t("permission.noRoleSelected")}
+          description={t("permission.empty")}
+        />
       )}
     </div>
   );

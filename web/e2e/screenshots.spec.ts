@@ -208,10 +208,13 @@ test("capture workspace screenshots", async ({ page }) => {
   await page.waitForTimeout(400);
   await shot(page, "09-form-editor");
 
-  // Permission view.
+  // Permission view — capture the empty state before creating a role.
   await page.getByRole("button", { name: "Permission", exact: true }).click();
-  await page.getByRole("textbox", { name: "New role name" }).fill("editor");
+  await page.waitForTimeout(300);
+  await shot(page, "19-permission-empty");
   await page.getByRole("button", { name: "Create Role" }).click();
+  await page.getByRole("textbox", { name: "New role name" }).fill("editor");
+  await page.getByRole("button", { name: "Save" }).last().click();
   await page.getByRole("button", { name: /editor/ }).waitFor();
   await page.waitForTimeout(300);
   await shot(page, "10-permission-matrix");
@@ -260,4 +263,13 @@ test("capture workspace screenshots", async ({ page }) => {
   await page.waitForTimeout(400);
   await shot(page, "11-narrow-permission");
   await page.setViewportSize({ width: 1440, height: 900 });
+
+  // Empty database: table/workflow/form empty states.
+  const emptyDb = `empty${Date.now()}-${sequence}`;
+  await api(page, "POST", "/api/databases", { name: emptyDb });
+  await page.reload();
+  await capture(page, "20-table-empty", async () => {
+    await page.getByRole("button", { name: emptyDb }).click(bestEffort);
+    await page.waitForTimeout(400);
+  });
 });

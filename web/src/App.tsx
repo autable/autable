@@ -1,6 +1,12 @@
 import { useEffect, useState } from "react";
 import { Text, Toolbar, ToolbarButton, Tooltip } from "@fluentui/react-components";
-import { ArrowClockwiseRegular } from "@fluentui/react-icons";
+import {
+  ArrowClockwiseRegular,
+  DatabaseRegular,
+  DocumentFlowchartRegular,
+  DocumentTableRegular,
+  FormRegular
+} from "@fluentui/react-icons";
 import { useTranslation } from "react-i18next";
 import { AuthDialog } from "./components/AuthDialog";
 import { FormWorkspace } from "./components/FormWorkspace";
@@ -8,6 +14,7 @@ import { PermissionPanel } from "./components/PermissionPanel";
 import { PublishedFormPage } from "./components/PublishedFormPage";
 import { TableWorkspace } from "./components/TableWorkspace";
 import { WorkflowWorkspace } from "./components/WorkflowWorkspace";
+import { WorkspaceEmptyState } from "./components/WorkspaceEmptyState";
 import { WorkspaceNavigation, type WorkspaceView } from "./components/WorkspaceNavigation";
 import { usePermissionWorkspace } from "./hooks/usePermissionWorkspace";
 import { useTableWorkspace } from "./hooks/useTableWorkspace";
@@ -455,7 +462,16 @@ function WorkspaceApp() {
         </header>
 
         <section className="content-band">
-          {view === "table" && (
+          {!database.name ? (
+            <WorkspaceEmptyState
+              icon={<DatabaseRegular />}
+              title={t("empty.noDatabaseTitle")}
+              description={t("empty.noDatabaseDescription")}
+            />
+          ) : (
+            <>
+          {view === "table" &&
+            (table.name ? (
             <TableWorkspace
               columns={tableWorkspace.columns}
               displayedRows={tableWorkspace.displayedRows}
@@ -503,9 +519,16 @@ function WorkspaceApp() {
               temporarySort={tableWorkspace.temporarySort}
               openViewPanelRequest={openViewPanelRequest}
             />
-          )}
+            ) : (
+              <WorkspaceEmptyState
+                icon={<DocumentTableRegular />}
+                title={t("empty.noTableTitle")}
+                description={t("empty.noTableDescription")}
+              />
+            ))}
 
-          {view === "workflow" && (
+          {view === "workflow" &&
+            (selectedWorkflow ? (
             <WorkflowWorkspace
               databaseName={database.name}
               onExecute={workflowFormWorkspace.executeWorkflow}
@@ -522,9 +545,16 @@ function WorkspaceApp() {
               workflowNodes={workflowNodes}
               workflowRuns={workflowRuns}
             />
-          )}
+            ) : (
+              <WorkspaceEmptyState
+                icon={<DocumentFlowchartRegular />}
+                title={t("empty.noWorkflowTitle")}
+                description={t("empty.noWorkflowDescription")}
+              />
+            ))}
 
-          {view === "form" && (
+          {view === "form" &&
+            (selectedForm ? (
             <FormWorkspace
               databaseName={database.name}
               form={selectedForm}
@@ -540,7 +570,13 @@ function WorkspaceApp() {
               renderedForm={renderedForm}
               tables={database.tables}
             />
-          )}
+            ) : (
+              <WorkspaceEmptyState
+                icon={<FormRegular />}
+                title={t("empty.noFormTitle")}
+                description={t("empty.noFormDescription")}
+              />
+            ))}
 
           {view === "permission" && (
             <PermissionPanel
@@ -561,6 +597,8 @@ function WorkspaceApp() {
               role={selectedRole}
               workflows={workflows}
             />
+          )}
+            </>
           )}
         </section>
 

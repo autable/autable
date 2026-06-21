@@ -40,6 +40,16 @@
     "or": "或",
     "password": "密码"
   },
+  "empty": {
+    "noDatabaseTitle": "未选择数据库",
+    "noDatabaseDescription": "在左侧创建或选择一个数据库开始。",
+    "noTableTitle": "还没有表",
+    "noTableDescription": "在「表」列表点 + 新建第一个表。",
+    "noWorkflowTitle": "还没有工作流",
+    "noWorkflowDescription": "在「工作流」列表点 + 用代码创建自动化。",
+    "noFormTitle": "还没有表单",
+    "noFormDescription": "在「表单」列表点 + 创建一个收集记录的表单。"
+  },
   "form": {
     "chooseRelation": "选择",
     "databaseMetadataMissing": "数据库元数据缺失：{{database}}",

@@ -274,7 +274,7 @@ test("covers login modal and workspace navigation through the real backend", asy
   await page.getByRole("button", { name: "Form", exact: true }).click();
   await expect(page.getByRole("button", { name: /quick-status/ })).toBeVisible();
   await page.getByRole("button", { name: "Permission", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Roles" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Create Role" })).toBeVisible();
 });
 
 test("shows database-owned workflow and form lists across table owners", async ({ page }) => {
@@ -1156,8 +1156,7 @@ test("covers role members and resource permission grants through the real backen
   expect(form).toBeTruthy();
 
   await page.getByRole("button", { name: "Permission", exact: true }).click();
-  await page.getByRole("textbox", { name: "New role name" }).fill("editor");
-  await page.getByRole("button", { name: "Create Role" }).click();
+  await createNamedResource(page, "Create Role", "New role name", "editor");
   await expect(page.getByRole("button", { name: /editor/ })).toBeVisible();
   const permissionView = page.locator(".permission-view");
   await permissionView.getByRole("button", { name: /Members/ }).click();

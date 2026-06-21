@@ -22,7 +22,6 @@ import {
   NavDrawerBody,
   NavDrawerHeader,
   NavItem,
-  NavSectionHeader,
   NavSubItem,
   NavSubItemGroup,
   Popover,
@@ -310,34 +309,31 @@ export function WorkspaceNavigation({
           )}
           {view === "permission" && (
             <>
+              <div className="list-heading">
+                <Text size={200} weight="semibold">{t("nav.roles")}</Text>
+                <CreateNamePopover
+                  ariaLabel={t("nav.createRole")}
+                  buttonLabel={t("nav.createRole")}
+                  disabled={!database.name || (database.permission_level ?? 2) < 2}
+                  inputLabel={t("nav.newRoleName")}
+                  name={newRoleName}
+                  onNameChange={onNewRoleNameChange}
+                  onSave={onCreateRole}
+                  placeholder={t("nav.placeholderRole")}
+                />
+              </div>
               <Nav
                 className="resource-nav"
                 aria-label={t("nav.roleList")}
                 selectedValue={selectedRole?.name ?? ""}
                 onNavItemSelect={(_, data) => onSelectRoleName(data.value)}
               >
-                <NavSectionHeader>{t("nav.roles")}</NavSectionHeader>
                 {roles.map((role) => (
                   <NavItem key={role.name} value={role.name} icon={<PeopleRegular />}>
                     {role.name}
                   </NavItem>
                 ))}
               </Nav>
-              <div className="create-rowline">
-                <Input
-                  aria-label={t("nav.newRoleName")}
-                  placeholder={t("nav.placeholderRole")}
-                  value={newRoleName}
-                  onChange={(_, data) => onNewRoleNameChange(data.value)}
-                  disabled={!database.name}
-                />
-                <Button
-                  icon={<AddRegular />}
-                  aria-label={t("nav.createRole")}
-                  onClick={onCreateRole}
-                  disabled={!database.name || (database.permission_level ?? 2) < 2}
-                />
-              </div>
             </>
           )}
         </NavDrawerBody>
