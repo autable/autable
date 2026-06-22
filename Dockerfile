@@ -18,7 +18,10 @@ RUN apt-get update \
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-COPY --from=web-build /src/web/dist ./internal/webui/dist
+RUN rm -rf ./internal/webui/dist && mkdir -p ./internal/webui/dist
+COPY --from=web-build /src/web/dist/. ./internal/webui/dist/
+RUN test -f ./internal/webui/dist/index.html \
+  && ! grep -q "frontend is not embedded" ./internal/webui/dist/index.html
 ARG VERSION=dev
 ARG COMMIT=unknown
 ARG BUILT_AT=unknown
