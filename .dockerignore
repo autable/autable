@@ -1,0 +1,14 @@
+.git
+.github
+.playwright-mcp
+data
+dist
+local_data
+node_modules
+release
+test-results
+workspace
+web/dist
+web/node_modules
+*.png
+*.sqlite

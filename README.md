@@ -72,6 +72,18 @@ go build -o autable ./cmd/autable
 
 The binary serves the API and frontend on the same `server.address`.
 
+Run the published Docker image:
+
+```sh
+docker run --rm \
+  -p 8080:8080 \
+  -v autable-data:/data \
+  -v autable-repository:/repository \
+  ghcr.io/autable/autable:latest
+```
+
+The container uses `/etc/autable/config.yml` by default, listens on `0.0.0.0:8080`, stores runtime data under `/data`, and stores user-authored metadata/workflows/forms under `/repository`.
+
 Run the frontend:
 
 ```sh

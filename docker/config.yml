@@ -1,0 +1,12 @@
+server:
+  address: "0.0.0.0:8080"
+data:
+  path: "/data"
+repository:
+  path: "/repository"
+auth:
+  password:
+    enabled: true
+  oidc:
+    enabled: false
+    providers: []
