@@ -315,7 +315,7 @@ func TestFormulaFieldValidationAndEditableExpression(t *testing.T) {
 			Name: "contacts",
 			Fields: []Field{
 				{Name: "score", Type: "float"},
-				{Name: "score_plus_one", Type: "formula", ValueType: "float", Formula: "field_score + 1"},
+				{Name: "score_plus_one", Type: "formula", ValueType: "float", Formula: `fields["score"] + 1`},
 			},
 		}},
 	}}}
@@ -327,7 +327,7 @@ func TestFormulaFieldValidationAndEditableExpression(t *testing.T) {
 		Name: "contacts",
 		Fields: []Field{
 			{Name: "score", Type: "float"},
-			{Name: "score_plus_one", Type: "formula", ValueType: "float", Formula: "field_score + 2"},
+			{Name: "score_plus_one", Type: "formula", ValueType: "float", Formula: `fields["score"] + 2`},
 		},
 	})
 	if err != nil {
@@ -338,14 +338,14 @@ func TestFormulaFieldValidationAndEditableExpression(t *testing.T) {
 		t.Fatal("expected updated table")
 	}
 	field, ok := table.Field("score_plus_one")
-	if !ok || field.Formula != "field_score + 2" {
+	if !ok || field.Formula != `fields["score"] + 2` {
 		t.Fatalf("expected formula expression update, got %#v", field)
 	}
 	if _, err := catalog.UpdateTable("workspace", "contacts", Table{
 		Name: "contacts",
 		Fields: []Field{
 			{Name: "score", Type: "float"},
-			{Name: "score_plus_one", Type: "formula", ValueType: "string", Formula: "String(field_score + 2)"},
+			{Name: "score_plus_one", Type: "formula", ValueType: "string", Formula: `String(fields["score"] + 2)`},
 		},
 	}); err == nil {
 		t.Fatal("expected formula value_type change to be rejected")
@@ -366,7 +366,7 @@ func TestFormulaFieldValidationAndEditableExpression(t *testing.T) {
 		Name: "workspace",
 		Tables: []Table{{
 			Name:   "contacts",
-			Fields: []Field{{Name: "name", Type: "string", Formula: "field_score + 1"}},
+			Fields: []Field{{Name: "name", Type: "string", Formula: `fields["score"] + 1`}},
 		}},
 	}}}
 	if err := invalid.Validate(); err == nil {

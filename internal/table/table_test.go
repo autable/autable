@@ -609,11 +609,13 @@ func TestFormulaFieldsAreComputedAndNotWritable(t *testing.T) {
 			Name: "contacts",
 			Fields: []metadata.Field{
 				{Name: "name", Type: "string"},
+				{Name: "提交人（人员）", Type: "string"},
 				{Name: "score", Type: "float"},
-				{Name: "score_plus_one", Type: "formula", ValueType: "float", Formula: "field_score + 1"},
-				{Name: "score_band", Type: "formula", ValueType: "string", Formula: "field_score >= 5 ? 'high' : 'low'"},
-				{Name: "row_label", Type: "formula", ValueType: "string", Formula: "'row-' + field_record_id"},
-				{Name: "stable_json", Type: "formula", ValueType: "string", Formula: "stableStringify({ b: field_score, a: field_name })"},
+				{Name: "score_plus_one", Type: "formula", ValueType: "float", Formula: `fields["score"] + 1`},
+				{Name: "score_band", Type: "formula", ValueType: "string", Formula: `fields["score"] >= 5 ? 'high' : 'low'`},
+				{Name: "row_label", Type: "formula", ValueType: "string", Formula: "'row-' + record_id"},
+				{Name: "stable_json", Type: "formula", ValueType: "string", Formula: `stableStringify({ b: fields["score"], a: fields["name"] })`},
+				{Name: "submitter_label", Type: "formula", ValueType: "string", Formula: `fields["提交人（人员）"] + " / " + fields["name"]`},
 			},
 			Views: []metadata.View{{
 				Name: "high",
@@ -633,13 +635,14 @@ func TestFormulaFieldsAreComputedAndNotWritable(t *testing.T) {
 	)
 
 	low, err := service.CreateRow(ctx, catalog, perms, "u1", false, "db", "contacts", map[string]any{
-		"name":  "Ada",
-		"score": 4,
+		"name":    "Ada",
+		"提交人（人员）": "张三",
+		"score":   4,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if fmt.Sprint(low.Values["score_plus_one"]) != "5" || low.Values["score_band"] != "low" || low.Values["row_label"] != "row-1" || low.Values["stable_json"] != `{"a":"Ada","b":4}` {
+	if fmt.Sprint(low.Values["score_plus_one"]) != "5" || low.Values["score_band"] != "low" || low.Values["row_label"] != "row-1" || low.Values["stable_json"] != `{"a":"Ada","b":4}` || low.Values["submitter_label"] != "张三 / Ada" {
 		t.Fatalf("expected computed formula values, got %#v", low.Values)
 	}
 	if _, err := service.CreateRow(ctx, catalog, perms, "u1", false, "db", "contacts", map[string]any{
@@ -691,7 +694,7 @@ func TestSyncTableRecomputesFormulaFieldsWithoutHistory(t *testing.T) {
 			Name: "contacts",
 			Fields: []metadata.Field{
 				{Name: "score", Type: "int"},
-				{Name: "score_formula", Type: "formula", ValueType: "int", Formula: "field_score + 1"},
+				{Name: "score_formula", Type: "formula", ValueType: "int", Formula: `fields["score"] + 1`},
 			},
 		}},
 	}}}
@@ -716,7 +719,7 @@ func TestSyncTableRecomputesFormulaFieldsWithoutHistory(t *testing.T) {
 			Name: "contacts",
 			Fields: []metadata.Field{
 				{Name: "score", Type: "int"},
-				{Name: "score_formula", Type: "formula", ValueType: "int", Formula: "field_score + 2"},
+				{Name: "score_formula", Type: "formula", ValueType: "int", Formula: `fields["score"] + 2`},
 			},
 		}},
 	}}}
@@ -748,7 +751,7 @@ func TestFormulaErrorsClearValueInsteadOfFailingWrite(t *testing.T) {
 			Name: "contacts",
 			Fields: []metadata.Field{
 				{Name: "score", Type: "int"},
-				{Name: "aaa", Type: "formula", ValueType: "int", Formula: "field_score / 2"},
+				{Name: "aaa", Type: "formula", ValueType: "int", Formula: `fields["score"] / 2`},
 			},
 		}},
 	}}}
@@ -782,7 +785,7 @@ func TestFormulaErrorsClearValueInsteadOfFailingWrite(t *testing.T) {
 			Name: "contacts",
 			Fields: []metadata.Field{
 				{Name: "score", Type: "int"},
-				{Name: "aaa", Type: "formula", ValueType: "int", Formula: "field_score / 8"},
+				{Name: "aaa", Type: "formula", ValueType: "int", Formula: `fields["score"] / 8`},
 			},
 		}},
 	}}}

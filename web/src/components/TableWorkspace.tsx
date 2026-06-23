@@ -483,7 +483,7 @@ export function TableWorkspace({
                       aria-label={t("table.formula")}
                       value={newFieldFormula}
                       onChange={(_, data) => onNewFieldFormulaChange(data.value)}
-                      placeholder="field_score + 1"
+                      placeholder={'fields["score"] + 1'}
                       resize="vertical"
                     />
                   </FluentField>
@@ -525,7 +525,7 @@ export function TableWorkspace({
                   onChange={(_, data) =>
                     setFormulaEditor((current) => (current ? { ...current, formula: data.value } : current))
                   }
-                  placeholder="field_score + 1"
+                  placeholder={'fields["score"] + 1'}
                   resize="vertical"
                 />
               </FluentField>

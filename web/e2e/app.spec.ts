@@ -602,7 +602,7 @@ test("covers table views, row creation, and row history through the real backend
   await formulaFieldEditor.getByLabel("Field name").fill("summary");
   await formulaFieldEditor.getByLabel("Field type").selectOption("formula");
   await formulaFieldEditor.getByLabel("Formula value type").selectOption("string");
-  await formulaFieldEditor.getByRole("textbox", { name: "Formula" }).fill("field_name + ' ' + field_status");
+  await formulaFieldEditor.getByRole("textbox", { name: "Formula" }).fill(`fields["name"] + ' ' + fields["status"]`);
   await formulaFieldEditor.getByRole("button", { name: "Add" }).click();
   await expect(page.getByText("Added field summary").first()).toBeVisible();
 
@@ -646,7 +646,7 @@ test("covers table views, row creation, and row history through the real backend
   await recordsGrid.getByRole("button", { name: "Field actions summary" }).click();
   await page.getByRole("menuitem", { name: "Edit formula" }).click();
   const formulaEditor = page.getByLabel("Edit formula");
-  await formulaEditor.getByRole("textbox", { name: "Formula" }).fill("field_name + ' / ' + field_status");
+  await formulaEditor.getByRole("textbox", { name: "Formula" }).fill(`fields["name"] + ' / ' + fields["status"]`);
   await formulaEditor.getByRole("button", { name: "Save" }).click();
   await expect(page.getByText("Updated formula summary").first()).toBeVisible();
   formulaRows = (await api(
@@ -744,7 +744,7 @@ test("covers table views, row creation, and row history through the real backend
   expect(table?.fields).toEqual(
     expect.arrayContaining([
       expect.objectContaining({ name: "priority", type: "string", deleted: false }),
-      expect.objectContaining({ name: "summary", type: "formula", value_type: "string", formula: "field_name + ' / ' + field_status", deleted: false }),
+      expect.objectContaining({ name: "summary", type: "formula", value_type: "string", formula: `fields["name"] + ' / ' + fields["status"]`, deleted: false }),
       expect.objectContaining({ name: "owner", type: "relation", relation_table: "contacts", deleted: false }),
       expect.objectContaining({ name: "email", deleted: true })
     ])

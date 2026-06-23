@@ -529,19 +529,17 @@ func evaluateFormula(expression string, recordID int64, values map[string]any) (
 	}
 	now := time.Now().UTC()
 	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
-	if err := runtime.Set("field_record_id", recordID); err != nil {
+	if err := runtime.Set("record_id", recordID); err != nil {
 		return nil, err
 	}
-	if err := runtime.Set("var_now", now.UnixMilli()); err != nil {
+	if err := runtime.Set("now", now.UnixMilli()); err != nil {
 		return nil, err
 	}
-	if err := runtime.Set("var_today", today.UnixMilli()); err != nil {
+	if err := runtime.Set("today", today.UnixMilli()); err != nil {
 		return nil, err
 	}
-	for key, value := range values {
-		if err := runtime.Set("field_"+key, value); err != nil {
-			return nil, err
-		}
+	if err := runtime.Set("fields", cloneValues(values)); err != nil {
+		return nil, err
 	}
 	value, err := runtime.RunString("(" + expression + ")")
 	if err != nil {

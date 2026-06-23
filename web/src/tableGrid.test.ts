@@ -15,7 +15,7 @@ describe("tableGrid", () => {
   it("does not make formula fields editable", () => {
     const columns = buildTableColumns([
       { name: "score", type: "float", deleted: false },
-      { name: "score_plus_one", type: "formula", value_type: "float", formula: "field_score + 1", deleted: false }
+      { name: "score_plus_one", type: "formula", value_type: "float", formula: `fields["score"] + 1`, deleted: false }
     ]);
 
     expect(typeof columns[0].editable === "function" ? columns[0].editable({ ct_record_id: 1 }) : columns[0].editable).toBe(true);
