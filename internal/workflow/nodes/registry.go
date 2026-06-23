@@ -7,6 +7,7 @@ import (
 	"autable/internal/workflow/nodes/dingtalk/notable/listrecords"
 	"autable/internal/workflow/nodes/dingtalk/robot"
 	"autable/internal/workflow/nodes/echo"
+	githubcontent "autable/internal/workflow/nodes/github/file/content"
 	"autable/internal/workflow/nodes/table/field"
 	"autable/internal/workflow/nodes/table/recordchanged"
 	rowcreate "autable/internal/workflow/nodes/table/row/create"
@@ -18,7 +19,7 @@ import (
 )
 
 type Dependencies struct {
-	History   history.Store
+	History history.Store
 	Autable autable.Service
 }
 
@@ -29,6 +30,7 @@ func All(deps Dependencies) []workflow.Node {
 		schedule.Node{},
 		robot.NewNode(),
 		listrecords.NewNode(),
+		githubcontent.NewNode(),
 	}
 	nodes = append(nodes, AutableNodes(deps.Autable)...)
 	return nodes

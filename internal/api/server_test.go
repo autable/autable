@@ -2941,6 +2941,7 @@ func TestWorkflowNodesAPI(t *testing.T) {
 		"dingtalk.notable.records.list",
 		"dingtalk.robot.send",
 		"echo",
+		"github.file.content.get",
 		"table.field.create",
 		"table.record.changed",
 		"table.row.create",
@@ -2990,6 +2991,13 @@ func TestWorkflowNodesAPI(t *testing.T) {
 	}
 	if len(notable.Secrets) != 2 || notable.Secrets[0].Name != "app_key" || notable.Secrets[1].Name != "app_secret" {
 		t.Fatalf("expected dingtalk notable node secrets: %#v", notable)
+	}
+	githubContent := byType["github.file.content.get"]
+	if len(githubContent.Inputs) != 4 || githubContent.Inputs[0].Name != "owner" || githubContent.Inputs[1].Name != "repo" || githubContent.Inputs[2].Name != "path" || githubContent.Inputs[3].Name != "ref" {
+		t.Fatalf("expected github content node inputs: %#v", githubContent)
+	}
+	if len(githubContent.Secrets) != 1 || githubContent.Secrets[0].Name != "token" {
+		t.Fatalf("expected github content node secret: %#v", githubContent)
 	}
 	if !byType["table.record.changed"].Trigger || len(byType["table.record.changed"].Inputs) == 0 || len(byType["table.record.changed"].Outputs) == 0 || !byType["time.schedule"].Trigger {
 		t.Fatalf("expected trigger node ports: %#v", nodes)
