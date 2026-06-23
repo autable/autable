@@ -12,6 +12,8 @@ func TestLoadValidConfig(t *testing.T) {
 	data := []byte(`
 data:
   path: ./data
+server:
+  public_url: https://app.example
 repository:
   path: ./repo
   remote_url: https://example.com/autable/repository.git
@@ -45,6 +47,9 @@ auth:
 	}
 	if got := cfg.Auth.OIDC.Providers[0].Name; got != "main" {
 		t.Fatalf("unexpected provider name: %q", got)
+	}
+	if got := cfg.Server.PublicURL; got != "https://app.example" {
+		t.Fatalf("unexpected server public url: %q", got)
 	}
 }
 
@@ -91,6 +96,21 @@ func TestValidateOIDCProvidersOnlyWhenEnabled(t *testing.T) {
 	err := cfg.Validate()
 	if err == nil {
 		t.Fatal("expected validation error")
+	}
+
+	cfg.Auth.OIDC.Providers = []OIDCProvider{{
+		Name:      "main",
+		IssuerURL: "https://issuer.example",
+		ClientID:  "autable",
+	}}
+	err = cfg.Validate()
+	if err == nil {
+		t.Fatal("expected server.public_url validation error")
+	}
+
+	cfg.Server.PublicURL = "https://app.example"
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("unexpected validation error: %v", err)
 	}
 }
 

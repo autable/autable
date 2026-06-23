@@ -1,5 +1,6 @@
 server:
   address: "127.0.0.1:8080"
+  public_url: "https://autable.example.com"
 data:
   path: "./data"
 repository:

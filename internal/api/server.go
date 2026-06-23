@@ -39,6 +39,7 @@ type Server struct {
 	history          history.Store
 	runner           *workflow.Runner
 	auth             config.AuthConfig
+	publicURL        string
 	workflowWorkers  map[string]*workflowEventWorker
 	workflowWorker   context.Context
 	workflowWorkerMu sync.Mutex
@@ -271,6 +272,10 @@ func (server *Server) SetRepositorySync(syncer repositorySyncer) {
 	server.repositorySync = syncer
 }
 
+func (server *Server) SetPublicURL(publicURL string) {
+	server.publicURL = strings.TrimRight(strings.TrimSpace(publicURL), "/")
+}
+
 func (server *Server) notifyRepositoryChange(ctx context.Context, actorID string, action string, summary string, paths ...string) {
 	if server.repositorySync == nil {
 		return
@@ -436,7 +441,12 @@ func (server *Server) handleOIDCStart(w http.ResponseWriter, r *http.Request, pr
 		return
 	}
 	setOIDCStateCookie(w, provider.Name, state)
-	authURL, err := oidcAuthorizeURL(r, provider, state)
+	callbackURL, err := oidcCallbackURL(server.publicURL, provider.Name)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	authURL, err := oidcAuthorizeURL(provider, state, callbackURL)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
@@ -467,11 +477,16 @@ func (server *Server) handleOIDCCallback(w http.ResponseWriter, r *http.Request,
 		writeError(w, http.StatusBadGateway, err)
 		return
 	}
+	callbackURL, err := oidcCallbackURL(server.publicURL, provider.Name)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
 	oauthConfig := oauth2.Config{
 		ClientID:     provider.ClientID,
 		ClientSecret: provider.ClientSecret,
 		Endpoint:     oidcProvider.Endpoint(),
-		RedirectURL:  oidcCallbackURL(r, provider.Name),
+		RedirectURL:  callbackURL,
 		Scopes:       oidcScopes(provider),
 	}
 	token, err := oauthConfig.Exchange(r.Context(), code)
@@ -3277,7 +3292,7 @@ func clearOIDCStateCookie(w http.ResponseWriter) {
 	})
 }
 
-func oidcAuthorizeURL(r *http.Request, provider config.OIDCProvider, state string) (string, error) {
+func oidcAuthorizeURL(provider config.OIDCProvider, state string, callbackURL string) (string, error) {
 	issuerURL := strings.TrimRight(provider.IssuerURL, "/")
 	if issuerURL == "" {
 		return "", errors.New("oidc issuer_url is required")
@@ -3289,30 +3304,28 @@ func oidcAuthorizeURL(r *http.Request, provider config.OIDCProvider, state strin
 	query := authorizeURL.Query()
 	query.Set("response_type", "code")
 	query.Set("client_id", provider.ClientID)
-	query.Set("redirect_uri", oidcCallbackURL(r, provider.Name))
+	query.Set("redirect_uri", callbackURL)
 	query.Set("scope", strings.Join(oidcScopes(provider), " "))
 	query.Set("state", state)
 	authorizeURL.RawQuery = query.Encode()
 	return authorizeURL.String(), nil
 }
 
-func oidcCallbackURL(r *http.Request, providerName string) string {
-	scheme := r.Header.Get("X-Forwarded-Proto")
-	if scheme == "" {
-		scheme = "http"
-		if r.TLS != nil {
-			scheme = "https"
-		}
+func oidcCallbackURL(publicURL string, providerName string) (string, error) {
+	if strings.TrimSpace(publicURL) == "" {
+		return "", errors.New("server public url is required")
 	}
-	host := r.Header.Get("X-Forwarded-Host")
-	if host == "" {
-		host = r.Host
+	parsed, err := url.Parse(strings.TrimSpace(publicURL))
+	if err != nil {
+		return "", err
 	}
-	return (&url.URL{
-		Scheme: scheme,
-		Host:   host,
-		Path:   "/api/auth/oidc/" + url.PathEscape(providerName) + "/callback",
-	}).String()
+	if parsed.Scheme == "" || parsed.Host == "" {
+		return "", errors.New("server public url must be an absolute URL")
+	}
+	parsed.Path = strings.TrimRight(parsed.Path, "/") + "/api/auth/oidc/" + url.PathEscape(providerName) + "/callback"
+	parsed.RawQuery = ""
+	parsed.Fragment = ""
+	return parsed.String(), nil
 }
 
 func oidcClaims(ctx context.Context, provider *oidc.Provider, token *oauth2.Token, idToken *oidc.IDToken) (oidcEmailClaims, error) {

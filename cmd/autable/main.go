@@ -138,6 +138,7 @@ func run(ctx context.Context, configPath string) error {
 		historyStore,
 		cfg.Auth,
 	)
+	server.SetPublicURL(cfg.Server.PublicURL)
 	server.EnableMetadataWrites(metadataPath)
 	server.SetDatabaseOpener(func(ctx context.Context, name string) error {
 		return rowRepository.OpenDatabase(ctx, name, cfg.DatabasePath(name))

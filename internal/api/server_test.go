@@ -146,7 +146,11 @@ func TestPasswordAuthDisabledRejectsPasswordEndpoints(t *testing.T) {
 		OIDC: config.OIDCConfig{
 			Enabled: true,
 			Providers: []config.OIDCProvider{
-				{Name: "main", IssuerURL: "https://issuer.example", ClientID: "autable"},
+				{
+					Name:      "main",
+					IssuerURL: "https://issuer.example",
+					ClientID:  "autable",
+				},
 			},
 		},
 	})
@@ -290,7 +294,8 @@ func TestOIDCStartRedirectsToAuthorizeEndpoint(t *testing.T) {
 
 	request := httptest.NewRequest(http.MethodGet, "/api/auth/oidc/main/start", nil)
 	request.Host = "app.example"
-	request.Header.Set("X-Forwarded-Proto", "https")
+	request.Header.Set("X-Forwarded-Proto", "http")
+	request.Header.Set("X-Forwarded-Host", "forwarded.example")
 	recorder := httptest.NewRecorder()
 	server.ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusFound {
@@ -312,7 +317,7 @@ func TestOIDCStartRedirectsToAuthorizeEndpoint(t *testing.T) {
 	if query.Get("scope") != "openid email profile" {
 		t.Fatalf("unexpected default scopes: %q", query.Get("scope"))
 	}
-	if query.Get("redirect_uri") != "https://app.example/api/auth/oidc/main/callback" {
+	if query.Get("redirect_uri") != "https://configured.example/api/auth/oidc/main/callback" {
 		t.Fatalf("unexpected redirect_uri: %q", query.Get("redirect_uri"))
 	}
 	if query.Get("state") == "" {
@@ -3599,7 +3604,11 @@ func newTestServerWithAuth(t *testing.T, authConfig config.AuthConfig) (*Server,
 			t.Fatal(err)
 		}
 	})
-	return NewServerWithAuthConfig(catalog, system, table.NewServiceWithRepository(historyStore, repository), historyStore, authConfig), system
+	server := NewServerWithAuthConfig(catalog, system, table.NewServiceWithRepository(historyStore, repository), historyStore, authConfig)
+	if authConfig.OIDC.Enabled {
+		server.SetPublicURL("https://configured.example")
+	}
+	return server, system
 }
 
 func assertWorkflowRunCount(t *testing.T, server *Server, system *systemdb.DB, workflowID int64, actorID string, expected int) []workflowRunResponse {

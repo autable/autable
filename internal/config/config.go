@@ -3,8 +3,10 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -18,7 +20,8 @@ type Config struct {
 }
 
 type ServerConfig struct {
-	Address string `yaml:"address"`
+	Address   string `yaml:"address"`
+	PublicURL string `yaml:"public_url"`
 }
 
 type DataConfig struct {
@@ -118,6 +121,9 @@ func (cfg Config) Validate() error {
 	if !cfg.Auth.OIDC.Enabled {
 		return nil
 	}
+	if err := validatePublicURL(cfg.Server.PublicURL); err != nil {
+		return err
+	}
 	if len(cfg.Auth.OIDC.Providers) == 0 {
 		return errors.New("auth.oidc.providers is required when auth.oidc.enabled is true")
 	}
@@ -131,6 +137,20 @@ func (cfg Config) Validate() error {
 		if provider.ClientID == "" {
 			return fmt.Errorf("auth.oidc.providers[%d].client_id is required", i)
 		}
+	}
+	return nil
+}
+
+func validatePublicURL(rawURL string) error {
+	if strings.TrimSpace(rawURL) == "" {
+		return errors.New("server.public_url is required when auth.oidc.enabled is true")
+	}
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("server.public_url is invalid: %w", err)
+	}
+	if parsed.Scheme == "" || parsed.Host == "" {
+		return errors.New("server.public_url must be an absolute URL")
 	}
 	return nil
 }
