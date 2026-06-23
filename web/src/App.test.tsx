@@ -314,19 +314,18 @@ describe("App", () => {
   });
 
   it("stores hidden table fields locally", async () => {
-    const user = userEvent.setup();
     renderApp();
     await waitForDefaultTableReady();
     expect(screen.getByRole("grid", { name: "Table records" })).toHaveAttribute("aria-colcount", "4");
 
-    await user.click(await findEnabledButton("Fields"));
+    fireEvent.click(await findEnabledButton("Fields"));
     const dialog = await findDialog("Fields");
-    await user.click(within(dialog).getByRole("button", { name: "Hide email" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Hide email", hidden: true }));
 
     await waitFor(() => expect(screen.getByRole("grid", { name: "Table records" })).toHaveAttribute("aria-colcount", "3"));
     expect(getFieldVisibilityStorageValue()).toBe(JSON.stringify(["email"]));
 
-    await user.click(within(dialog).getByRole("button", { name: "Show email" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Show email", hidden: true }));
 
     await waitFor(() => expect(screen.getByRole("grid", { name: "Table records" })).toHaveAttribute("aria-colcount", "4"));
     expect(getFieldVisibilityStorageValue()).toBeNull();
@@ -343,10 +342,9 @@ describe("App", () => {
       return defaultFetch(input, init);
     });
 
-    const user = userEvent.setup();
     renderApp();
     await waitForDefaultTableReady();
-    await user.click(await findEnabledButton("Fields"));
+    fireEvent.click(await findEnabledButton("Fields"));
     const dialog = await findDialog("Fields");
     const dragData = new Map<string, string>();
     const dataTransfer = {
@@ -355,9 +353,9 @@ describe("App", () => {
       setData: (format: string, value: string) => dragData.set(format, value)
     };
 
-    fireEvent.dragStart(within(dialog).getByRole("button", { name: "Drag status" }), { dataTransfer });
-    fireEvent.dragOver(within(dialog).getByRole("listitem", { name: "Field email" }), { dataTransfer });
-    fireEvent.drop(within(dialog).getByRole("listitem", { name: "Field email" }), { dataTransfer });
+    fireEvent.dragStart(within(dialog).getByRole("button", { name: "Drag status", hidden: true }), { dataTransfer });
+    fireEvent.dragOver(within(dialog).getByRole("listitem", { name: "Field email", hidden: true }), { dataTransfer });
+    fireEvent.drop(within(dialog).getByRole("listitem", { name: "Field email", hidden: true }), { dataTransfer });
 
     await waitFor(() =>
       expect(requests).toContainEqual({

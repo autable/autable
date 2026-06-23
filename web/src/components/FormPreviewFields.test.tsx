@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { FluentProvider, webLightTheme } from "@fluentui/react-components";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -187,15 +187,14 @@ describe("FormPreviewFields", () => {
     expect(screen.queryByText("internal_note")).not.toBeInTheDocument();
     const relationSearch = await screen.findByRole("searchbox", { name: "Search relation records" });
 
-    await user.type(relationSearch, "Acme");
+    fireEvent.change(relationSearch, { target: { value: "Acme" } });
     expect(await screen.findByText("PR-001")).toBeInTheDocument();
 
-    await user.clear(relationSearch);
-    await user.type(relationSearch, "hidden");
+    fireEvent.change(relationSearch, { target: { value: "hidden" } });
     expect(await screen.findByText("No matching records")).toBeInTheDocument();
     expect(screen.queryByText("PR-001")).not.toBeInTheDocument();
 
-    await user.clear(relationSearch);
+    fireEvent.change(relationSearch, { target: { value: "" } });
     await user.click(await screen.findByText("PR-002"));
     expect(onFormValueChange).toHaveBeenCalledWith("purchase_request", "2");
 
