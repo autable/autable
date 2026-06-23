@@ -15,6 +15,8 @@ import (
 
 	"autable/internal/history"
 	"autable/internal/metadata"
+
+	"github.com/syndtr/goleveldb/leveldb"
 )
 
 type copyUploader struct {
@@ -87,10 +89,10 @@ func TestRunCreatesArchiveAndUploads(t *testing.T) {
 		names = append(names, name)
 	}
 	slices.Sort(names)
-	wantNames := []string{"leveldb/entries.jsonl", "manifest.json", "sqlite/system.sqlite", "sqlite/workspace.sqlite"}
-	if !slices.Equal(names, wantNames) {
-		t.Fatalf("unexpected archive files:\n got %v\nwant %v", names, wantNames)
-	}
+	requireArchiveFile(t, files, "manifest.json")
+	requireArchiveFile(t, files, "sqlite/system.sqlite")
+	requireArchiveFile(t, files, "sqlite/workspace.sqlite")
+	requireArchivePrefix(t, names, "leveldb/")
 
 	var manifest Manifest
 	if err := json.Unmarshal(files["manifest.json"], &manifest); err != nil {
@@ -99,9 +101,7 @@ func TestRunCreatesArchiveAndUploads(t *testing.T) {
 	if !manifest.IncludeLevelDB || len(manifest.Files) != 3 {
 		t.Fatalf("unexpected manifest: %#v", manifest)
 	}
-	if !slices.Contains(stringLines(files["leveldb/entries.jsonl"]), `{"key_base64":"cm93LzE=","value_base64":"Y3JlYXRlZA=="}`) {
-		t.Fatalf("expected leveldb entry, got %s", files["leveldb/entries.jsonl"])
-	}
+	assertLevelDBValue(t, files, filepath.Join(root, "restored-leveldb"), "row/1", "created")
 	assertSQLiteValue(t, filepath.Join(root, "restored-system.sqlite"), files["sqlite/system.sqlite"], "settings", "system")
 	assertSQLiteValue(t, filepath.Join(root, "restored-workspace.sqlite"), files["sqlite/workspace.sqlite"], "records", "workspace")
 }
@@ -151,6 +151,51 @@ func readArchive(t *testing.T, path string) map[string][]byte {
 	}
 }
 
+func requireArchiveFile(t *testing.T, files map[string][]byte, name string) {
+	t.Helper()
+	if _, ok := files[name]; !ok {
+		t.Fatalf("expected archive file %q", name)
+	}
+}
+
+func requireArchivePrefix(t *testing.T, names []string, prefix string) {
+	t.Helper()
+	for _, name := range names {
+		if len(name) >= len(prefix) && name[:len(prefix)] == prefix {
+			return
+		}
+	}
+	t.Fatalf("expected archive entry with prefix %q, got %v", prefix, names)
+}
+
+func assertLevelDBValue(t *testing.T, files map[string][]byte, path string, key string, want string) {
+	t.Helper()
+	for name, data := range files {
+		if len(name) < len("leveldb/") || name[:len("leveldb/")] != "leveldb/" {
+			continue
+		}
+		destination := filepath.Join(path, filepath.FromSlash(name[len("leveldb/"):]))
+		if err := os.MkdirAll(filepath.Dir(destination), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(destination, data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	db, err := leveldb.OpenFile(path, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	got, err := db.Get([]byte(key), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != want {
+		t.Fatalf("unexpected leveldb value: got %q want %q", got, want)
+	}
+}
+
 func assertSQLiteValue(t *testing.T, path string, data []byte, tableName string, want string) {
 	t.Helper()
 	if err := os.WriteFile(path, data, 0o644); err != nil {
@@ -168,20 +213,4 @@ func assertSQLiteValue(t *testing.T, path string, data []byte, tableName string,
 	if got != want {
 		t.Fatalf("unexpected sqlite value from %s: got %q want %q", tableName, got, want)
 	}
-}
-
-func stringLines(data []byte) []string {
-	lines := []string{}
-	lineStart := 0
-	for index, char := range data {
-		if char != '\n' {
-			continue
-		}
-		lines = append(lines, string(data[lineStart:index]))
-		lineStart = index + 1
-	}
-	if lineStart < len(data) {
-		lines = append(lines, string(data[lineStart:]))
-	}
-	return lines
 }

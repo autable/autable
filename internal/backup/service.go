@@ -189,17 +189,36 @@ func backupSQLiteIfExists(ctx context.Context, source string, destination string
 }
 
 func exportLevelDB(ctx context.Context, historyStore *history.LevelDBStore, workDir string, manifest *Manifest) error {
-	relativePath := "leveldb/entries.jsonl"
-	destination := filepath.Join(workDir, filepath.FromSlash(relativePath))
+	relativePath := "leveldb"
+	destination := filepath.Join(workDir, relativePath)
 	if err := exportLevelDBSnapshot(ctx, historyStore, destination); err != nil {
 		return err
 	}
-	info, err := os.Stat(destination)
+	sizeBytes, err := directorySize(destination)
 	if err != nil {
 		return err
 	}
-	manifest.Files = append(manifest.Files, ManifestFile{Path: relativePath, Kind: "leveldb_snapshot", SizeBytes: info.Size()})
+	manifest.Files = append(manifest.Files, ManifestFile{Path: relativePath, Kind: "leveldb_directory", SizeBytes: sizeBytes})
 	return nil
+}
+
+func directorySize(path string) (int64, error) {
+	var sizeBytes int64
+	err := filepath.WalkDir(path, func(_ string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		sizeBytes += info.Size()
+		return nil
+	})
+	return sizeBytes, err
 }
 
 func backupObjectKey(options Options, fileName string) string {

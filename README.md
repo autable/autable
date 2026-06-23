@@ -103,7 +103,7 @@ npm run build
 npm run e2e
 ```
 
-Autable can upload scheduled backups to S3-compatible storage. SQLite databases are copied with SQLite's online backup API, so the service does not need to stop while a backup is created. LevelDB history is optional and is exported through a consistent snapshot when `backup.include_leveldb` is enabled:
+Autable can upload scheduled backups to S3-compatible storage. SQLite databases are copied with SQLite's online backup API, so the service does not need to stop while a backup is created. LevelDB history is optional; when `backup.include_leveldb` is enabled, Autable exports a consistent snapshot into a restorable LevelDB directory inside the archive:
 
 ```yaml
 backup:

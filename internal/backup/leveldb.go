@@ -1,40 +1,45 @@
 package backup
 
 import (
-	"bufio"
 	"context"
-	"encoding/base64"
-	"encoding/json"
 	"os"
 	"path/filepath"
 
 	"autable/internal/history"
+
+	"github.com/syndtr/goleveldb/leveldb"
 )
 
-type levelDBEntry struct {
-	KeyBase64   string `json:"key_base64"`
-	ValueBase64 string `json:"value_base64"`
-}
-
 func exportLevelDBSnapshot(ctx context.Context, store *history.LevelDBStore, destinationPath string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := os.RemoveAll(destinationPath); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(filepath.Dir(destinationPath), 0o755); err != nil {
 		return err
 	}
-	file, err := os.Create(destinationPath)
+	destinationDB, err := leveldb.OpenFile(destinationPath, nil)
 	if err != nil {
 		return err
 	}
-	defer file.Close()
-	writer := bufio.NewWriter(file)
+	closeDestination := true
+	defer func() {
+		if closeDestination {
+			_ = destinationDB.Close()
+		}
+	}()
 
-	encoder := json.NewEncoder(writer)
-	if err := store.ForEachSnapshot(ctx, func(key []byte, value []byte) error {
-		return encoder.Encode(levelDBEntry{
-			KeyBase64:   base64.StdEncoding.EncodeToString(key),
-			ValueBase64: base64.StdEncoding.EncodeToString(value),
-		})
-	}); err != nil {
+	err = store.ForEachSnapshot(ctx, func(key []byte, value []byte) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		return destinationDB.Put(key, value, nil)
+	})
+	if err != nil {
 		return err
 	}
-	return writer.Flush()
+	closeDestination = false
+	return destinationDB.Close()
 }
