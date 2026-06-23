@@ -3,7 +3,14 @@ server:
 data:
   path: "./data"
 repository:
-  path: "./examples"
+  path: "./repository"
+  remote_url: "https://YOUR_PAT@github.com/example/autable-repository.git"
+  remote_branch: "main"
+  sync:
+    debounce: "2s"
+    push_timeout: "30s"
+    author_name: "autable"
+    author_email: "autable@example.local"
 auth:
   password:
     enabled: true

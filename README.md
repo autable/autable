@@ -53,10 +53,11 @@ This repository currently contains the backend core primitives:
 go test ./...
 ```
 
-Run the API server with git-managed config. The server loads metadata from `repository.path/metadata/main.yml` and stores runtime data under `data.path`:
+Run the API server with git-managed config. On startup, Autable clones `repository.remote_url` at `repository.remote_branch` into `repository.path` when the path does not exist. After startup, local metadata, workflow, and form changes are committed and pushed to that remote branch; Autable does not pull or rebase remote changes automatically. The server loads metadata from `repository.path/metadata/main.yml` and stores runtime data under `data.path`:
 
 ```sh
 cp examples/config.example.yml examples/config.yml
+# Edit repository.remote_url and repository.remote_branch before starting.
 go run ./cmd/autable -config examples/config.yml
 ```
 

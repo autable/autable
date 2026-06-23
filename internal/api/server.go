@@ -20,6 +20,7 @@ import (
 	"autable/internal/history"
 	"autable/internal/metadata"
 	"autable/internal/permission"
+	"autable/internal/repositorysync"
 	"autable/internal/systemdb"
 	"autable/internal/table"
 	"autable/internal/workflow"
@@ -32,6 +33,7 @@ type Server struct {
 	metadataPath     string
 	openDatabase     func(context.Context, string) error
 	codeFiles        codeFileStore
+	repositorySync   repositorySyncer
 	system           *systemdb.DB
 	tables           *table.Service
 	history          history.Store
@@ -50,6 +52,12 @@ type codeFileStore interface {
 	SaveFormScript(context.Context, systemdb.FormDefinition) error
 	LoadFormScript(context.Context, systemdb.FormDefinition) (string, bool, error)
 	DeleteFormScript(context.Context, systemdb.FormDefinition) error
+	WorkflowScriptPath(systemdb.WorkflowDefinition) string
+	FormScriptPath(systemdb.FormDefinition) string
+}
+
+type repositorySyncer interface {
+	Notify(repositorysync.Change)
 }
 
 type createDatabaseRequest struct {
@@ -257,6 +265,43 @@ func (server *Server) SetDatabaseOpener(openDatabase func(context.Context, strin
 
 func (server *Server) SetCodeFileStore(store codeFileStore) {
 	server.codeFiles = store
+}
+
+func (server *Server) SetRepositorySync(syncer repositorySyncer) {
+	server.repositorySync = syncer
+}
+
+func (server *Server) notifyRepositoryChange(ctx context.Context, actorID string, action string, summary string, paths ...string) {
+	if server.repositorySync == nil {
+		return
+	}
+	server.repositorySync.Notify(repositorysync.Change{
+		ActorID:    actorID,
+		ActorLabel: server.repositoryActorLabel(ctx, actorID),
+		Action:     action,
+		Summary:    summary,
+		Paths:      paths,
+	})
+}
+
+func (server *Server) repositoryActorLabel(ctx context.Context, actorID string) string {
+	if actorID == "" || server.system == nil {
+		return actorID
+	}
+	user, err := server.system.User(ctx, actorID)
+	if err != nil {
+		return actorID
+	}
+	switch {
+	case user.DisplayName != "" && user.Email != "":
+		return user.DisplayName + " <" + user.Email + ">"
+	case user.Email != "":
+		return user.Email
+	case user.DisplayName != "":
+		return user.DisplayName
+	default:
+		return actorID
+	}
 }
 
 func (server *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -557,6 +602,7 @@ func (server *Server) handleCreateDatabase(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+	server.notifyRepositoryChange(r.Context(), actorID, "metadata.database.create", "created database "+database.Name, server.metadataPath)
 	writeJSON(w, http.StatusCreated, database)
 }
 
@@ -948,7 +994,7 @@ func (server *Server) handleSaveWorkflow(w http.ResponseWriter, r *http.Request)
 	if workflow.ID == 0 {
 		workflow.CreatorID = actorID
 	}
-	saved, err := server.saveWorkflowDefinition(r.Context(), workflow)
+	saved, err := server.saveWorkflowDefinition(r.Context(), actorID, workflow)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -1055,6 +1101,7 @@ func (server *Server) handlePostDatabaseResource(w http.ResponseWriter, r *http.
 			writeError(w, http.StatusBadRequest, err)
 			return
 		}
+		server.notifyRepositoryChange(r.Context(), actorID, "metadata.table.create", "created table "+dbName+"/"+tableMeta.Name, server.metadataPath)
 		writeJSON(w, http.StatusCreated, tableMeta)
 	case "workflows":
 		var workflow systemdb.WorkflowDefinition
@@ -1075,7 +1122,7 @@ func (server *Server) handlePostDatabaseResource(w http.ResponseWriter, r *http.
 		if workflow.ID == 0 {
 			workflow.CreatorID = actorID
 		}
-		saved, err := server.saveWorkflowDefinition(r.Context(), workflow)
+		saved, err := server.saveWorkflowDefinition(r.Context(), actorID, workflow)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err)
 			return
@@ -1106,7 +1153,7 @@ func (server *Server) handlePostDatabaseResource(w http.ResponseWriter, r *http.
 		if form.ID == 0 {
 			form.CreatorID = actorID
 		}
-		saved, err := server.saveFormDefinition(r.Context(), form)
+		saved, err := server.saveFormDefinition(r.Context(), actorID, form)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err)
 			return
@@ -1239,6 +1286,7 @@ func (server *Server) handlePatchDatabaseResource(w http.ResponseWriter, r *http
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
+	server.notifyRepositoryChange(r.Context(), actorID, "metadata.field.move", "moved field "+dbName+"/"+tableName+"/"+fieldName, server.metadataPath)
 	writeJSON(w, http.StatusOK, visibleTableMetadata(perms, actorID, dbName, isOwner, tableMeta))
 }
 
@@ -1281,6 +1329,7 @@ func (server *Server) handleUpdateTableMetadata(w http.ResponseWriter, r *http.R
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
+	server.notifyRepositoryChange(r.Context(), actorID, "metadata.table.update", "updated table metadata "+dbName+"/"+tableName, server.metadataPath)
 	writeJSON(w, http.StatusOK, visibleTableMetadata(perms, actorID, dbName, isOwner, updated))
 }
 
@@ -1762,7 +1811,7 @@ func (server *Server) handleSaveForm(w http.ResponseWriter, r *http.Request) {
 	if form.ID == 0 {
 		form.CreatorID = actorID
 	}
-	saved, err := server.saveFormDefinition(r.Context(), form)
+	saved, err := server.saveFormDefinition(r.Context(), actorID, form)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -1836,6 +1885,7 @@ func (server *Server) handleDeleteWorkflow(w http.ResponseWriter, r *http.Reques
 			writeError(w, http.StatusInternalServerError, err)
 			return
 		}
+		server.notifyRepositoryChange(r.Context(), actorID, "workflow.delete", "deleted workflow "+workflow.DatabaseName+"/"+workflow.Name, server.codeFiles.WorkflowScriptPath(workflow))
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -1867,6 +1917,7 @@ func (server *Server) handleDeleteForm(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, err)
 			return
 		}
+		server.notifyRepositoryChange(r.Context(), actorID, "form.delete", "deleted form "+form.DatabaseName+"/"+form.Name, server.codeFiles.FormScriptPath(form))
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -2896,7 +2947,7 @@ func (server *Server) workflowDefinitionWithFileScript(ctx context.Context, work
 	return workflow, nil
 }
 
-func (server *Server) saveWorkflowDefinition(ctx context.Context, workflow systemdb.WorkflowDefinition) (systemdb.WorkflowDefinition, error) {
+func (server *Server) saveWorkflowDefinition(ctx context.Context, actorID string, workflow systemdb.WorkflowDefinition) (systemdb.WorkflowDefinition, error) {
 	var previous *systemdb.WorkflowDefinition
 	if workflow.ID != 0 {
 		existing, err := server.system.Workflow(ctx, workflow.ID)
@@ -2912,14 +2963,26 @@ func (server *Server) saveWorkflowDefinition(ctx context.Context, workflow syste
 	if server.codeFiles == nil {
 		return saved, nil
 	}
+	paths := []string{server.codeFiles.WorkflowScriptPath(saved)}
 	if err := server.codeFiles.SaveWorkflowScript(ctx, saved); err != nil {
 		return systemdb.WorkflowDefinition{}, err
 	}
 	if previous != nil && (previous.DatabaseName != saved.DatabaseName || previous.Name != saved.Name) {
+		paths = append(paths, server.codeFiles.WorkflowScriptPath(*previous))
 		if err := server.codeFiles.DeleteWorkflowScript(ctx, *previous); err != nil {
 			return systemdb.WorkflowDefinition{}, err
 		}
 	}
+	summary := "saved workflow " + saved.DatabaseName + "/" + saved.Name
+	action := "workflow.save"
+	if previous == nil {
+		summary = "created workflow " + saved.DatabaseName + "/" + saved.Name
+		action = "workflow.create"
+	} else if previous.DatabaseName != saved.DatabaseName || previous.Name != saved.Name {
+		summary = "renamed workflow " + previous.DatabaseName + "/" + previous.Name + " to " + saved.DatabaseName + "/" + saved.Name
+		action = "workflow.rename"
+	}
+	server.notifyRepositoryChange(ctx, actorID, action, summary, paths...)
 	return saved, nil
 }
 
@@ -3033,7 +3096,7 @@ func (server *Server) formDefinitionWithFileScript(ctx context.Context, form sys
 	return form, nil
 }
 
-func (server *Server) saveFormDefinition(ctx context.Context, form systemdb.FormDefinition) (systemdb.FormDefinition, error) {
+func (server *Server) saveFormDefinition(ctx context.Context, actorID string, form systemdb.FormDefinition) (systemdb.FormDefinition, error) {
 	var previous *systemdb.FormDefinition
 	if form.ID != 0 {
 		existing, err := server.system.Form(ctx, form.ID)
@@ -3049,14 +3112,26 @@ func (server *Server) saveFormDefinition(ctx context.Context, form systemdb.Form
 	if server.codeFiles == nil {
 		return saved, nil
 	}
+	paths := []string{server.codeFiles.FormScriptPath(saved)}
 	if err := server.codeFiles.SaveFormScript(ctx, saved); err != nil {
 		return systemdb.FormDefinition{}, err
 	}
 	if previous != nil && (previous.DatabaseName != saved.DatabaseName || previous.Name != saved.Name) {
+		paths = append(paths, server.codeFiles.FormScriptPath(*previous))
 		if err := server.codeFiles.DeleteFormScript(ctx, *previous); err != nil {
 			return systemdb.FormDefinition{}, err
 		}
 	}
+	summary := "saved form " + saved.DatabaseName + "/" + saved.Name
+	action := "form.save"
+	if previous == nil {
+		summary = "created form " + saved.DatabaseName + "/" + saved.Name
+		action = "form.create"
+	} else if previous.DatabaseName != saved.DatabaseName || previous.Name != saved.Name {
+		summary = "renamed form " + previous.DatabaseName + "/" + previous.Name + " to " + saved.DatabaseName + "/" + saved.Name
+		action = "form.rename"
+	}
+	server.notifyRepositoryChange(ctx, actorID, action, summary, paths...)
 	return saved, nil
 }
 

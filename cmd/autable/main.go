@@ -16,6 +16,7 @@ import (
 	"autable/internal/metadata"
 	"autable/internal/recorddb"
 	"autable/internal/repository"
+	"autable/internal/repositorysync"
 	"autable/internal/systemdb"
 	"autable/internal/table"
 	"autable/internal/version"
@@ -40,6 +41,13 @@ func main() {
 func run(ctx context.Context, configPath string) error {
 	cfg, err := config.Load(configPath)
 	if err != nil {
+		return err
+	}
+	if err := repository.EnsureGitRepository(ctx, repository.GitOptions{
+		Path:         cfg.Repository.Path,
+		RemoteURL:    cfg.Repository.RemoteURL,
+		RemoteBranch: cfg.Repository.RemoteBranch,
+	}); err != nil {
 		return err
 	}
 	repoLayout := repository.NewLayout(cfg.Repository.Path)
@@ -70,6 +78,28 @@ func run(ctx context.Context, configPath string) error {
 	if address == "" {
 		address = "127.0.0.1:8080"
 	}
+	repoSync := repositorysync.New(repositorysync.Options{
+		Root:        cfg.Repository.Path,
+		RemoteURL:   cfg.Repository.RemoteURL,
+		Branch:      cfg.Repository.RemoteBranch,
+		Debounce:    configDuration(cfg.Repository.Sync.Debounce, 2*time.Second),
+		PushTimeout: configDuration(cfg.Repository.Sync.PushTimeout, 30*time.Second),
+		AuthorName:  cfg.Repository.Sync.AuthorName,
+		AuthorEmail: cfg.Repository.Sync.AuthorEmail,
+	})
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := repoSync.Shutdown(shutdownCtx); err != nil {
+			slog.Warn("repository sync shutdown failed", "error", err)
+		}
+	}()
+	repoSync.Notify(repositorysync.Change{
+		ActorID: "system",
+		Action:  "repository.start",
+		Summary: "started repository sync",
+		Paths:   []string{metadataPath},
+	})
 	server := api.NewServerWithAuthConfig(
 		catalog,
 		system,
@@ -82,8 +112,21 @@ func run(ctx context.Context, configPath string) error {
 		return rowRepository.OpenDatabase(ctx, name, cfg.DatabasePath(name))
 	})
 	server.SetCodeFileStore(codefiles.NewStore(cfg.Repository.Path))
+	server.SetRepositorySync(repoSync)
 	server.StartWorkflowWorkers(ctx)
 	server.StartWorkflowScheduler(ctx, 15*time.Second)
 	slog.Info("autable listening", "address", address)
 	return http.ListenAndServe(address, webui.Handler(server))
+}
+
+func configDuration(value string, fallback time.Duration) time.Duration {
+	if value == "" {
+		return fallback
+	}
+	duration, err := time.ParseDuration(value)
+	if err != nil {
+		slog.Warn("invalid duration config, using default", "value", value, "default", fallback)
+		return fallback
+	}
+	return duration
 }

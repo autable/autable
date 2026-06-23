@@ -25,7 +25,17 @@ type DataConfig struct {
 }
 
 type RepositoryConfig struct {
-	Path string `yaml:"path"`
+	Path         string               `yaml:"path"`
+	RemoteURL    string               `yaml:"remote_url"`
+	RemoteBranch string               `yaml:"remote_branch"`
+	Sync         RepositorySyncConfig `yaml:"sync"`
+}
+
+type RepositorySyncConfig struct {
+	Debounce    string `yaml:"debounce"`
+	PushTimeout string `yaml:"push_timeout"`
+	AuthorName  string `yaml:"author_name"`
+	AuthorEmail string `yaml:"author_email"`
 }
 
 type AuthConfig struct {
@@ -73,6 +83,12 @@ func (cfg Config) Validate() error {
 	}
 	if cfg.Repository.Path == "" {
 		return errors.New("repository.path is required")
+	}
+	if cfg.Repository.RemoteURL == "" {
+		return errors.New("repository.remote_url is required")
+	}
+	if cfg.Repository.RemoteBranch == "" {
+		return errors.New("repository.remote_branch is required")
 	}
 	if !cfg.Auth.Password.Enabled && !cfg.Auth.OIDC.Enabled {
 		return errors.New("at least one auth method is required")

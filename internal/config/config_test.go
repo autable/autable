@@ -14,6 +14,8 @@ data:
   path: ./data
 repository:
   path: ./repo
+  remote_url: https://example.com/autable/repository.git
+  remote_branch: main
 auth:
   password:
     enabled: true
@@ -56,7 +58,7 @@ func TestValidateRequiresCorePaths(t *testing.T) {
 func TestValidateRequiresAtLeastOneAuthMethod(t *testing.T) {
 	cfg := Config{
 		Data:       DataConfig{Path: "./data"},
-		Repository: RepositoryConfig{Path: "./repo"},
+		Repository: RepositoryConfig{Path: "./repo", RemoteURL: "https://example.com/repo.git", RemoteBranch: "main"},
 	}
 
 	err := cfg.Validate()
@@ -68,7 +70,7 @@ func TestValidateRequiresAtLeastOneAuthMethod(t *testing.T) {
 func TestValidateOIDCProvidersOnlyWhenEnabled(t *testing.T) {
 	cfg := Config{
 		Data:       DataConfig{Path: "./data"},
-		Repository: RepositoryConfig{Path: "./repo"},
+		Repository: RepositoryConfig{Path: "./repo", RemoteURL: "https://example.com/repo.git", RemoteBranch: "main"},
 		Auth: AuthConfig{
 			Password: PasswordAuthConfig{Enabled: true},
 			OIDC: OIDCConfig{

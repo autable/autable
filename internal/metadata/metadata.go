@@ -1,6 +1,7 @@
 package metadata
 
 import (
+	"autable/internal/repository"
 	"errors"
 	"fmt"
 	"os"
@@ -122,7 +123,7 @@ func Save(path string, catalog Catalog) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0o644)
+	return repository.WriteFileAtomic(path, data, 0o644)
 }
 
 func (catalog Catalog) Validate() error {

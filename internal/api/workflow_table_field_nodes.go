@@ -35,6 +35,7 @@ func (service workflowAutableService) CreateFields(ctx context.Context, input ma
 	if err != nil {
 		return nil, err
 	}
+	server.notifyRepositoryChange(ctx, info.CreatorID, "metadata.fields.create", "created fields "+dbName+"/"+tableName, server.metadataPath)
 	return workflowFieldMutationResponse(mutation), nil
 }
 

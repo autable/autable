@@ -70,7 +70,7 @@ func (store *Store) writeScript(ctx context.Context, kind, databaseName string, 
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(store.scriptPath(kind, databaseName, name), []byte(script), 0o644)
+	return repository.WriteFileAtomic(store.scriptPath(kind, databaseName, name), []byte(script), 0o644)
 }
 
 func (store *Store) readScript(ctx context.Context, kind, databaseName string, name string) (string, bool, error) {
