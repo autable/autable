@@ -133,6 +133,7 @@ export type WorkflowRun = {
 export type WorkflowRunResponse = {
   history_key: string;
   run: WorkflowRun;
+  summary?: boolean;
 };
 
 export type FormDefinition = {
@@ -670,6 +671,15 @@ export async function listWorkflowRuns(workflowID: number): Promise<WorkflowRunR
     throw new Error(error.error ?? `workflow runs failed: ${response.status}`);
   }
   return response.json() as Promise<WorkflowRunResponse[]>;
+}
+
+export async function loadWorkflowRun(workflowID: number, historyKey: string): Promise<WorkflowRunResponse> {
+  const response = await fetch(`/api/workflows/${workflowID}/runs/${encodeURIComponent(historyKey)}`);
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: response.statusText }));
+    throw new Error(error.error ?? `workflow run failed: ${response.status}`);
+  }
+  return response.json() as Promise<WorkflowRunResponse>;
 }
 
 export async function listForms(dbName: string): Promise<FormDefinition[]> {

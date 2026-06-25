@@ -6,6 +6,7 @@ import {
   deleteForm,
   deleteWorkflow,
   listForms,
+  loadWorkflowRun,
   listWorkflowRuns,
   listWorkflows,
   loadWorkflowNodes,
@@ -160,6 +161,32 @@ export function useWorkflowFormWorkspace({
     };
   }, [currentUserID, selectedWorkflow?.id]);
 
+  useEffect(() => {
+    let cancelled = false;
+    if (!currentUserID || !selectedWorkflow?.id || !selectedWorkflowRunKey || !selectedWorkflowRun?.summary) {
+      return () => {
+        cancelled = true;
+      };
+    }
+    void loadWorkflowRun(selectedWorkflow.id, selectedWorkflowRunKey)
+      .then((run) => {
+        if (cancelled) {
+          return;
+        }
+        setWorkflowRuns((current) =>
+          current.map((item) => (item.history_key === run.history_key ? run : item))
+        );
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          onStatus(error instanceof Error ? error.message : t("status.workflowRunFailed"), "error");
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUserID, selectedWorkflow?.id, selectedWorkflowRunKey, selectedWorkflowRun?.summary]);
+
   async function loadWorkflowRuns(workflowID: number, preferredRunKey = "") {
     const runs = await listWorkflowRuns(workflowID);
     const newestFirst = applyWorkflowRuns(runs, preferredRunKey);
@@ -168,10 +195,12 @@ export function useWorkflowFormWorkspace({
 
   function applyWorkflowRuns(runs: WorkflowRunResponse[], preferredRunKey = "") {
     const newestFirst = [...runs].reverse();
-    setWorkflowRuns(newestFirst);
-    const preferredExists = preferredRunKey && newestFirst.some((run) => run.history_key === preferredRunKey);
-    setSelectedWorkflowRunKey(preferredExists ? preferredRunKey : newestFirst[0]?.history_key ?? "");
-    return newestFirst;
+    const loadedRuns = new Map(workflowRuns.filter((run) => !run.summary).map((run) => [run.history_key, run]));
+    const mergedRuns = newestFirst.map((run) => loadedRuns.get(run.history_key) ?? run);
+    setWorkflowRuns(mergedRuns);
+    const preferredExists = preferredRunKey && mergedRuns.some((run) => run.history_key === preferredRunKey);
+    setSelectedWorkflowRunKey(preferredExists ? preferredRunKey : mergedRuns[0]?.history_key ?? "");
+    return mergedRuns;
   }
 
   async function refreshWorkflowRuns(preferredRunKey = "", workflowID = selectedWorkflow?.id ?? 0) {

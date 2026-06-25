@@ -96,6 +96,30 @@ func (store *LevelDBStore) GetPrefixLimit(ctx context.Context, prefix string, li
 	return entries, nil
 }
 
+func (store *LevelDBStore) GetPrefixKeysLimit(ctx context.Context, prefix string, limit int) ([]string, error) {
+	if limit <= 0 {
+		return []string{}, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	iter := store.db.NewIterator(util.BytesPrefix([]byte(prefix)), nil)
+	defer iter.Release()
+
+	keys := []string{}
+	for ok := iter.Last(); ok && len(keys) < limit; ok = iter.Prev() {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		keys = append(keys, string(iter.Key()))
+	}
+	if err := iter.Error(); err != nil {
+		return nil, err
+	}
+	slices.Reverse(keys)
+	return keys, nil
+}
+
 func (store *LevelDBStore) ForEachSnapshot(ctx context.Context, visit func(key []byte, value []byte) error) error {
 	if err := ctx.Err(); err != nil {
 		return err

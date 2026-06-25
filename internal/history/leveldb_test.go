@@ -91,3 +91,35 @@ func TestLevelDBStorePersistsPrefixScannableHistory(t *testing.T) {
 		t.Fatalf("expected latest entries in key order, got %#v %#v", limitedFirst.Values, limitedSecond.Values)
 	}
 }
+
+func TestLevelDBStoreGetsPrefixKeysWithoutReadingValues(t *testing.T) {
+	ctx := context.Background()
+	store, err := OpenLevelDB(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	keys := []string{WorkflowKey(7, 1), WorkflowKey(7, 2), WorkflowKey(7, 3)}
+	for _, key := range keys {
+		if err := store.Put(ctx, key, []byte("{not json")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := store.Put(ctx, WorkflowKey(8, 3), []byte("{not json")); err != nil {
+		t.Fatal(err)
+	}
+
+	latest, err := store.GetPrefixKeysLimit(ctx, WorkflowPrefix(7), 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected := keys[1:]
+	if len(latest) != len(expected) || latest[0] != expected[0] || latest[1] != expected[1] {
+		t.Fatalf("unexpected keys: %#v", latest)
+	}
+}

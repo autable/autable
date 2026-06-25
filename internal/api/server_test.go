@@ -2887,6 +2887,13 @@ func TestWorkflowRunAPI(t *testing.T) {
 	if len(runs) != 1 || runs[0].HistoryKey != runResponse.HistoryKey {
 		t.Fatalf("unexpected workflow run list: %#v", runs)
 	}
+	if !runs[0].Summary || runs[0].Run.Inputs != nil || runs[0].Run.Outputs != nil || len(runs[0].Run.Steps) != 0 {
+		t.Fatalf("expected workflow run list to return summary only, got %#v", runs[0])
+	}
+	detail := fetchWorkflowRun(t, server, system, saved.ID, runResponse.HistoryKey, "u1")
+	if detail.Summary || detail.Run.Outputs["message"] != "Ada-done" {
+		t.Fatalf("unexpected workflow run detail: %#v", detail)
+	}
 }
 
 func TestWorkflowTableCreateNodeUsesWorkflowPermissions(t *testing.T) {
@@ -3168,11 +3175,12 @@ func TestRowCreateAutomaticallyRunsMatchingWorkflowTrigger(t *testing.T) {
 	if len(runs) != 1 {
 		t.Fatalf("expected one automatic workflow run, got %#v", runs)
 	}
-	if runs[0].Run.Inputs["operation"] != "create" || runs[0].Run.Outputs["name"] != "Ada" || runs[0].Run.Outputs["record_id"] != float64(1) {
-		t.Fatalf("unexpected automatic workflow run: %#v", runs[0].Run)
+	run := fetchWorkflowRun(t, server, system, 1, runs[0].HistoryKey, "u1")
+	if run.Run.Inputs["operation"] != "create" || run.Run.Outputs["name"] != "Ada" || run.Run.Outputs["record_id"] != float64(1) {
+		t.Fatalf("unexpected automatic workflow run: %#v", run.Run)
 	}
-	if len(runs[0].Run.Steps) != 0 {
-		t.Fatalf("trigger node should feed run inputs without being executed in run steps: %#v", runs[0].Run.Steps)
+	if len(run.Run.Steps) != 0 {
+		t.Fatalf("trigger node should feed run inputs without being executed in run steps: %#v", run.Run.Steps)
 	}
 }
 
@@ -3214,11 +3222,12 @@ func TestWorkflowWorkersConsumeRowChangeEvents(t *testing.T) {
 	}
 
 	runs := waitWorkflowRunCount(t, server, system, 1, "u1", 1)
-	if runs[0].Run.Outputs["name"] != "Ada" {
-		t.Fatalf("unexpected worker workflow run: %#v", runs[0].Run)
+	run := fetchWorkflowRun(t, server, system, 1, runs[0].HistoryKey, "u1")
+	if run.Run.Outputs["name"] != "Ada" {
+		t.Fatalf("unexpected worker workflow run: %#v", run.Run)
 	}
-	if len(runs[0].Run.Steps) != 0 {
-		t.Fatalf("trigger node should not be called from run: %#v", runs[0].Run.Steps)
+	if len(run.Run.Steps) != 0 {
+		t.Fatalf("trigger node should not be called from run: %#v", run.Run.Steps)
 	}
 }
 
@@ -3352,8 +3361,9 @@ func TestScheduleTickRunsIntervalWorkflowUsingRunHistory(t *testing.T) {
 	assertWorkflowRunCount(t, server, system, 1, "u1", 1)
 	server.dispatchScheduleTick(ctx, "db", first.Add(15*time.Second))
 	runs := assertWorkflowRunCount(t, server, system, 1, "u1", 2)
-	if runs[1].Run.Outputs["event"] != "schedule" || runs[1].Run.Outputs["scheduled_at"] != float64(first.Add(15*time.Second).UnixMilli()) {
-		t.Fatalf("unexpected scheduled workflow output: %#v", runs[1].Run.Outputs)
+	run := fetchWorkflowRun(t, server, system, 1, runs[1].HistoryKey, "u1")
+	if run.Run.Outputs["event"] != "schedule" || run.Run.Outputs["scheduled_at"] != float64(first.Add(15*time.Second).UnixMilli()) {
+		t.Fatalf("unexpected scheduled workflow output: %#v", run.Run.Outputs)
 	}
 }
 
@@ -3422,6 +3432,9 @@ func TestWorkflowRunsListDefaultsToLatestRuns(t *testing.T) {
 	}
 	if runs[0].Run.Timestamp != 6 || runs[len(runs)-1].Run.Timestamp != int64(defaultWorkflowRunListLimit+5) {
 		t.Fatalf("expected latest runs in ascending order, first=%d last=%d", runs[0].Run.Timestamp, runs[len(runs)-1].Run.Timestamp)
+	}
+	if !runs[0].Summary || runs[0].Run.Outputs != nil || len(runs[0].Run.Steps) != 0 {
+		t.Fatalf("expected run list to return summaries only, got %#v", runs[0])
 	}
 
 	request := httptest.NewRequest(http.MethodGet, "/api/workflows/"+strconv.FormatInt(saved.ID, 10)+"/runs?limit=2", nil)
@@ -3767,6 +3780,22 @@ func fetchWorkflowRuns(t *testing.T, server *Server, system *systemdb.DB, workfl
 		t.Fatal(err)
 	}
 	return runs
+}
+
+func fetchWorkflowRun(t *testing.T, server *Server, system *systemdb.DB, workflowID int64, historyKey string, actorID string) workflowRunResponse {
+	t.Helper()
+	request := httptest.NewRequest(http.MethodGet, "/api/workflows/"+strconv.FormatInt(workflowID, 10)+"/runs/"+url.PathEscape(historyKey), nil)
+	request.AddCookie(testSessionCookie(t, system, actorID))
+	recorder := httptest.NewRecorder()
+	server.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected workflow run detail 200, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+	var run workflowRunResponse
+	if err := json.NewDecoder(recorder.Body).Decode(&run); err != nil {
+		t.Fatal(err)
+	}
+	return run
 }
 
 func newTestServerWithMetadataFile(t *testing.T, catalog metadata.Catalog) (*Server, *systemdb.DB, string) {

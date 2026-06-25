@@ -145,6 +145,7 @@ type fieldPositionRequest struct {
 type workflowRunResponse struct {
 	HistoryKey string              `json:"history_key"`
 	Run        history.WorkflowRun `json:"run"`
+	Summary    bool                `json:"summary,omitempty"`
 }
 
 const (
@@ -1406,6 +1407,10 @@ func (server *Server) authorizeViewMetadataPatch(w http.ResponseWriter, actorID 
 }
 
 func (server *Server) handleGetWorkflow(w http.ResponseWriter, r *http.Request) {
+	if workflowID, historyKey, ok := parseWorkflowRunPath(r.URL.Path); ok {
+		server.handleWorkflowRun(w, r, workflowID, historyKey)
+		return
+	}
 	if id, ok := parseWorkflowRunsPath(r.URL.Path); ok {
 		server.handleWorkflowRuns(w, r, id)
 		return
@@ -1491,21 +1496,63 @@ func (server *Server) handleWorkflowRuns(w http.ResponseWriter, r *http.Request,
 	if !server.requireResourceRead(w, r, actorID, permission.ScopeWorkflow, workflowID) {
 		return
 	}
-	entries, err := server.history.GetPrefixLimit(r.Context(), history.WorkflowPrefix(workflowID), workflowRunListLimit(r))
+	keys, err := server.history.GetPrefixKeysLimit(r.Context(), history.WorkflowPrefix(workflowID), workflowRunListLimit(r))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	runs := make([]workflowRunResponse, 0, len(entries))
-	for _, entry := range entries {
-		run, err := history.DecodeWorkflowRun(entry)
+	runs := make([]workflowRunResponse, 0, len(keys))
+	for _, key := range keys {
+		parsedWorkflowID, timestamp, err := history.ParseWorkflowKey(key)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err)
 			return
 		}
-		runs = append(runs, workflowRunResponse{HistoryKey: entry.Key, Run: run})
+		if parsedWorkflowID != workflowID {
+			writeError(w, http.StatusInternalServerError, fmt.Errorf("workflow history key %q does not match workflow %d", key, workflowID))
+			return
+		}
+		runs = append(runs, workflowRunResponse{HistoryKey: key, Run: history.WorkflowRun{
+			WorkflowID: workflowID,
+			Timestamp:  timestamp,
+			Steps:      []history.StepRecord{},
+		}, Summary: true})
 	}
 	writeJSON(w, http.StatusOK, runs)
+}
+
+func (server *Server) handleWorkflowRun(w http.ResponseWriter, r *http.Request, workflowID int64, historyKey string) {
+	if r.Method != http.MethodGet {
+		http.NotFound(w, r)
+		return
+	}
+	actorID, ok := server.requireUserID(w, r)
+	if !ok {
+		return
+	}
+	if !server.requireResourceRead(w, r, actorID, permission.ScopeWorkflow, workflowID) {
+		return
+	}
+	parsedWorkflowID, _, err := history.ParseWorkflowKey(historyKey)
+	if err != nil || parsedWorkflowID != workflowID {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("invalid workflow history key %q", historyKey))
+		return
+	}
+	entry, err := server.history.Get(r.Context(), historyKey)
+	if errors.Is(err, history.ErrNotFound) {
+		writeError(w, http.StatusNotFound, err)
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	run, err := history.DecodeWorkflowRun(entry)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, workflowRunResponse{HistoryKey: historyKey, Run: run})
 }
 
 func (server *Server) StartWorkflowWorkers(ctx context.Context) {
@@ -1625,18 +1672,21 @@ func (server *Server) scheduleTriggerMatches(ctx context.Context, workflowID int
 }
 
 func (server *Server) latestWorkflowRunTimestamp(ctx context.Context, workflowID int64) (time.Time, bool, error) {
-	entries, err := server.history.GetPrefixLimit(ctx, history.WorkflowPrefix(workflowID), 1)
+	keys, err := server.history.GetPrefixKeysLimit(ctx, history.WorkflowPrefix(workflowID), 1)
 	if err != nil {
 		return time.Time{}, false, err
 	}
 	var latest int64
-	for _, entry := range entries {
-		run, err := history.DecodeWorkflowRun(entry)
+	for _, key := range keys {
+		parsedWorkflowID, timestamp, err := history.ParseWorkflowKey(key)
 		if err != nil {
 			return time.Time{}, false, err
 		}
-		if run.Timestamp > latest {
-			latest = run.Timestamp
+		if parsedWorkflowID != workflowID {
+			return time.Time{}, false, fmt.Errorf("workflow history key %q does not match workflow %d", key, workflowID)
+		}
+		if timestamp > latest {
+			latest = timestamp
 		}
 	}
 	if latest == 0 {
@@ -2197,6 +2247,22 @@ func parseWorkflowRunsPath(path string) (int64, bool) {
 	}
 	id, err := strconv.ParseInt(parts[2], 10, 64)
 	return id, err == nil
+}
+
+func parseWorkflowRunPath(path string) (int64, string, bool) {
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(parts) != 5 || parts[0] != "api" || parts[1] != "workflows" || parts[3] != "runs" {
+		return 0, "", false
+	}
+	id, err := strconv.ParseInt(parts[2], 10, 64)
+	if err != nil {
+		return 0, "", false
+	}
+	historyKey, err := url.PathUnescape(parts[4])
+	if err != nil || historyKey == "" {
+		return 0, "", false
+	}
+	return id, historyKey, true
 }
 
 func parseIDPath(path, prefix string) (int64, bool) {

@@ -81,6 +81,48 @@ func TestWorkflowHistoryKey(t *testing.T) {
 	if key != "whistory_00000000000000000007_00000000000000020000" {
 		t.Fatalf("unexpected key: %s", key)
 	}
+	workflowID, timestamp, err := ParseWorkflowKey(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if workflowID != 7 || timestamp != time.Unix(20, 0).UTC().UnixMilli() {
+		t.Fatalf("unexpected parsed key: workflow=%d timestamp=%d", workflowID, timestamp)
+	}
+	if _, _, err := ParseWorkflowKey("rhistory_db_contacts_00000000000000000001_00000000000000000002"); err == nil {
+		t.Fatal("expected non-workflow key parse error")
+	}
+}
+
+func TestMemoryStoreGetPrefixKeysLimit(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore()
+	for index := 1; index <= 4; index++ {
+		if _, err := SaveWorkflowRun(ctx, store, WorkflowRun{
+			WorkflowID: 7,
+			Timestamp:  int64(index),
+			Outputs:    map[string]any{"index": index},
+			Steps:      []StepRecord{},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := SaveWorkflowRun(ctx, store, WorkflowRun{
+		WorkflowID: 8,
+		Timestamp:  4,
+		Outputs:    map[string]any{"other": true},
+		Steps:      []StepRecord{},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	keys, err := store.GetPrefixKeysLimit(ctx, WorkflowPrefix(7), 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected := []string{WorkflowKey(7, 3), WorkflowKey(7, 4)}
+	if len(keys) != len(expected) || keys[0] != expected[0] || keys[1] != expected[1] {
+		t.Fatalf("unexpected keys: %#v", keys)
+	}
 }
 
 func TestHistoryTimestampsStayMillisecondIntsWithoutOverwriting(t *testing.T) {
