@@ -3392,6 +3392,54 @@ func TestScheduleTickRunsDailyWorkflowOncePerDay(t *testing.T) {
 	assertWorkflowRunCount(t, server, system, 1, "u1", 2)
 }
 
+func TestWorkflowRunsListDefaultsToLatestRuns(t *testing.T) {
+	ctx := context.Background()
+	server, system := newTestServer(t)
+	saveTestGrants(t, system, permission.Grant{SubjectID: "u1", Scope: permission.ScopeWorkflowSet, Resource: "db", Level: permission.Read})
+	saved, err := system.SaveWorkflow(ctx, systemdb.WorkflowDefinition{
+		DatabaseName: "db",
+		Name:         "many-runs",
+		Script:       `function instances(info) { return { echo: "echo" }; } function run(info) { return info.inputs; }`,
+		CreatorID:    "u1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index := 1; index <= defaultWorkflowRunListLimit+5; index++ {
+		if _, err := history.SaveWorkflowRun(ctx, server.history, history.WorkflowRun{
+			WorkflowID: saved.ID,
+			Timestamp:  int64(index),
+			Outputs:    map[string]any{"index": index},
+			Steps:      []history.StepRecord{},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	runs := fetchWorkflowRuns(t, server, system, saved.ID, "u1")
+	if len(runs) != defaultWorkflowRunListLimit {
+		t.Fatalf("expected default workflow run limit, got %d", len(runs))
+	}
+	if runs[0].Run.Timestamp != 6 || runs[len(runs)-1].Run.Timestamp != int64(defaultWorkflowRunListLimit+5) {
+		t.Fatalf("expected latest runs in ascending order, first=%d last=%d", runs[0].Run.Timestamp, runs[len(runs)-1].Run.Timestamp)
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/api/workflows/"+strconv.FormatInt(saved.ID, 10)+"/runs?limit=2", nil)
+	request.AddCookie(testSessionCookie(t, system, "u1"))
+	recorder := httptest.NewRecorder()
+	server.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected workflow runs 200, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+	var limited []workflowRunResponse
+	if err := json.NewDecoder(recorder.Body).Decode(&limited); err != nil {
+		t.Fatal(err)
+	}
+	if len(limited) != 2 || limited[0].Run.Timestamp != int64(defaultWorkflowRunListLimit+4) || limited[1].Run.Timestamp != int64(defaultWorkflowRunListLimit+5) {
+		t.Fatalf("unexpected limited runs: %#v", limited)
+	}
+}
+
 func TestWorkflowAndFormPermissions(t *testing.T) {
 	server, system := newTestServer(t)
 	saveTestDatabaseOwners(t, system, "db", "owner")

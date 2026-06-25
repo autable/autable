@@ -12,6 +12,7 @@ func TestRowHistoryKeysSupportPrefixScan(t *testing.T) {
 	store := NewMemoryStore()
 	ts1 := time.Unix(10, 0).UTC().UnixMilli()
 	ts2 := time.Unix(11, 0).UTC().UnixMilli()
+	ts3 := time.Unix(12, 0).UTC().UnixMilli()
 
 	secondKey, err := SaveRowChange(ctx, store, RowChange{Database: "db", Table: "contacts", RecordID: 42, Timestamp: ts2, Values: map[string]any{"name": "second"}})
 	if err != nil {
@@ -23,13 +24,16 @@ func TestRowHistoryKeysSupportPrefixScan(t *testing.T) {
 	if _, err := SaveRowChange(ctx, store, RowChange{Database: "db", Table: "contacts", RecordID: 43, Timestamp: ts1, Values: map[string]any{"name": "other"}}); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := SaveRowChange(ctx, store, RowChange{Database: "db", Table: "contacts", RecordID: 42, Timestamp: ts3, Values: map[string]any{"name": "third"}}); err != nil {
+		t.Fatal(err)
+	}
 
 	entries, err := store.GetPrefix(ctx, RowPrefix("db", "contacts", 42))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(entries) != 2 {
-		t.Fatalf("expected two entries, got %d", len(entries))
+	if len(entries) != 3 {
+		t.Fatalf("expected three entries, got %d", len(entries))
 	}
 	first, err := DecodeRowChange(entries[0])
 	if err != nil {
@@ -48,6 +52,24 @@ func TestRowHistoryKeysSupportPrefixScan(t *testing.T) {
 	}
 	if second.Values["name"] != "second" {
 		t.Fatalf("unexpected exact history entry: %#v", second.Values)
+	}
+	limited, err := store.GetPrefixLimit(ctx, RowPrefix("db", "contacts", 42), 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(limited) != 2 {
+		t.Fatalf("expected two limited entries, got %d", len(limited))
+	}
+	limitedFirst, err := DecodeRowChange(limited[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	limitedSecond, err := DecodeRowChange(limited[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if limitedFirst.Values["name"] != "second" || limitedSecond.Values["name"] != "third" {
+		t.Fatalf("expected latest entries in key order, got %#v %#v", limitedFirst.Values, limitedSecond.Values)
 	}
 	if _, err := store.Get(ctx, "missing"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("expected ErrNotFound, got %v", err)

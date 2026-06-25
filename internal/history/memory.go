@@ -49,3 +49,17 @@ func (store *MemoryStore) GetPrefix(_ context.Context, prefix string) ([]Entry, 
 	})
 	return entries, nil
 }
+
+func (store *MemoryStore) GetPrefixLimit(ctx context.Context, prefix string, limit int) ([]Entry, error) {
+	entries, err := store.GetPrefix(ctx, prefix)
+	if err != nil {
+		return nil, err
+	}
+	if limit <= 0 {
+		return []Entry{}, nil
+	}
+	if len(entries) <= limit {
+		return entries, nil
+	}
+	return entries[len(entries)-limit:], nil
+}

@@ -16,6 +16,7 @@ type Store interface {
 	Put(ctx context.Context, key string, value []byte) error
 	Get(ctx context.Context, key string) (Entry, error)
 	GetPrefix(ctx context.Context, prefix string) ([]Entry, error)
+	GetPrefixLimit(ctx context.Context, prefix string, limit int) ([]Entry, error)
 }
 
 type Entry struct {

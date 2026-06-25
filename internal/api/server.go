@@ -147,6 +147,11 @@ type workflowRunResponse struct {
 	Run        history.WorkflowRun `json:"run"`
 }
 
+const (
+	defaultWorkflowRunListLimit = 100
+	maxWorkflowRunListLimit     = 500
+)
+
 type workflowDefinitionResponse struct {
 	ID              int64             `json:"id"`
 	DatabaseName    string            `json:"database_name"`
@@ -1486,7 +1491,7 @@ func (server *Server) handleWorkflowRuns(w http.ResponseWriter, r *http.Request,
 	if !server.requireResourceRead(w, r, actorID, permission.ScopeWorkflow, workflowID) {
 		return
 	}
-	entries, err := server.history.GetPrefix(r.Context(), history.WorkflowPrefix(workflowID))
+	entries, err := server.history.GetPrefixLimit(r.Context(), history.WorkflowPrefix(workflowID), workflowRunListLimit(r))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -1620,7 +1625,7 @@ func (server *Server) scheduleTriggerMatches(ctx context.Context, workflowID int
 }
 
 func (server *Server) latestWorkflowRunTimestamp(ctx context.Context, workflowID int64) (time.Time, bool, error) {
-	entries, err := server.history.GetPrefix(ctx, history.WorkflowPrefix(workflowID))
+	entries, err := server.history.GetPrefixLimit(ctx, history.WorkflowPrefix(workflowID), 1)
 	if err != nil {
 		return time.Time{}, false, err
 	}
@@ -1638,6 +1643,23 @@ func (server *Server) latestWorkflowRunTimestamp(ctx context.Context, workflowID
 		return time.Time{}, false, nil
 	}
 	return time.UnixMilli(latest).UTC(), true, nil
+}
+
+func workflowRunListLimit(r *http.Request) int {
+	limit := defaultWorkflowRunListLimit
+	if value := strings.TrimSpace(r.URL.Query().Get("limit")); value != "" {
+		parsed, err := strconv.Atoi(value)
+		if err == nil {
+			limit = parsed
+		}
+	}
+	if limit <= 0 {
+		return defaultWorkflowRunListLimit
+	}
+	if limit > maxWorkflowRunListLimit {
+		return maxWorkflowRunListLimit
+	}
+	return limit
 }
 
 func dailyScheduleDue(scheduledAt, latestRun time.Time, hasLatestRun bool, dailyAt string) bool {

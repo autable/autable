@@ -3,6 +3,7 @@ package history
 import (
 	"context"
 	"errors"
+	"slices"
 
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/util"
@@ -65,6 +66,33 @@ func (store *LevelDBStore) GetPrefix(ctx context.Context, prefix string) ([]Entr
 	if err := iter.Error(); err != nil {
 		return nil, err
 	}
+	return entries, nil
+}
+
+func (store *LevelDBStore) GetPrefixLimit(ctx context.Context, prefix string, limit int) ([]Entry, error) {
+	if limit <= 0 {
+		return []Entry{}, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	iter := store.db.NewIterator(util.BytesPrefix([]byte(prefix)), nil)
+	defer iter.Release()
+
+	entries := []Entry{}
+	for ok := iter.Last(); ok && len(entries) < limit; ok = iter.Prev() {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		entries = append(entries, Entry{
+			Key:   string(iter.Key()),
+			Value: append([]byte(nil), iter.Value()...),
+		})
+	}
+	if err := iter.Error(); err != nil {
+		return nil, err
+	}
+	slices.Reverse(entries)
 	return entries, nil
 }
 

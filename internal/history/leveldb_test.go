@@ -28,13 +28,31 @@ func TestLevelDBStorePersistsPrefixScannableHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := SaveRowChange(ctx, store, RowChange{
+		Database:  "db",
+		Table:     "contacts",
+		RecordID:  1,
+		Timestamp: time.Unix(2, 0).UTC().UnixMilli(),
+		Values:    map[string]any{"name": "Grace"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := SaveRowChange(ctx, store, RowChange{
+		Database:  "db",
+		Table:     "contacts",
+		RecordID:  1,
+		Timestamp: time.Unix(3, 0).UTC().UnixMilli(),
+		Values:    map[string]any{"name": "Linus"},
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	entries, err := store.GetPrefix(ctx, RowPrefix("db", "contacts", 1))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(entries) != 1 {
-		t.Fatalf("expected one entry, got %d", len(entries))
+	if len(entries) != 3 {
+		t.Fatalf("expected three entries, got %d", len(entries))
 	}
 	change, err := DecodeRowChange(entries[0])
 	if err != nil {
@@ -53,5 +71,23 @@ func TestLevelDBStorePersistsPrefixScannableHistory(t *testing.T) {
 	}
 	if exactChange.RecordID != 1 {
 		t.Fatalf("unexpected exact change: %#v", exactChange)
+	}
+	limited, err := store.GetPrefixLimit(ctx, RowPrefix("db", "contacts", 1), 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(limited) != 2 {
+		t.Fatalf("expected two limited entries, got %d", len(limited))
+	}
+	limitedFirst, err := DecodeRowChange(limited[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	limitedSecond, err := DecodeRowChange(limited[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if limitedFirst.Values["name"] != "Grace" || limitedSecond.Values["name"] != "Linus" {
+		t.Fatalf("expected latest entries in key order, got %#v %#v", limitedFirst.Values, limitedSecond.Values)
 	}
 }

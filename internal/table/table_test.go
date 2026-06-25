@@ -859,6 +859,10 @@ func (failingHistoryStore) GetPrefix(context.Context, string) ([]history.Entry, 
 	return nil, nil
 }
 
+func (failingHistoryStore) GetPrefixLimit(context.Context, string, int) ([]history.Entry, error) {
+	return nil, nil
+}
+
 func testTableCatalog() metadata.Catalog {
 	return metadata.Catalog{Databases: []metadata.Database{{
 		Name: "db",
