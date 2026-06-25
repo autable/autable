@@ -86,6 +86,33 @@ docker run --rm \
 
 The container uses `/etc/autable/config.yml`, listens on `0.0.0.0:8080`, stores runtime data under `/data`, and stores user-authored metadata/workflows/forms under `/repository`. Mount a config file that sets `repository.remote_url` and `repository.remote_branch`; an empty `/repository` volume is initialized by cloning the remote, or by creating the local branch when the remote repository is empty.
 
+To debug memory or CPU in Docker, enable pprof in `config.yml`:
+
+```yaml
+debug:
+  pprof_address: "0.0.0.0:6060"
+```
+
+Expose it only on localhost:
+
+```sh
+docker run --rm \
+  -p 8080:8080 \
+  -p 127.0.0.1:6060:6060 \
+  -v "$PWD/config.yml:/etc/autable/config.yml:ro" \
+  -v autable-data:/data \
+  -v autable-repository:/repository \
+  ghcr.io/autable/autable:latest
+```
+
+Then inspect profiles from the host:
+
+```sh
+go tool pprof http://127.0.0.1:6060/debug/pprof/heap
+go tool pprof http://127.0.0.1:6060/debug/pprof/profile?seconds=30
+curl http://127.0.0.1:6060/debug/pprof/goroutine?debug=2
+```
+
 Run the frontend:
 
 ```sh

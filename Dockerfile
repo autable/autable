@@ -41,7 +41,7 @@ RUN apt-get update \
 COPY --from=go-build /out/autable /usr/local/bin/autable
 COPY docker/config.yml /etc/autable/config.yml
 USER autable
-EXPOSE 8080
+EXPOSE 8080 6060
 VOLUME ["/data", "/repository"]
 ENTRYPOINT ["autable"]
 CMD ["-config", "/etc/autable/config.yml"]

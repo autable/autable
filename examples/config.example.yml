@@ -36,3 +36,5 @@ auth:
         client_id: "autable"
         client_secret: "replace-me"
         scopes: ["openid", "email", "profile"]
+debug:
+  pprof_address: ""

@@ -18,6 +18,7 @@ type Config struct {
 	Backup     BackupConfig     `yaml:"backup"`
 	Auth       AuthConfig       `yaml:"auth"`
 	AI         AIConfig         `yaml:"ai"`
+	Debug      DebugConfig      `yaml:"debug"`
 }
 
 type ServerConfig struct {
@@ -28,6 +29,10 @@ type ServerConfig struct {
 type AIConfig struct {
 	Enabled   bool   `yaml:"enabled"`
 	WorkerURL string `yaml:"worker_url"`
+}
+
+type DebugConfig struct {
+	PprofAddress string `yaml:"pprof_address"`
 }
 
 type DataConfig struct {

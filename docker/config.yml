@@ -33,3 +33,5 @@ auth:
 ai:
   enabled: false
   worker_url: ""
+debug:
+  pprof_address: ""

@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/http/pprof"
 	"os"
 	"time"
 
@@ -79,6 +81,7 @@ func run(ctx context.Context, configPath string) error {
 	if address == "" {
 		address = "127.0.0.1:8080"
 	}
+	startPprofServer(ctx, cfg.Debug.PprofAddress)
 	repoSync := repositorysync.New(repositorysync.Options{
 		Root:        cfg.Repository.Path,
 		RemoteURL:   cfg.Repository.RemoteURL,
@@ -161,6 +164,34 @@ func run(ctx context.Context, configPath string) error {
 	server.StartWorkflowScheduler(ctx, 15*time.Second)
 	slog.Info("autable listening", "address", address)
 	return http.ListenAndServe(address, webui.Handler(server))
+}
+
+func startPprofServer(ctx context.Context, address string) {
+	if address == "" {
+		return
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/debug/pprof/", pprof.Index)
+	mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+	mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+	mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+	mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+
+	server := &http.Server{Addr: address, Handler: mux}
+	go func() {
+		<-ctx.Done()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := server.Shutdown(shutdownCtx); err != nil {
+			slog.Warn("pprof server shutdown failed", "error", err)
+		}
+	}()
+	go func() {
+		slog.Info("pprof listening", "address", address)
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			slog.Error("pprof server stopped", "error", err)
+		}
+	}()
 }
 
 func configDuration(value string, fallback time.Duration) time.Duration {
