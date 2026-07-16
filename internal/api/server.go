@@ -21,6 +21,7 @@ import (
 	"autable/internal/metadata"
 	"autable/internal/permission"
 	"autable/internal/repositorysync"
+	"autable/internal/runnerhub"
 	"autable/internal/systemdb"
 	"autable/internal/table"
 	"autable/internal/workflow"
@@ -41,6 +42,7 @@ type Server struct {
 	tables           *table.Service
 	history          history.Store
 	runner           *workflow.Runner
+	runnerHub        *runnerhub.Hub
 	auth             config.AuthConfig
 	publicURL        string
 	workflowWorkers  map[string]*workflowEventWorker
@@ -162,6 +164,7 @@ type workflowDefinitionResponse struct {
 	CreatorID       string            `json:"creator_id,omitempty"`
 	Secrets         map[string]int    `json:"secrets"`
 	Variables       map[string]string `json:"variables"`
+	Runners         map[string]string `json:"runners"`
 	PermissionLevel permission.Level  `json:"permission_level,omitempty"`
 	CreatedAt       int64             `json:"created_at"`
 	UpdatedAt       int64             `json:"updated_at"`
@@ -261,6 +264,10 @@ func NewServerWithWorkflowRunnerAndAuth(catalog metadata.Catalog, system *system
 		}
 	}
 	server.runner = runner
+	server.runnerHub = runnerhub.New(func(ctx context.Context, token string) (bool, error) {
+		return system.ValidateRunnerToken(ctx, token)
+	}, runnerhub.DefaultJobTimeout)
+	server.runner.SetRemoteDispatcher(server.runnerHub)
 	server.tables.SetRowChangeHandler(server.dispatchRowChangeEvent)
 	server.routes()
 	return server
@@ -356,6 +363,9 @@ func (server *Server) routes() {
 	server.mux.HandleFunc("PUT /api/databases/", server.handlePutDatabaseResource)
 	server.mux.HandleFunc("PATCH /api/databases/", server.handlePatchDatabaseResource)
 	server.mux.HandleFunc("GET /api/workflow/nodes", server.handleWorkflowNodes)
+	server.mux.HandleFunc("GET /api/runner/ws", server.runnerHub.ServeWS)
+	server.mux.HandleFunc("GET /api/runners", server.handleListRunners)
+	server.mux.HandleFunc("POST /api/runner-token/reset", server.handleResetRunnerToken)
 	server.mux.HandleFunc("POST /api/workflows", server.handleSaveWorkflow)
 	server.mux.HandleFunc("POST /api/workflows/", server.handleRunWorkflow)
 	server.mux.HandleFunc("GET /api/workflows/", server.handleGetWorkflow)
@@ -1033,6 +1043,10 @@ func (server *Server) handleSaveWorkflow(w http.ResponseWriter, r *http.Request)
 	if workflow.ID == 0 {
 		workflow.CreatorID = actorID
 	}
+	if err := server.validateRunnerBindings(r.Context(), workflow); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
 	saved, err := server.saveWorkflowDefinition(r.Context(), actorID, workflow)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
@@ -1160,6 +1174,10 @@ func (server *Server) handlePostDatabaseResource(w http.ResponseWriter, r *http.
 		workflow.DatabaseName = dbName
 		if workflow.ID == 0 {
 			workflow.CreatorID = actorID
+		}
+		if err := server.validateRunnerBindings(r.Context(), workflow); err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
 		}
 		saved, err := server.saveWorkflowDefinition(r.Context(), actorID, workflow)
 		if err != nil {
@@ -1476,6 +1494,7 @@ func (server *Server) handleRunWorkflow(w http.ResponseWriter, r *http.Request) 
 		CreatorID:    systemdb.WorkflowSubjectID(workflowDefinition.ID),
 		Secrets:      workflowDefinition.Secrets,
 		Variables:    workflowDefinition.Variables,
+		Runners:      workflowDefinition.Runners,
 	}, request.Inputs)
 	status := http.StatusCreated
 	if err != nil {
@@ -1754,6 +1773,7 @@ func (server *Server) processWorkflowEvent(ctx context.Context, event workflowEv
 			CreatorID:    systemdb.WorkflowSubjectID(workflowDefinition.ID),
 			Secrets:      workflowDefinition.Secrets,
 			Variables:    workflowDefinition.Variables,
+			Runners:      workflowDefinition.Runners,
 		}
 		declaration, err := server.runner.Trigger(ctx, definition)
 		if errors.Is(err, workflow.ErrMissingTrigger) {
@@ -3125,6 +3145,7 @@ func workflowResponseFromDefinition(workflow systemdb.WorkflowDefinition) workfl
 		CreatorID:       workflow.CreatorID,
 		Secrets:         secretLengths(workflow.Secrets),
 		Variables:       workflow.Variables,
+		Runners:         workflow.Runners,
 		PermissionLevel: workflow.PermissionLevel,
 		CreatedAt:       workflow.CreatedAt,
 		UpdatedAt:       workflow.UpdatedAt,
