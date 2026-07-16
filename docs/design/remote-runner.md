@@ -1,6 +1,6 @@
 # Remote Runner Design
 
-Status: draft, not implemented.
+Status: implemented (server core, `autable-runner` CLI, web UI).
 
 ## Problem
 
@@ -199,7 +199,7 @@ Per-job timeout: server-side, default 10 minutes, applied by the dispatcher.
 A single static system token authorizes runner connections.
 
 - Stored in `system.sqlite` as a SHA-256 hash (single-row table), created on
-  first reset. The plaintext (`atr_` + 43 base62 chars, ≥256 bits) is
+  first reset. The plaintext (`atr_` + 43 URL-safe base64 chars, 256 bits) is
   returned exactly once by the reset call and never displayed again.
 - `POST /api/runner-token/reset` generates/replaces the token. Resetting
   invalidates every connected runner immediately (the hub drops their
@@ -285,8 +285,6 @@ whose remote step executes an `echo` node.
 
 ## Open questions
 
-- Should `GET /api/runners` / token reset be surfaced in the web UI settings
-  area from phase 1, or is API-only acceptable until the UI phase?
 - Job payload size: row-heavy nodes could return large outputs; is a hard
   frame size limit (e.g. 16 MiB) enough, or do large results need chunking?
 - A binding referencing a runner that never connects only surfaces at exec

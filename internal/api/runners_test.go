@@ -9,8 +9,11 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	"autable/internal/runnercli"
 	"autable/internal/systemdb"
+	"autable/internal/workflow/nodes"
 )
 
 const runnerBindingScript = `function instances(info) {
@@ -158,6 +161,65 @@ func TestSaveWorkflowValidatesRunnerBindings(t *testing.T) {
 		if !strings.Contains(recorder.Body.String(), testCase.message) {
 			t.Fatalf("expected %q in error, got %s", testCase.message, recorder.Body.String())
 		}
+	}
+}
+
+func TestRunWorkflowExecutesOnConnectedRunner(t *testing.T) {
+	server, system := newTestServer(t)
+	cookie := runnerTestSession(t, system)
+
+	token, err := system.ResetRunnerToken(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpServer := httptest.NewServer(server)
+	t.Cleanup(httpServer.Close)
+
+	runnerCtx, stopRunner := context.WithCancel(context.Background())
+	defer stopRunner()
+	go runnercli.Run(runnerCtx, runnercli.Options{
+		Endpoint: httpServer.URL,
+		Token:    token,
+		Name:     "intranet",
+	}, nodes.Remote())
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, ok := server.runnerHub.NodeTypes("intranet"); ok {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	recorder := saveWorkflowWithRunners(t, server, cookie, map[string]string{"remote_echo": "intranet"})
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("save failed: %d %s", recorder.Code, recorder.Body.String())
+	}
+	var saved workflowDefinitionResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &saved); err != nil {
+		t.Fatal(err)
+	}
+
+	runRequest := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/workflows/%d/runs", saved.ID), bytes.NewBufferString(`{"inputs":{}}`))
+	runRequest.AddCookie(cookie)
+	recorder = httptest.NewRecorder()
+	server.ServeHTTP(recorder, runRequest)
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("expected remote run to succeed, got %d %s", recorder.Code, recorder.Body.String())
+	}
+	var runResult struct {
+		Run struct {
+			Outputs map[string]any   `json:"outputs"`
+			Steps   []map[string]any `json:"steps"`
+		} `json:"run"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &runResult); err != nil {
+		t.Fatal(err)
+	}
+	if runResult.Run.Outputs["value"] != "Ada" {
+		t.Fatalf("unexpected run outputs: %#v", runResult.Run.Outputs)
+	}
+	if len(runResult.Run.Steps) != 1 || runResult.Run.Steps[0]["runner"] != "intranet" {
+		t.Fatalf("expected step to record the runner, got %#v", runResult.Run.Steps)
 	}
 }
 
