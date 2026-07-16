@@ -146,18 +146,22 @@ jobs:
             -ldflags "-s -w -X autable/internal/version.Version=${version} -X autable/internal/version.Commit=${commit} -X autable/internal/version.BuiltAt=${built_at}" \
             -o "release/${{ matrix.binary }}" \
             ./cmd/autable
+          go build \
+            -ldflags "-s -w -X autable/internal/version.Version=${version} -X autable/internal/version.Commit=${commit} -X autable/internal/version.BuiltAt=${built_at}" \
+            -o "release/${{ matrix.binary }}-runner" \
+            ./cmd/autable-runner
       - name: Package Unix artifact
         if: matrix.goos != 'windows'
         shell: bash
         run: |
           version="${{ needs.prepare.outputs.version }}"
-          tar -czf "autable-${version}-${{ matrix.target }}.tar.gz" -C release "${{ matrix.binary }}"
+          tar -czf "autable-${version}-${{ matrix.target }}.tar.gz" -C release "${{ matrix.binary }}" "${{ matrix.binary }}-runner"
       - name: Package Windows artifact
         if: matrix.goos == 'windows'
         shell: pwsh
         run: |
           $version = "${{ needs.prepare.outputs.version }}"
-          Compress-Archive -Path "release/${{ matrix.binary }}" -DestinationPath "autable-$version-${{ matrix.target }}.zip"
+          Compress-Archive -Path "release/${{ matrix.binary }}", "release/${{ matrix.binary }}-runner" -DestinationPath "autable-$version-${{ matrix.target }}.zip"
       - uses: actions/upload-artifact@v4
         with:
           name: autable-${{ needs.prepare.outputs.version }}-${{ matrix.target }}
