@@ -111,7 +111,7 @@ type workflowModel struct {
 	CreatorID     string `gorm:"index;not null;default:''"`
 	SecretsJSON   string `gorm:"not null"`
 	VariablesJSON string `gorm:"not null"`
-	RunnersJSON   string `gorm:"not null"`
+	RunnersJSON   string `gorm:"not null;default:'{}'"`
 	CreatedAt     int64  `gorm:"autoCreateTime:milli"`
 	UpdatedAt     int64  `gorm:"autoUpdateTime:milli"`
 }
@@ -176,7 +176,7 @@ func (db *DB) Close() error {
 }
 
 func (db *DB) Migrate(ctx context.Context) error {
-	if err := db.dropLegacyRoleMembers(ctx); err != nil {
+	if err := db.runSchemaMigrations(ctx); err != nil {
 		return err
 	}
 	return db.orm.WithContext(ctx).AutoMigrate(
@@ -190,14 +190,6 @@ func (db *DB) Migrate(ctx context.Context) error {
 		&roleMemberModel{},
 		&runnerTokenModel{},
 	)
-}
-
-func (db *DB) dropLegacyRoleMembers(ctx context.Context) error {
-	migrator := db.orm.WithContext(ctx).Migrator()
-	if migrator.HasColumn(&roleMemberModel{}, "user_id") {
-		return migrator.DropTable(&roleMemberModel{})
-	}
-	return nil
 }
 
 func (db *DB) UpsertUserByEmail(ctx context.Context, user auth.User) (auth.User, error) {
