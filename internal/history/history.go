@@ -55,6 +55,7 @@ type WorkflowRun struct {
 type StepRecord struct {
 	NodeID   string         `json:"node_id"`
 	NodeType string         `json:"node_type,omitempty"`
+	Runner   string         `json:"runner,omitempty"`
 	Input    map[string]any `json:"input,omitempty"`
 	Output   map[string]any `json:"output,omitempty"`
 	Error    string         `json:"error,omitempty"`

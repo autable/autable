@@ -26,17 +26,24 @@ type Dependencies struct {
 }
 
 func All(deps Dependencies) []workflow.Node {
-	nodes := []workflow.Node{
-		echo.Node{},
+	nodes := append(Remote(),
 		recordchanged.NewNode(deps.History),
 		schedule.Node{},
+	)
+	nodes = append(nodes, AutableNodes(deps.Autable)...)
+	return nodes
+}
+
+// Remote returns the nodes a remote runner can execute: every node
+// constructible without server-side dependencies.
+func Remote() []workflow.Node {
+	return []workflow.Node{
+		echo.Node{},
 		robot.NewNode(),
 		listrecords.NewNode(),
 		batchsendoto.NewNode(),
 		githubcontent.NewNode(),
 	}
-	nodes = append(nodes, AutableNodes(deps.Autable)...)
-	return nodes
 }
 
 func AutableNodes(service autable.Service) []workflow.Node {

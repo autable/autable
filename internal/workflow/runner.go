@@ -22,6 +22,9 @@ type Definition struct {
 	CreatorID    string
 	Secrets      map[string]string
 	Variables    map[string]string
+	// Runners maps instance IDs to remote runner names. Instances absent
+	// from the map execute on the server runner (in-process).
+	Runners map[string]string
 }
 
 var ErrMissingTrigger = errors.New("workflow script must define function trigger(info)")
@@ -41,9 +44,10 @@ type TriggerDeclaration struct {
 }
 
 type Runner struct {
-	store history.Store
-	nodes map[string]Node
-	now   func() time.Time
+	store      history.Store
+	nodes      map[string]Node
+	now        func() time.Time
+	dispatcher RemoteDispatcher
 }
 
 func NewRunner(store history.Store, nodes ...Node) *Runner {
@@ -61,6 +65,10 @@ func NewRunner(store history.Store, nodes ...Node) *Runner {
 func (runner *Runner) Register(node Node) {
 	info := node.Info()
 	runner.nodes[info.Type] = node
+}
+
+func (runner *Runner) SetRemoteDispatcher(dispatcher RemoteDispatcher) {
+	runner.dispatcher = dispatcher
 }
 
 func (runner *Runner) NodeInfos() []NodeInfo {
@@ -241,7 +249,8 @@ func (runner *Runner) TriggerRunInputs(ctx context.Context, definition Definitio
 
 func (runner *Runner) runInstance(ctx context.Context, definition Definition, runID, instanceID string, declaration InstanceDeclaration, input map[string]any, run *history.WorkflowRun) (map[string]any, error) {
 	node, ok := runner.nodes[declaration.Node]
-	step := history.StepRecord{NodeID: instanceID, NodeType: declaration.Node, Input: cloneAnyMap(input)}
+	runnerName := definition.Runners[instanceID]
+	step := history.StepRecord{NodeID: instanceID, NodeType: declaration.Node, Runner: runnerName, Input: cloneAnyMap(input)}
 	if !ok {
 		step.Error = "node is not registered"
 		run.Steps = append(run.Steps, step)
@@ -252,7 +261,7 @@ func (runner *Runner) runInstance(ctx context.Context, definition Definition, ru
 		run.Steps = append(run.Steps, step)
 		return nil, fmt.Errorf("trigger node %q cannot be executed from run; declare it in trigger(info) and read its output from info.inputs", declaration.Node)
 	}
-	output, err := node.Run(ctx, input, RuntimeInfo{
+	info := RuntimeInfo{
 		WorkflowID:   definition.ID,
 		DatabaseName: definition.DatabaseName,
 		RunID:        runID,
@@ -261,7 +270,17 @@ func (runner *Runner) runInstance(ctx context.Context, definition Definition, ru
 		CreatorID:    definition.CreatorID,
 		Secrets:      instanceStringMap(definition.Secrets, instanceID, declaration.Secrets),
 		Variables:    instanceStringMap(definition.Variables, instanceID, declaration.Variables),
-	})
+	}
+	var output map[string]any
+	var err error
+	switch {
+	case runnerName == "":
+		output, err = node.Run(ctx, input, info)
+	case runner.dispatcher == nil:
+		err = fmt.Errorf("workflow instance %q is bound to runner %q but remote dispatch is not configured", instanceID, runnerName)
+	default:
+		output, err = runner.dispatcher.Dispatch(ctx, runnerName, RemoteJob{Input: cloneAnyMap(input), Runtime: info})
+	}
 	if err != nil {
 		step.Error = err.Error()
 		run.Steps = append(run.Steps, step)

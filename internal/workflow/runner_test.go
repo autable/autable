@@ -495,3 +495,126 @@ func TestRunnerRejectsTriggerNodeExecInRun(t *testing.T) {
 		t.Fatalf("unexpected trigger workflow steps: %#v", run.Steps)
 	}
 }
+
+type fakeRemoteDispatcher struct {
+	runnerName string
+	job        RemoteJob
+	output     map[string]any
+	err        error
+	calls      int
+}
+
+func (dispatcher *fakeRemoteDispatcher) Dispatch(_ context.Context, runnerName string, job RemoteJob) (map[string]any, error) {
+	dispatcher.calls++
+	dispatcher.runnerName = runnerName
+	dispatcher.job = job
+	return dispatcher.output, dispatcher.err
+}
+
+func (dispatcher *fakeRemoteDispatcher) NodeTypes(string) ([]string, bool) {
+	return []string{"echo"}, true
+}
+
+func TestRunnerDispatchesBoundInstancesRemotely(t *testing.T) {
+	ctx := context.Background()
+	store := history.NewMemoryStore()
+	runner := NewRunner(store, testEchoNode{})
+	dispatcher := &fakeRemoteDispatcher{output: map[string]any{"value": "from-remote"}}
+	runner.SetRemoteDispatcher(dispatcher)
+
+	run, _, err := runner.Run(ctx, Definition{
+		ID: 21,
+		Script: `
+function instances(info) {
+  return {
+    remote_echo: { node: "echo", secrets: [{ name: "app_secret", type: "string" }] },
+    local_echo: "echo"
+  };
+}
+function run(info) {
+  const remote = info.instance("remote_echo").exec({ value: info.inputs.name });
+  const local = info.instance("local_echo").exec({ value: "here" });
+  return { remote: remote.value, local: local.value };
+}`,
+		Secrets: map[string]string{"remote_echo.app_secret": "s3cret"},
+		Runners: map[string]string{"remote_echo": "intranet"},
+	}, map[string]any{"name": "Ada"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.Outputs["remote"] != "from-remote" || run.Outputs["local"] != "here" {
+		t.Fatalf("unexpected outputs: %#v", run.Outputs)
+	}
+	if dispatcher.calls != 1 || dispatcher.runnerName != "intranet" {
+		t.Fatalf("unexpected dispatch calls: %d to %q", dispatcher.calls, dispatcher.runnerName)
+	}
+	if dispatcher.job.Input["value"] != "Ada" {
+		t.Fatalf("unexpected job input: %#v", dispatcher.job.Input)
+	}
+	if dispatcher.job.Runtime.WorkflowID != 21 || dispatcher.job.Runtime.InstanceID != "remote_echo" || dispatcher.job.Runtime.NodeType != "echo" {
+		t.Fatalf("unexpected job runtime: %#v", dispatcher.job.Runtime)
+	}
+	if dispatcher.job.Runtime.Secrets["app_secret"] != "s3cret" {
+		t.Fatalf("expected scoped secret in job, got %#v", dispatcher.job.Runtime.Secrets)
+	}
+	if len(run.Steps) != 2 {
+		t.Fatalf("expected two steps, got %#v", run.Steps)
+	}
+	if run.Steps[0].Runner != "intranet" || run.Steps[0].Output["value"] != "from-remote" {
+		t.Fatalf("unexpected remote step: %#v", run.Steps[0])
+	}
+	if run.Steps[1].Runner != "" {
+		t.Fatalf("expected local step without runner, got %#v", run.Steps[1])
+	}
+}
+
+func TestRunnerFailsBoundInstanceWithoutDispatcher(t *testing.T) {
+	ctx := context.Background()
+	store := history.NewMemoryStore()
+	runner := NewRunner(store, testEchoNode{})
+
+	run, _, err := runner.Run(ctx, Definition{
+		ID:      22,
+		Script:  `function instances(info) { return { remote_echo: "echo" }; } function run(info) { return info.instance("remote_echo").exec({ value: 1 }); }`,
+		Runners: map[string]string{"remote_echo": "intranet"},
+	}, nil)
+	if err == nil {
+		t.Fatal("expected dispatch error")
+	}
+	if !strings.Contains(err.Error(), "remote dispatch is not configured") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(run.Steps) != 1 || run.Steps[0].Runner != "intranet" || run.Steps[0].Error == "" {
+		t.Fatalf("unexpected steps: %#v", run.Steps)
+	}
+}
+
+func TestRunnerRecordsRemoteDispatchErrors(t *testing.T) {
+	ctx := context.Background()
+	store := history.NewMemoryStore()
+	runner := NewRunner(store, testEchoNode{})
+	dispatcher := &fakeRemoteDispatcher{err: errors.New(`runner "intranet" is not connected`)}
+	runner.SetRemoteDispatcher(dispatcher)
+
+	run, _, err := runner.Run(ctx, Definition{
+		ID:      23,
+		Script:  `function instances(info) { return { remote_echo: "echo" }; } function run(info) { return info.instance("remote_echo").exec({ value: 1 }); }`,
+		Runners: map[string]string{"remote_echo": "intranet"},
+	}, nil)
+	if err == nil {
+		t.Fatal("expected dispatch error")
+	}
+	if !strings.Contains(err.Error(), `runner "intranet" is not connected`) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(run.Steps) != 1 || run.Steps[0].Error == "" || run.Steps[0].Runner != "intranet" {
+		t.Fatalf("unexpected steps: %#v", run.Steps)
+	}
+	entries, err := store.GetPrefix(ctx, history.WorkflowPrefix(23))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected failed run to be persisted, got %d", len(entries))
+	}
+}
