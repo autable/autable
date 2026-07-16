@@ -168,10 +168,49 @@ jobs:
           path: autable-${{ needs.prepare.outputs.version }}-${{ matrix.target }}.*
           if-no-files-found: error
 
+  build-runner-windows:
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.commit }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Build Windows runner binary
+        shell: bash
+        env:
+          # autable-runner has no cgo dependencies, so it cross-compiles;
+          # the server binary needs cgo (sqlite) and native Windows builds.
+          CGO_ENABLED: "0"
+          GOOS: windows
+          GOARCH: amd64
+        run: |
+          version="${{ needs.prepare.outputs.version }}"
+          commit="$(git rev-parse --short HEAD)"
+          built_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          mkdir -p release
+          go build \
+            -ldflags "-s -w -X autable/internal/version.Version=${version} -X autable/internal/version.Commit=${commit} -X autable/internal/version.BuiltAt=${built_at}" \
+            -o release/autable-runner.exe \
+            ./cmd/autable-runner
+      - name: Package Windows runner artifact
+        shell: bash
+        run: |
+          version="${{ needs.prepare.outputs.version }}"
+          (cd release && zip -q "../autable-${version}-runner-windows-amd64.zip" autable-runner.exe)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: autable-${{ needs.prepare.outputs.version }}-runner-windows-amd64
+          path: autable-${{ needs.prepare.outputs.version }}-runner-windows-amd64.zip
+          if-no-files-found: error
+
   publish:
     needs:
       - prepare
       - build
+      - build-runner-windows
       - docker
     runs-on: ubuntu-latest
     steps:
