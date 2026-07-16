@@ -117,9 +117,10 @@ type workflowModel struct {
 }
 
 type runnerTokenModel struct {
-	ID        int64  `gorm:"primaryKey"`
-	TokenHash string `gorm:"not null"`
-	CreatedAt int64  `gorm:"autoCreateTime:milli"`
+	ID           int64  `gorm:"primaryKey;autoIncrement"`
+	DatabaseName string `gorm:"uniqueIndex;not null"`
+	TokenHash    string `gorm:"uniqueIndex;not null"`
+	CreatedAt    int64  `gorm:"autoCreateTime:milli"`
 }
 
 type formModel struct {
@@ -343,6 +344,20 @@ func (db *DB) SaveDatabaseOwner(ctx context.Context, dbName, ownerID string) err
 		Columns:   []clause.Column{{Name: "database_name"}, {Name: "owner_id"}},
 		DoNothing: true,
 	}).Create(&model).Error
+}
+
+// OwnsAnyDatabase reports whether the user owns at least one database;
+// database owners are the only role allowed to manage the runner token.
+func (db *DB) OwnsAnyDatabase(ctx context.Context, userID string) (bool, error) {
+	var count int64
+	err := db.orm.WithContext(ctx).
+		Model(&databaseOwnerModel{}).
+		Where(&databaseOwnerModel{OwnerID: userID}).
+		Count(&count).Error
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
 }
 
 func (db *DB) IsDatabaseOwner(ctx context.Context, userID, dbName string) (bool, error) {

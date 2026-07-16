@@ -48,6 +48,7 @@ import {
 } from "@fluentui/react-icons";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { RunnersPanel } from "./RunnersPanel";
 import type {
   AuthUser,
   Catalog,
@@ -332,6 +333,9 @@ export function WorkspaceNavigation({
               </Nav>
             </>
           )}
+          <div className="runners-entry-slot">
+            <RunnersPanel databaseName={database.name} />
+          </div>
         </NavDrawerBody>
       </NavDrawer>
     </>

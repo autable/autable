@@ -62,15 +62,43 @@ func TestRunnersEndpointRequiresAuthentication(t *testing.T) {
 	server, _ := newTestServer(t)
 
 	recorder := httptest.NewRecorder()
-	server.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/runners", nil))
+	server.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/databases/db/runners", nil))
 	if recorder.Code != http.StatusUnauthorized {
 		t.Fatalf("expected unauthorized, got %d", recorder.Code)
 	}
 
 	recorder = httptest.NewRecorder()
-	server.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/api/runner-token/reset", nil))
+	server.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/api/databases/db/runners", nil))
 	if recorder.Code != http.StatusUnauthorized {
 		t.Fatalf("expected unauthorized, got %d", recorder.Code)
+	}
+}
+
+func TestRunnerTokenManagementIsOwnerOnly(t *testing.T) {
+	server, system := newTestServer(t)
+	cookie := testSessionCookie(t, system, "outsider")
+
+	listRequest := httptest.NewRequest(http.MethodGet, "/api/databases/db/runners", nil)
+	listRequest.AddCookie(cookie)
+	recorder := httptest.NewRecorder()
+	server.ServeHTTP(recorder, listRequest)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected runner listing for signed-in users, got %d %s", recorder.Code, recorder.Body.String())
+	}
+	var listing runnersResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &listing); err != nil {
+		t.Fatal(err)
+	}
+	if listing.CanManage || listing.Token != nil {
+		t.Fatalf("expected token metadata to be hidden from non-owners, got %#v", listing)
+	}
+
+	resetRequest := httptest.NewRequest(http.MethodPost, "/api/databases/db/runners", nil)
+	resetRequest.AddCookie(cookie)
+	recorder = httptest.NewRecorder()
+	server.ServeHTTP(recorder, resetRequest)
+	if recorder.Code != http.StatusForbidden {
+		t.Fatalf("expected non-owner reset to be forbidden, got %d %s", recorder.Code, recorder.Body.String())
 	}
 }
 
@@ -78,7 +106,7 @@ func TestRunnerTokenResetAndListing(t *testing.T) {
 	server, system := newTestServer(t)
 	cookie := runnerTestSession(t, system)
 
-	listRequest := httptest.NewRequest(http.MethodGet, "/api/runners", nil)
+	listRequest := httptest.NewRequest(http.MethodGet, "/api/databases/db/runners", nil)
 	listRequest.AddCookie(cookie)
 	recorder := httptest.NewRecorder()
 	server.ServeHTTP(recorder, listRequest)
@@ -89,15 +117,15 @@ func TestRunnerTokenResetAndListing(t *testing.T) {
 	if err := json.Unmarshal(recorder.Body.Bytes(), &listing); err != nil {
 		t.Fatal(err)
 	}
-	if listing.Token.Exists || len(listing.Runners) != 0 {
-		t.Fatalf("expected empty initial state, got %#v", listing)
+	if !listing.CanManage || listing.Token == nil || listing.Token.Exists || len(listing.Runners) != 0 {
+		t.Fatalf("expected empty owner-visible initial state, got %#v", listing)
 	}
 	remoteTypes := strings.Join(listing.RemoteNodeTypes, ",")
 	if !strings.Contains(remoteTypes, "echo") || strings.Contains(remoteTypes, "table.row.upsert") || strings.Contains(remoteTypes, "time.schedule") {
 		t.Fatalf("unexpected remote node types: %v", listing.RemoteNodeTypes)
 	}
 
-	resetRequest := httptest.NewRequest(http.MethodPost, "/api/runner-token/reset", nil)
+	resetRequest := httptest.NewRequest(http.MethodPost, "/api/databases/db/runners", nil)
 	resetRequest.AddCookie(cookie)
 	recorder = httptest.NewRecorder()
 	server.ServeHTTP(recorder, resetRequest)
@@ -111,19 +139,19 @@ func TestRunnerTokenResetAndListing(t *testing.T) {
 	if !strings.HasPrefix(reset.Token, "atr_") || reset.CreatedAt == 0 {
 		t.Fatalf("unexpected reset response: %#v", reset)
 	}
-	valid, err := system.ValidateRunnerToken(context.Background(), reset.Token)
-	if err != nil || !valid {
-		t.Fatalf("expected returned token to validate, valid=%v err=%v", valid, err)
+	dbName, ok, err := system.LookupRunnerToken(context.Background(), reset.Token)
+	if err != nil || !ok || dbName != "db" {
+		t.Fatalf("expected returned token to resolve to db, got %q ok=%v err=%v", dbName, ok, err)
 	}
 
 	recorder = httptest.NewRecorder()
-	listRequest = httptest.NewRequest(http.MethodGet, "/api/runners", nil)
+	listRequest = httptest.NewRequest(http.MethodGet, "/api/databases/db/runners", nil)
 	listRequest.AddCookie(cookie)
 	server.ServeHTTP(recorder, listRequest)
 	if err := json.Unmarshal(recorder.Body.Bytes(), &listing); err != nil {
 		t.Fatal(err)
 	}
-	if !listing.Token.Exists || listing.Token.CreatedAt != reset.CreatedAt {
+	if listing.Token == nil || !listing.Token.Exists || listing.Token.CreatedAt != reset.CreatedAt {
 		t.Fatalf("expected token metadata after reset, got %#v", listing.Token)
 	}
 }
@@ -168,7 +196,7 @@ func TestRunWorkflowExecutesOnConnectedRunner(t *testing.T) {
 	server, system := newTestServer(t)
 	cookie := runnerTestSession(t, system)
 
-	token, err := system.ResetRunnerToken(context.Background())
+	token, err := system.ResetRunnerToken(context.Background(), "db")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,10 +212,13 @@ func TestRunWorkflowExecutesOnConnectedRunner(t *testing.T) {
 	}, nodes.Remote())
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		if _, ok := server.runnerHub.NodeTypes("intranet"); ok {
+		if _, ok := server.runnerHub.NodeTypes("db", "intranet"); ok {
 			break
 		}
 		time.Sleep(5 * time.Millisecond)
+	}
+	if _, ok := server.runnerHub.NodeTypes("other", "intranet"); ok {
+		t.Fatal("expected the runner to be scoped to its token's database")
 	}
 
 	recorder := saveWorkflowWithRunners(t, server, cookie, map[string]string{"remote_echo": "intranet"})

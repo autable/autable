@@ -8,15 +8,15 @@ import {
   DialogSurface,
   DialogTitle,
   DialogTrigger,
-  Text,
-  ToolbarButton,
-  Tooltip
+  Text
 } from "@fluentui/react-components";
 import { ArrowSyncCircleRegular, KeyResetRegular } from "@fluentui/react-icons";
 import { useTranslation } from "react-i18next";
 import { fetchRunners, resetRunnerToken, type RunnersResponse } from "../api";
 
-export function RunnersPanel({ disabled }: { disabled: boolean }) {
+// Runners are database-scoped: the panel manages the current database's
+// runner token and lists the runners connected with it.
+export function RunnersPanel({ databaseName }: { databaseName: string }) {
   const { t, i18n } = useTranslation();
   const [open, setOpen] = useState(false);
   const [runnersInfo, setRunnersInfo] = useState<RunnersResponse | null>(null);
@@ -25,7 +25,7 @@ export function RunnersPanel({ disabled }: { disabled: boolean }) {
 
   async function refresh() {
     try {
-      setRunnersInfo(await fetchRunners());
+      setRunnersInfo(await fetchRunners(databaseName));
       setError("");
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : t("runners.loadFailed"));
@@ -34,13 +34,15 @@ export function RunnersPanel({ disabled }: { disabled: boolean }) {
 
   async function reset() {
     try {
-      const result = await resetRunnerToken();
+      const result = await resetRunnerToken(databaseName);
       setFreshToken(result.token);
       await refresh();
     } catch (resetError) {
       setError(resetError instanceof Error ? resetError.message : t("runners.resetFailed"));
     }
   }
+
+  const canManage = runnersInfo?.can_manage ?? false;
 
   return (
     <Dialog
@@ -54,13 +56,18 @@ export function RunnersPanel({ disabled }: { disabled: boolean }) {
       }}
     >
       <DialogTrigger disableButtonEnhancement>
-        <Tooltip content={t("runners.title")} relationship="label">
-          <ToolbarButton aria-label={t("runners.title")} icon={<ArrowSyncCircleRegular />} disabled={disabled} />
-        </Tooltip>
+        <Button
+          className="runners-entry"
+          icon={<ArrowSyncCircleRegular />}
+          appearance="subtle"
+          disabled={databaseName === ""}
+        >
+          {t("runners.title")}
+        </Button>
       </DialogTrigger>
       <DialogSurface aria-label={t("runners.title")}>
         <DialogBody>
-          <DialogTitle>{t("runners.title")}</DialogTitle>
+          <DialogTitle>{`${t("runners.title")} · ${databaseName}`}</DialogTitle>
           <DialogContent>
             <div className="runners-panel">
               {error !== "" && <Text role="alert">{error}</Text>}
@@ -84,13 +91,17 @@ export function RunnersPanel({ disabled }: { disabled: boolean }) {
                 </ul>
               )}
               <Text weight="semibold">{t("runners.token")}</Text>
-              <Text size={200}>
-                {runnersInfo?.token.exists
-                  ? t("runners.tokenCreatedAt", {
-                      createdAt: new Date(runnersInfo.token.created_at ?? 0).toLocaleString(i18n.language)
-                    })
-                  : t("runners.tokenMissing")}
-              </Text>
+              {canManage ? (
+                <Text size={200}>
+                  {runnersInfo?.token?.exists
+                    ? t("runners.tokenCreatedAt", {
+                        createdAt: new Date(runnersInfo.token.created_at ?? 0).toLocaleString(i18n.language)
+                      })
+                    : t("runners.tokenMissing")}
+                </Text>
+              ) : (
+                <Text size={200}>{t("runners.ownerOnly")}</Text>
+              )}
               {freshToken !== "" && (
                 <div className="runners-fresh-token">
                   <Text size={200}>{t("runners.tokenShownOnce")}</Text>
@@ -100,9 +111,11 @@ export function RunnersPanel({ disabled }: { disabled: boolean }) {
             </div>
           </DialogContent>
           <DialogActions>
-            <Button appearance="primary" icon={<KeyResetRegular />} onClick={() => void reset()}>
-              {runnersInfo?.token.exists ? t("runners.reset") : t("runners.generate")}
-            </Button>
+            {canManage && (
+              <Button appearance="primary" icon={<KeyResetRegular />} onClick={() => void reset()}>
+                {runnersInfo?.token?.exists ? t("runners.reset") : t("runners.generate")}
+              </Button>
+            )}
             <DialogTrigger disableButtonEnhancement>
               <Button appearance="secondary">{t("common.close")}</Button>
             </DialogTrigger>

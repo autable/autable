@@ -264,8 +264,8 @@ func NewServerWithWorkflowRunnerAndAuth(catalog metadata.Catalog, system *system
 		}
 	}
 	server.runner = runner
-	server.runnerHub = runnerhub.New(func(ctx context.Context, token string) (bool, error) {
-		return system.ValidateRunnerToken(ctx, token)
+	server.runnerHub = runnerhub.New(func(ctx context.Context, token string) (string, bool, error) {
+		return system.LookupRunnerToken(ctx, token)
 	}, runnerhub.DefaultJobTimeout)
 	server.runner.SetRemoteDispatcher(server.runnerHub)
 	server.tables.SetRowChangeHandler(server.dispatchRowChangeEvent)
@@ -364,8 +364,6 @@ func (server *Server) routes() {
 	server.mux.HandleFunc("PATCH /api/databases/", server.handlePatchDatabaseResource)
 	server.mux.HandleFunc("GET /api/workflow/nodes", server.handleWorkflowNodes)
 	server.mux.HandleFunc("GET /api/runner/ws", server.runnerHub.ServeWS)
-	server.mux.HandleFunc("GET /api/runners", server.handleListRunners)
-	server.mux.HandleFunc("POST /api/runner-token/reset", server.handleResetRunnerToken)
 	server.mux.HandleFunc("POST /api/workflows", server.handleSaveWorkflow)
 	server.mux.HandleFunc("POST /api/workflows/", server.handleRunWorkflow)
 	server.mux.HandleFunc("GET /api/workflows/", server.handleGetWorkflow)
@@ -1076,6 +1074,8 @@ func (server *Server) handleGetDatabaseResource(w http.ResponseWriter, r *http.R
 		return
 	}
 	switch resource {
+	case "runners":
+		server.handleDatabaseRunners(w, r, actorID, dbName)
 	case "workflows":
 		workflows, err := server.system.Workflows(r.Context(), dbName)
 		if err != nil {
@@ -1141,6 +1141,8 @@ func (server *Server) handlePostDatabaseResource(w http.ResponseWriter, r *http.
 		return
 	}
 	switch resource {
+	case "runners":
+		server.handleResetDatabaseRunnerToken(w, r, actorID, dbName)
 	case "tables":
 		if !server.requireDatabaseOwner(w, r, actorID, dbName) {
 			return
@@ -2205,7 +2207,7 @@ func parseDatabaseResourcePath(path string) (string, string, bool) {
 	if len(parts) != 4 || parts[0] != "api" || parts[1] != "databases" {
 		return "", "", false
 	}
-	if parts[3] != "tables" && parts[3] != "workflows" && parts[3] != "forms" && parts[3] != "roles" {
+	if parts[3] != "tables" && parts[3] != "workflows" && parts[3] != "forms" && parts[3] != "roles" && parts[3] != "runners" {
 		return "", "", false
 	}
 	return parts[2], parts[3], true

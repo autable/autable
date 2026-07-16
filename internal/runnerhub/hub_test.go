@@ -13,9 +13,12 @@ import (
 	"autable/internal/workflow"
 )
 
-func testValidator(valid string) TokenValidator {
-	return func(_ context.Context, token string) (bool, error) {
-		return token == valid, nil
+func testResolver(valid string) TokenResolver {
+	return func(_ context.Context, token string) (string, bool, error) {
+		if token == valid {
+			return "db", true, nil
+		}
+		return "", false, nil
 	}
 }
 
@@ -44,7 +47,7 @@ func waitForRunner(t *testing.T, hub *Hub, name string) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		if _, ok := hub.NodeTypes(name); ok {
+		if _, ok := hub.NodeTypes("db", name); ok {
 			return
 		}
 		time.Sleep(5 * time.Millisecond)
@@ -56,17 +59,18 @@ func echoJob(runnerName string) workflow.RemoteJob {
 	return workflow.RemoteJob{
 		Input: map[string]any{"value": "Ada"},
 		Runtime: workflow.RuntimeInfo{
-			WorkflowID: 7,
-			RunID:      "run-1",
-			InstanceID: "remote_echo",
-			NodeType:   "echo",
-			Secrets:    map[string]string{"app_secret": "s3cret"},
+			WorkflowID:   7,
+			DatabaseName: "db",
+			RunID:        "run-1",
+			InstanceID:   "remote_echo",
+			NodeType:     "echo",
+			Secrets:      map[string]string{"app_secret": "s3cret"},
 		},
 	}
 }
 
 func TestHubRejectsBadTokens(t *testing.T) {
-	hub := New(testValidator("good"), 0)
+	hub := New(testResolver("good"), 0)
 	url := startHub(t, hub)
 
 	header := http.Header{"Authorization": {"Bearer wrong"}}
@@ -80,7 +84,7 @@ func TestHubRejectsBadTokens(t *testing.T) {
 }
 
 func TestHubDispatchesJobsAndReturnsResults(t *testing.T) {
-	hub := New(testValidator("good"), 0)
+	hub := New(testResolver("good"), 0)
 	url := startHub(t, hub)
 	ws := dialRunner(t, url, "good", HelloMessage{Kind: "hello", Name: "intranet", Version: "v1", NodeTypes: []string{"echo"}})
 	waitForRunner(t, hub, "intranet")
@@ -105,14 +109,20 @@ func TestHubDispatchesJobsAndReturnsResults(t *testing.T) {
 		t.Fatalf("unexpected output: %#v", output)
 	}
 
-	statuses := hub.Runners()
+	statuses := hub.Runners("db")
 	if len(statuses) != 1 || statuses[0].Name != "intranet" || statuses[0].Version != "v1" {
 		t.Fatalf("unexpected runner statuses: %#v", statuses)
+	}
+	if others := hub.Runners("other"); len(others) != 0 {
+		t.Fatalf("expected runner to be scoped to its database, got %#v", others)
+	}
+	if _, ok := hub.NodeTypes("other", "intranet"); ok {
+		t.Fatal("expected node types to be scoped to the database")
 	}
 }
 
 func TestHubReturnsRunnerErrors(t *testing.T) {
-	hub := New(testValidator("good"), 0)
+	hub := New(testResolver("good"), 0)
 	url := startHub(t, hub)
 	ws := dialRunner(t, url, "good", HelloMessage{Kind: "hello", Name: "intranet", NodeTypes: []string{"echo"}})
 	waitForRunner(t, hub, "intranet")
@@ -132,7 +142,7 @@ func TestHubReturnsRunnerErrors(t *testing.T) {
 }
 
 func TestHubFailsUnknownRunnersAndNodes(t *testing.T) {
-	hub := New(testValidator("good"), 0)
+	hub := New(testResolver("good"), 0)
 	url := startHub(t, hub)
 
 	if _, err := hub.Dispatch(context.Background(), "intranet", echoJob("intranet")); err == nil || !strings.Contains(err.Error(), `runner "intranet" is not connected`) {
@@ -147,7 +157,7 @@ func TestHubFailsUnknownRunnersAndNodes(t *testing.T) {
 }
 
 func TestHubFailsInFlightJobsOnDisconnect(t *testing.T) {
-	hub := New(testValidator("good"), 0)
+	hub := New(testResolver("good"), 0)
 	url := startHub(t, hub)
 	ws := dialRunner(t, url, "good", HelloMessage{Kind: "hello", Name: "intranet", NodeTypes: []string{"echo"}})
 	waitForRunner(t, hub, "intranet")
@@ -167,7 +177,7 @@ func TestHubFailsInFlightJobsOnDisconnect(t *testing.T) {
 }
 
 func TestHubTimesOutSilentJobs(t *testing.T) {
-	hub := New(testValidator("good"), 50*time.Millisecond)
+	hub := New(testResolver("good"), 50*time.Millisecond)
 	url := startHub(t, hub)
 	dialRunner(t, url, "good", HelloMessage{Kind: "hello", Name: "intranet", NodeTypes: []string{"echo"}})
 	waitForRunner(t, hub, "intranet")
@@ -179,12 +189,12 @@ func TestHubTimesOutSilentJobs(t *testing.T) {
 }
 
 func TestHubDisconnectAllDropsRunners(t *testing.T) {
-	hub := New(testValidator("good"), 0)
+	hub := New(testResolver("good"), 0)
 	url := startHub(t, hub)
 	ws := dialRunner(t, url, "good", HelloMessage{Kind: "hello", Name: "intranet", NodeTypes: []string{"echo"}})
 	waitForRunner(t, hub, "intranet")
 
-	hub.DisconnectAll()
+	hub.DisconnectDatabase("db")
 
 	ws.SetReadDeadline(time.Now().Add(5 * time.Second))
 	var message ResultMessage
@@ -193,10 +203,10 @@ func TestHubDisconnectAllDropsRunners(t *testing.T) {
 	}
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		if len(hub.Runners()) == 0 {
+		if len(hub.Runners("db")) == 0 {
 			return
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	t.Fatalf("expected no runners, got %#v", hub.Runners())
+	t.Fatalf("expected no runners, got %#v", hub.Runners("db"))
 }

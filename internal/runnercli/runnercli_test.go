@@ -24,7 +24,7 @@ func waitForRunner(t *testing.T, hub *runnerhub.Hub, name string) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		if _, ok := hub.NodeTypes(name); ok {
+		if _, ok := hub.NodeTypes("db", name); ok {
 			return
 		}
 		time.Sleep(5 * time.Millisecond)
@@ -32,9 +32,12 @@ func waitForRunner(t *testing.T, hub *runnerhub.Hub, name string) {
 	t.Fatalf("runner %q never registered", name)
 }
 
-func validator(valid string) runnerhub.TokenValidator {
-	return func(_ context.Context, token string) (bool, error) {
-		return token == valid, nil
+func validator(valid string) runnerhub.TokenResolver {
+	return func(_ context.Context, token string) (string, bool, error) {
+		if token == valid {
+			return "db", true, nil
+		}
+		return "", false, nil
 	}
 }
 
@@ -42,10 +45,11 @@ func echoDispatch(hub *runnerhub.Hub, value string) (map[string]any, error) {
 	return hub.Dispatch(context.Background(), "intranet", workflow.RemoteJob{
 		Input: map[string]any{"value": value},
 		Runtime: workflow.RuntimeInfo{
-			WorkflowID: 7,
-			RunID:      "run-1",
-			InstanceID: "remote_echo",
-			NodeType:   "echo",
+			WorkflowID:   7,
+			DatabaseName: "db",
+			RunID:        "run-1",
+			InstanceID:   "remote_echo",
+			NodeType:     "echo",
 		},
 	})
 }
@@ -90,10 +94,10 @@ func TestRunnerReconnectsAfterDisconnect(t *testing.T) {
 	go Run(ctx, Options{Endpoint: url, Token: "good", Name: "intranet"}, []workflow.Node{echo.Node{}})
 	waitForRunner(t, hub, "intranet")
 
-	hub.DisconnectAll()
+	hub.DisconnectDatabase("db")
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
-		if _, ok := hub.NodeTypes("intranet"); !ok {
+		if _, ok := hub.NodeTypes("db", "intranet"); !ok {
 			break
 		}
 		time.Sleep(5 * time.Millisecond)
@@ -120,7 +124,7 @@ func TestRunnerReportsUnknownNodes(t *testing.T) {
 
 	// The hub blocks unsupported node types before dispatching.
 	_, err := hub.Dispatch(context.Background(), "intranet", workflow.RemoteJob{
-		Runtime: workflow.RuntimeInfo{NodeType: "kingdee.bill.query"},
+		Runtime: workflow.RuntimeInfo{DatabaseName: "db", NodeType: "kingdee.bill.query"},
 	})
 	if err == nil || !strings.Contains(err.Error(), `does not support node`) {
 		t.Fatalf("unexpected error: %v", err)

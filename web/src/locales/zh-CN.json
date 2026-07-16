@@ -433,6 +433,7 @@
     "token": "运行器令牌",
     "tokenCreatedAt": "创建于 {{createdAt}}",
     "tokenMissing": "尚未生成令牌",
+    "ownerOnly": "只有数据库所有者可以查看和重置令牌。",
     "tokenShownOnce": "请立即复制令牌——之后不会再显示：",
     "tokenValue": "运行器令牌值",
     "generate": "生成令牌",

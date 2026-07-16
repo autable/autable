@@ -131,7 +131,8 @@ export type RunnerStatus = {
 };
 
 export type RunnersResponse = {
-  token: { exists: boolean; created_at?: number };
+  token?: { exists: boolean; created_at?: number } | null;
+  can_manage: boolean;
   runners: RunnerStatus[];
   remote_node_types: string[];
 };
@@ -611,16 +612,16 @@ export async function logout(): Promise<void> {
   }
 }
 
-export async function fetchRunners(): Promise<RunnersResponse> {
-  const response = await fetch("/api/runners");
+export async function fetchRunners(dbName: string): Promise<RunnersResponse> {
+  const response = await fetch(`/api/databases/${dbName}/runners`);
   if (!response.ok) {
     throw new Error(`runners load failed: ${response.status}`);
   }
   return response.json() as Promise<RunnersResponse>;
 }
 
-export async function resetRunnerToken(): Promise<{ token: string; created_at: number }> {
-  const response = await fetch("/api/runner-token/reset", { method: "POST" });
+export async function resetRunnerToken(dbName: string): Promise<{ token: string; created_at: number }> {
+  const response = await fetch(`/api/databases/${dbName}/runners`, { method: "POST" });
   if (!response.ok) {
     throw new Error(`runner token reset failed: ${response.status}`);
   }

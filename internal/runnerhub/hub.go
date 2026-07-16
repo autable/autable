@@ -68,8 +68,11 @@ type RunnerStatus struct {
 	ConnectedAt int64    `json:"connected_at"`
 }
 
-// TokenValidator checks a presented runner token.
-type TokenValidator func(ctx context.Context, token string) (bool, error)
+// TokenResolver resolves a presented runner token to the database the
+// runner serves; ok is false for unknown tokens. Runners are
+// database-scoped: the token decides the database, so a runner cannot
+// claim another database's name space.
+type TokenResolver func(ctx context.Context, token string) (database string, ok bool, err error)
 
 type pendingJob struct {
 	result chan ResultMessage
@@ -79,6 +82,7 @@ type pendingJob struct {
 type runnerConn struct {
 	hub         *Hub
 	ws          *websocket.Conn
+	database    string
 	name        string
 	version     string
 	nodeTypes   map[string]bool
@@ -91,7 +95,7 @@ type runnerConn struct {
 // Hub accepts runner connections and dispatches node jobs to them. It
 // implements workflow.RemoteDispatcher.
 type Hub struct {
-	validate   TokenValidator
+	resolve    TokenResolver
 	jobTimeout time.Duration
 	upgrader   websocket.Upgrader
 
@@ -100,12 +104,12 @@ type Hub struct {
 	jobs  map[string]*pendingJob
 }
 
-func New(validate TokenValidator, jobTimeout time.Duration) *Hub {
+func New(resolve TokenResolver, jobTimeout time.Duration) *Hub {
 	if jobTimeout <= 0 {
 		jobTimeout = DefaultJobTimeout
 	}
 	return &Hub{
-		validate:   validate,
+		resolve:    resolve,
 		jobTimeout: jobTimeout,
 		conns:      map[*runnerConn]struct{}{},
 		jobs:       map[string]*pendingJob{},
@@ -120,12 +124,12 @@ func (hub *Hub) ServeWS(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "runner token is required", http.StatusUnauthorized)
 		return
 	}
-	valid, err := hub.validate(r.Context(), token)
+	database, ok, err := hub.resolve(r.Context(), token)
 	if err != nil {
-		http.Error(w, "validate runner token", http.StatusInternalServerError)
+		http.Error(w, "resolve runner token", http.StatusInternalServerError)
 		return
 	}
-	if !valid {
+	if !ok {
 		http.Error(w, "invalid runner token", http.StatusUnauthorized)
 		return
 	}
@@ -133,7 +137,7 @@ func (hub *Hub) ServeWS(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
-	conn, err := hub.register(ws)
+	conn, err := hub.register(ws, database)
 	if err != nil {
 		ws.Close()
 		return
@@ -143,7 +147,7 @@ func (hub *Hub) ServeWS(w http.ResponseWriter, r *http.Request) {
 	hub.unregister(conn)
 }
 
-func (hub *Hub) register(ws *websocket.Conn) (*runnerConn, error) {
+func (hub *Hub) register(ws *websocket.Conn, database string) (*runnerConn, error) {
 	ws.SetReadDeadline(time.Now().Add(readTimeout))
 	var hello HelloMessage
 	if err := ws.ReadJSON(&hello); err != nil {
@@ -159,6 +163,7 @@ func (hub *Hub) register(ws *websocket.Conn) (*runnerConn, error) {
 	conn := &runnerConn{
 		hub:         hub,
 		ws:          ws,
+		database:    database,
 		name:        hello.Name,
 		version:     hello.Version,
 		nodeTypes:   nodeTypes,
@@ -189,9 +194,10 @@ func (hub *Hub) unregister(conn *runnerConn) {
 	}
 }
 
-// Dispatch implements workflow.RemoteDispatcher.
+// Dispatch implements workflow.RemoteDispatcher; the job's database decides
+// which database's runners are eligible.
 func (hub *Hub) Dispatch(ctx context.Context, runnerName string, job workflow.RemoteJob) (map[string]any, error) {
-	conn, ok := hub.pick(runnerName)
+	conn, ok := hub.pick(job.Runtime.DatabaseName, runnerName)
 	if !ok {
 		return nil, fmt.Errorf("runner %q is not connected", runnerName)
 	}
@@ -248,8 +254,8 @@ func (hub *Hub) Dispatch(ctx context.Context, runnerName string, job workflow.Re
 }
 
 // NodeTypes implements workflow.RemoteDispatcher.
-func (hub *Hub) NodeTypes(runnerName string) ([]string, bool) {
-	conn, ok := hub.pick(runnerName)
+func (hub *Hub) NodeTypes(databaseName, runnerName string) ([]string, bool) {
+	conn, ok := hub.pick(databaseName, runnerName)
 	if !ok {
 		return nil, false
 	}
@@ -260,12 +266,15 @@ func (hub *Hub) NodeTypes(runnerName string) ([]string, bool) {
 	return nodeTypes, true
 }
 
-// Runners lists every live runner connection.
-func (hub *Hub) Runners() []RunnerStatus {
+// Runners lists the live runner connections serving one database.
+func (hub *Hub) Runners(databaseName string) []RunnerStatus {
 	hub.mu.Lock()
 	defer hub.mu.Unlock()
 	statuses := make([]RunnerStatus, 0, len(hub.conns))
 	for conn := range hub.conns {
+		if conn.database != databaseName {
+			continue
+		}
 		nodeTypes := make([]string, 0, len(conn.nodeTypes))
 		for nodeType := range conn.nodeTypes {
 			nodeTypes = append(nodeTypes, nodeType)
@@ -280,12 +289,15 @@ func (hub *Hub) Runners() []RunnerStatus {
 	return statuses
 }
 
-// DisconnectAll drops every runner connection; used when the token is reset.
-func (hub *Hub) DisconnectAll() {
+// DisconnectDatabase drops the database's runner connections; used when its
+// token is reset.
+func (hub *Hub) DisconnectDatabase(databaseName string) {
 	hub.mu.Lock()
 	conns := make([]*runnerConn, 0, len(hub.conns))
 	for conn := range hub.conns {
-		conns = append(conns, conn)
+		if conn.database == databaseName {
+			conns = append(conns, conn)
+		}
 	}
 	hub.mu.Unlock()
 	for _, conn := range conns {
@@ -293,11 +305,11 @@ func (hub *Hub) DisconnectAll() {
 	}
 }
 
-func (hub *Hub) pick(runnerName string) (*runnerConn, bool) {
+func (hub *Hub) pick(databaseName, runnerName string) (*runnerConn, bool) {
 	hub.mu.Lock()
 	defer hub.mu.Unlock()
 	for conn := range hub.conns {
-		if conn.name == runnerName {
+		if conn.database == databaseName && conn.name == runnerName {
 			return conn, true
 		}
 	}

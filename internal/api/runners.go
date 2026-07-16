@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"sort"
@@ -18,7 +19,10 @@ type runnerTokenResponse struct {
 }
 
 type runnersResponse struct {
-	Token           runnerTokenResponse      `json:"token"`
+	// Token metadata is only included for the database owner.
+	Token *runnerTokenResponse `json:"token,omitempty"`
+	// CanManage reports whether the caller may view and reset the token.
+	CanManage       bool                     `json:"can_manage"`
 	Runners         []runnerhub.RunnerStatus `json:"runners"`
 	RemoteNodeTypes []string                 `json:"remote_node_types"`
 }
@@ -28,43 +32,50 @@ type runnerTokenResetResponse struct {
 	CreatedAt int64  `json:"created_at"`
 }
 
-func (server *Server) handleListRunners(w http.ResponseWriter, r *http.Request) {
-	if _, ok := server.requireUserID(w, r); !ok {
-		return
+// handleDatabaseRunners serves GET /api/databases/{db}/runners: the
+// database's connected runners for anyone signed in, plus token metadata for
+// the database owner. Runners are database-scoped resources.
+func (server *Server) handleDatabaseRunners(w http.ResponseWriter, r *http.Request, actorID, dbName string) {
+	response := runnersResponse{
+		CanManage:       server.isDatabaseOwner(r.Context(), actorID, dbName),
+		Runners:         server.runnerHub.Runners(dbName),
+		RemoteNodeTypes: remoteNodeTypes(),
 	}
-	createdAt, exists, err := server.system.RunnerTokenCreatedAt(r.Context())
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	runners := server.runnerHub.Runners()
-	sort.Slice(runners, func(i, j int) bool {
-		if runners[i].Name != runners[j].Name {
-			return runners[i].Name < runners[j].Name
+	if response.CanManage {
+		createdAt, exists, err := server.system.RunnerTokenCreatedAt(r.Context(), dbName)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
 		}
-		return runners[i].ConnectedAt < runners[j].ConnectedAt
+		response.Token = &runnerTokenResponse{Exists: exists, CreatedAt: createdAt}
+	}
+	sort.Slice(response.Runners, func(i, j int) bool {
+		if response.Runners[i].Name != response.Runners[j].Name {
+			return response.Runners[i].Name < response.Runners[j].Name
+		}
+		return response.Runners[i].ConnectedAt < response.Runners[j].ConnectedAt
 	})
-	for _, runner := range runners {
+	for _, runner := range response.Runners {
 		sort.Strings(runner.NodeTypes)
 	}
-	writeJSON(w, http.StatusOK, runnersResponse{
-		Token:           runnerTokenResponse{Exists: exists, CreatedAt: createdAt},
-		Runners:         runners,
-		RemoteNodeTypes: remoteNodeTypes(),
-	})
+	writeJSON(w, http.StatusOK, response)
 }
 
-func (server *Server) handleResetRunnerToken(w http.ResponseWriter, r *http.Request) {
-	if _, ok := server.requireUserID(w, r); !ok {
+// handleResetDatabaseRunnerToken serves POST /api/databases/{db}/runners:
+// the database owner rotates the database's runner token, which drops its
+// connected runners.
+func (server *Server) handleResetDatabaseRunnerToken(w http.ResponseWriter, r *http.Request, actorID, dbName string) {
+	if !server.isDatabaseOwner(r.Context(), actorID, dbName) {
+		writeError(w, http.StatusForbidden, errors.New("only the database owner can reset the runner token"))
 		return
 	}
-	token, err := server.system.ResetRunnerToken(r.Context())
+	token, err := server.system.ResetRunnerToken(r.Context(), dbName)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	server.runnerHub.DisconnectAll()
-	createdAt, _, err := server.system.RunnerTokenCreatedAt(r.Context())
+	server.runnerHub.DisconnectDatabase(dbName)
+	createdAt, _, err := server.system.RunnerTokenCreatedAt(r.Context(), dbName)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return

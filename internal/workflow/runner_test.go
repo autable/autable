@@ -511,7 +511,7 @@ func (dispatcher *fakeRemoteDispatcher) Dispatch(_ context.Context, runnerName s
 	return dispatcher.output, dispatcher.err
 }
 
-func (dispatcher *fakeRemoteDispatcher) NodeTypes(string) ([]string, bool) {
+func (dispatcher *fakeRemoteDispatcher) NodeTypes(string, string) ([]string, bool) {
 	return []string{"echo"}, true
 }
 

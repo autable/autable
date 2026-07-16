@@ -106,7 +106,7 @@ export function WorkflowWorkspace({
       return;
     }
     let cancelled = false;
-    fetchRunners()
+    fetchRunners(databaseName)
       .then((info) => {
         if (!cancelled) {
           setRunnersInfo(info);
@@ -120,7 +120,7 @@ export function WorkflowWorkspace({
     return () => {
       cancelled = true;
     };
-  }, [activeTab, workflow?.id]);
+  }, [activeTab, databaseName, workflow?.id]);
   const editorExtraLibs = useMemo(
     () =>
       workflowEditorExtraLibs({

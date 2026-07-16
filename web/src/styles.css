@@ -156,6 +156,16 @@ select {
   overflow: hidden;
 }
 
+.runners-entry-slot {
+  margin-top: auto;
+  padding-bottom: 4px;
+}
+
+.runners-entry-slot .runners-entry {
+  width: 100%;
+  justify-content: flex-start;
+}
+
 .secondary-sidebar .fui-DrawerHeader {
   border-bottom: 1px solid var(--colorNeutralStroke2);
 }

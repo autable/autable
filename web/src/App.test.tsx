@@ -79,6 +79,7 @@ const formFixture = [
 
 const runnersFixture = {
   token: { exists: true, created_at: 1781600000000 },
+  can_manage: true,
   runners: [{ name: "intranet", version: "v1.0.0", node_types: ["echo", "dingtalk.robot.send"], connected_at: 1781603000000 }],
   remote_node_types: ["dingtalk.robot.send", "echo"]
 };
@@ -177,11 +178,11 @@ async function defaultFetch(input: RequestInfo | URL, init?: RequestInit): Promi
   if (url === "/api/workflow/nodes") {
     return jsonResponse(workflowNodeFixture);
   }
-  if (url === "/api/runners") {
+  if (url === "/api/databases/workspace/runners") {
+    if (init?.method === "POST") {
+      return jsonResponse({ token: "atr_fresh-runner-token", created_at: 1781604000000 });
+    }
     return jsonResponse(runnersFixture);
-  }
-  if (url === "/api/runner-token/reset" && init?.method === "POST") {
-    return jsonResponse({ token: "atr_fresh-runner-token", created_at: 1781604000000 });
   }
   if (url === "/api/workflows/1/runs") {
     return jsonResponse([]);
@@ -753,12 +754,14 @@ describe("App", () => {
     expect(await screen.findByText("runner intranet")).toBeInTheDocument();
   }, 15_000);
 
-  it("manages remote runners and the token from the topbar", async () => {
+  it("manages the database's remote runners from the workflow sidebar", async () => {
     renderApp();
     await waitForDefaultTableReady();
+    await userEvent.click(await screen.findByRole("button", { name: /^Workflow$/ }));
     await userEvent.click(await screen.findByRole("button", { name: "Remote runners" }));
 
     const dialog = await findDialog("Remote runners");
+    expect(within(dialog).getByText(/Remote runners · workspace/)).toBeInTheDocument();
     expect(within(dialog).getByText("intranet")).toBeInTheDocument();
     expect(within(dialog).getByText(/v1\.0\.0/)).toBeInTheDocument();
     expect(within(dialog).queryByText(/atr_/)).not.toBeInTheDocument();

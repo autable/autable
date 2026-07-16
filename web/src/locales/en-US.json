@@ -433,6 +433,7 @@
     "token": "Runner token",
     "tokenCreatedAt": "Created {{createdAt}}",
     "tokenMissing": "No token generated yet",
+    "ownerOnly": "Only the database owner can view and reset the token.",
     "tokenShownOnce": "Copy the token now — it will not be shown again:",
     "tokenValue": "Runner token value",
     "generate": "Generate token",

@@ -29,9 +29,9 @@ where they execute becomes a deployment concern.
   server.
 - Running `table.*` / autable-service nodes remotely. They need direct access
   to server-side stores.
-- Per-user or per-database runner permissions. There is a single system-wide
-  runner token (autable currently has no system administrator concept; see
-  Security).
+- Per-user runner permissions. Runners and their tokens are database-scoped
+  and managed by the database owner (see Token); finer-grained permissions
+  are not modeled.
 - Guaranteed (at-least-once) job delivery. A step dispatched to a runner that
   disconnects mid-flight fails visibly, like any other node error.
 
@@ -130,7 +130,7 @@ visible in the runners API.
 ```go
 type RemoteDispatcher interface {
     Dispatch(ctx context.Context, runnerName string, job RemoteJob) (map[string]any, error)
-    NodeTypes(runnerName string) ([]string, bool) // false when not connected
+    NodeTypes(databaseName, runnerName string) ([]string, bool) // false when not connected
 }
 
 type RemoteJob struct {
@@ -196,27 +196,27 @@ Per-job timeout: server-side, default 10 minutes, applied by the dispatcher.
 
 ## Token
 
-A single static system token authorizes runner connections.
+Runners are database-scoped: each database has its own static token, and the
+token a runner presents decides which database it serves — a runner cannot
+claim another database's namespace, and workflow bindings only resolve
+against runners of the workflow's own database. There is no global runner
+concept.
 
-- Stored in `system.sqlite` as a SHA-256 hash (single-row table), created on
-  first reset. The plaintext (`atr_` + 43 URL-safe base64 chars, 256 bits) is
+- Tokens are stored in `system.sqlite` as SHA-256 hashes, one row per
+  database. The plaintext (`atr_` + 43 URL-safe base64 chars, 256 bits) is
   returned exactly once by the reset call and never displayed again.
-- `POST /api/runner-token/reset` generates/replaces the token. Resetting
-  invalidates every connected runner immediately (the hub drops their
-  connections); this is accepted behavior, runners are reconfigured with the
-  new token and reconnect.
-- `GET /api/runners` returns token metadata (created timestamp, never the
-  value) plus the list of connected runners: name, version, node types,
-  connect time.
-- Both endpoints require an authenticated session. autable has no system
-  administrator concept — database owners are the only elevated role — so any
-  authenticated user can reset the token. This is a deliberate simplification
-  at the current stage; the endpoints are the natural place to attach an
-  admin check if such a concept is introduced later.
+- `POST /api/databases/{db}/runners` generates/replaces the database's
+  token; only the database owner may call it. Resetting drops that
+  database's runner connections immediately (others are untouched); runners
+  are reconfigured with the new token and reconnect.
+- `GET /api/databases/{db}/runners` returns the database's connected runners
+  (name, version, node types, connect time) for any signed-in user — the
+  binding selector needs the list — plus token metadata (created timestamp,
+  never the value) for the database owner only.
 
-The token is deliberately **not** stored in the git-managed repository:
+Tokens are deliberately **not** stored in the git-managed repository:
 `repository.path` is synced to remote git hosting, and a credential committed
-there survives in history even after rotation. `system.sqlite` keeps it
+there survives in history even after rotation. `system.sqlite` keeps them
 server-local, resettable at runtime without a server restart, and out of
 version control.
 
@@ -258,10 +258,11 @@ platform matrix.
   reachability into the private network. A compromised server can at most
   dispatch jobs to nodes the runner registers, with inputs it controls — it
   cannot open arbitrary connections behind the firewall.
-- **Token scope**: possession of the runner token allows connecting as any
-  runner name, receiving jobs routed to that name (including their secret
-  payloads), and returning forged outputs into workflow runs. It grants no
-  other API access. TLS (`wss://`) is required outside local development.
+- **Token scope**: possession of a database's runner token allows connecting
+  as any runner name **within that database**, receiving jobs routed to those
+  names (including their secret payloads), and returning forged outputs into
+  that database's workflow runs. It grants no other API access and no reach
+  into other databases. TLS (`wss://`) is required outside local development.
 - **Job payloads** can contain secrets and row data; they exist transiently
   in runner memory and are not persisted by the CLI.
 
