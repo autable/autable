@@ -28,17 +28,8 @@ type preRunnersWorkflowModel struct {
 
 func (preRunnersWorkflowModel) TableName() string { return "workflow_models" }
 
-// legacyRoleMemberModel is the role member model before it was re-keyed.
-type legacyRoleMemberModel struct {
-	ID     int64 `gorm:"primaryKey;autoIncrement"`
-	RoleID int64
-	UserID string
-}
-
-func (legacyRoleMemberModel) TableName() string { return "role_member_models" }
-
 // createOldDatabase builds a database with historical GORM models plus one
-// saved workflow, exactly as an old release would have left it.
+// saved workflow, exactly as the 0.1.8 release would have left it.
 func createOldDatabase(t *testing.T, path string, models ...any) {
 	t.Helper()
 	orm, err := gorm.Open(sqlite.Open(path), &gorm.Config{})
@@ -120,27 +111,6 @@ func TestMigrateUpgradesPreRunnersDatabase(t *testing.T) {
 	}
 }
 
-func TestMigrateUpgradesLegacyRoleMemberDatabase(t *testing.T) {
-	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "system.sqlite")
-	createOldDatabase(t, path, &preRunnersWorkflowModel{}, &legacyRoleMemberModel{})
-
-	db, err := Open(ctx, path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	if version := schemaVersion(t, db); version != currentSchemaVersion() {
-		t.Fatalf("expected schema version %d, got %d", currentSchemaVersion(), version)
-	}
-	if db.orm.Migrator().HasColumn(&roleMemberModel{}, "user_id") {
-		t.Fatal("expected the legacy role member table to be replaced")
-	}
-	if !db.orm.Migrator().HasColumn(&workflowModel{}, "runners_json") {
-		t.Fatal("expected the runners column to be added")
-	}
-}
-
 func TestFreshDatabaseStartsAtCurrentVersion(t *testing.T) {
 	ctx := context.Background()
 	db := openTestDB(t)
@@ -157,10 +127,10 @@ func TestMigrationDriftFailsLoudly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Simulate drift: the version row claims 1, but the runners column
-	// already exists, so the 1 → 2 migration must fail instead of being
+	// Simulate drift: the version row claims 0, but the runners column
+	// already exists, so the 0 → 1 migration must fail instead of being
 	// silently skipped.
-	if err := db.orm.Model(&schemaVersionModel{}).Where("id = ?", schemaVersionRowID).Update("version", 1).Error; err != nil {
+	if err := db.orm.Model(&schemaVersionModel{}).Where("id = ?", schemaVersionRowID).Update("version", 0).Error; err != nil {
 		t.Fatal(err)
 	}
 	if err := db.Close(); err != nil {
@@ -168,7 +138,7 @@ func TestMigrationDriftFailsLoudly(t *testing.T) {
 	}
 
 	_, err = Open(ctx, path)
-	if err == nil || !strings.Contains(err.Error(), "schema migration 1 → 2") {
+	if err == nil || !strings.Contains(err.Error(), "schema migration 0 → 1") {
 		t.Fatalf("expected drift to fail loudly, got %v", err)
 	}
 }

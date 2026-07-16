@@ -15,18 +15,16 @@ type schemaVersionModel struct {
 
 const schemaVersionRowID = 1
 
+// Version 0 is the schema of the 0.1.8 release, the last release before
+// version tracking; databases older than 0.1.8 are not supported.
+//
 // migrations[i] upgrades a version-i database to version i+1. Each runs
 // unconditionally inside a transaction: at version i the schema state is
 // exact, so migrations never probe for tables or columns, and manual drift
 // fails loudly instead of being skipped. Append only; never edit or reorder
 // released migrations. Raw SQL is allowed here.
 var migrations = []func(orm *gorm.DB) error{
-	// 0 → 1: role members were re-keyed from user_id to subject_id; the
-	// legacy table is dropped and AutoMigrate recreates the current shape.
-	func(orm *gorm.DB) error {
-		return orm.Migrator().DropTable(&roleMemberModel{})
-	},
-	// 1 → 2: per-instance runner bindings. SQLite requires an explicit
+	// 0 → 1: per-instance runner bindings. SQLite requires an explicit
 	// default to add a NOT NULL column to a populated table, which
 	// AutoMigrate does not emit.
 	func(orm *gorm.DB) error {
@@ -66,10 +64,9 @@ func (db *DB) runSchemaMigrations(ctx context.Context) error {
 	return nil
 }
 
-// ensureSchemaVersion returns the recorded schema version, establishing a
-// baseline for databases that predate version tracking. The baseline
-// inference is the only place allowed to inspect the schema; once the
-// version row exists it is the sole source of truth.
+// ensureSchemaVersion returns the recorded schema version. A database
+// without a version row is either brand new (no tables yet, created at the
+// current version by AutoMigrate) or a 0.1.8 deployment (version 0).
 func (db *DB) ensureSchemaVersion(orm *gorm.DB) (int64, error) {
 	var record schemaVersionModel
 	err := orm.First(&record, schemaVersionRowID).Error
@@ -79,28 +76,13 @@ func (db *DB) ensureSchemaVersion(orm *gorm.DB) (int64, error) {
 	if err != gorm.ErrRecordNotFound {
 		return 0, err
 	}
-	version := db.baselineSchemaVersion(orm)
+	version := int64(0)
+	if !orm.Migrator().HasTable(&userModel{}) {
+		version = currentSchemaVersion()
+	}
 	record = schemaVersionModel{ID: schemaVersionRowID, Version: version}
 	if err := orm.Create(&record).Error; err != nil {
 		return 0, err
 	}
 	return version, nil
-}
-
-func (db *DB) baselineSchemaVersion(orm *gorm.DB) int64 {
-	migrator := orm.Migrator()
-	// Leftover state table from a pre-release migration mechanism that
-	// never shipped; the baseline below re-derives what it recorded.
-	_ = migrator.DropTable("schema_migration_models")
-	if !migrator.HasTable(&userModel{}) {
-		// Fresh database: AutoMigrate creates the final schema directly.
-		return currentSchemaVersion()
-	}
-	if migrator.HasColumn(&roleMemberModel{}, "user_id") {
-		return 0
-	}
-	if migrator.HasTable(&workflowModel{}) && !migrator.HasColumn(&workflowModel{}, "runners_json") {
-		return 1
-	}
-	return currentSchemaVersion()
 }
