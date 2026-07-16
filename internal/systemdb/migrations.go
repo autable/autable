@@ -30,6 +30,13 @@ var migrations = []func(orm *gorm.DB) error{
 	func(orm *gorm.DB) error {
 		return orm.Exec("ALTER TABLE `workflow_models` ADD `runners_json` text NOT NULL DEFAULT '{}'").Error
 	},
+	// 1 → 2: runner tokens became database-scoped. Interim builds created
+	// the table with a single global row; the old token is meaningless
+	// under the new semantics, so the table is dropped and AutoMigrate
+	// recreates the per-database shape (owners reset tokens afterwards).
+	func(orm *gorm.DB) error {
+		return orm.Exec("DROP TABLE IF EXISTS `runner_token_models`").Error
+	},
 }
 
 func currentSchemaVersion() int64 {

@@ -111,6 +111,39 @@ func TestMigrateUpgradesPreRunnersDatabase(t *testing.T) {
 	}
 }
 
+// interimRunnerTokenModel is the single-global-token table shape created by
+// interim builds before runner tokens became database-scoped.
+type interimRunnerTokenModel struct {
+	ID        int64  `gorm:"primaryKey"`
+	TokenHash string `gorm:"not null"`
+	CreatedAt int64  `gorm:"autoCreateTime:milli"`
+}
+
+func (interimRunnerTokenModel) TableName() string { return "runner_token_models" }
+
+func TestMigrateReplacesInterimRunnerTokenTable(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "system.sqlite")
+	createOldDatabase(t, path, &preRunnersWorkflowModel{}, &interimRunnerTokenModel{})
+
+	db, err := Open(ctx, path)
+	if err != nil {
+		t.Fatalf("expected interim database to open, got %v", err)
+	}
+	defer db.Close()
+	if version := schemaVersion(t, db); version != currentSchemaVersion() {
+		t.Fatalf("expected schema version %d, got %d", currentSchemaVersion(), version)
+	}
+
+	token, err := db.ResetRunnerToken(ctx, "db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dbName, ok, err := db.LookupRunnerToken(ctx, token); err != nil || !ok || dbName != "db" {
+		t.Fatalf("expected rebuilt token table to work, got %q ok=%v err=%v", dbName, ok, err)
+	}
+}
+
 func TestFreshDatabaseStartsAtCurrentVersion(t *testing.T) {
 	ctx := context.Background()
 	db := openTestDB(t)
