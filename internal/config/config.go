@@ -40,10 +40,18 @@ type DataConfig struct {
 }
 
 type RepositoryConfig struct {
+	// Enabled toggles git management of the repository directory: git init,
+	// commits, and pushes to the remote. When false, metadata and scripts are
+	// still stored under Path as plain files. Defaults to true.
+	Enabled      *bool                `yaml:"enabled"`
 	Path         string               `yaml:"path"`
 	RemoteURL    string               `yaml:"remote_url"`
 	RemoteBranch string               `yaml:"remote_branch"`
 	Sync         RepositorySyncConfig `yaml:"sync"`
+}
+
+func (repository RepositoryConfig) IsEnabled() bool {
+	return repository.Enabled == nil || *repository.Enabled
 }
 
 type RepositorySyncConfig struct {
@@ -117,11 +125,11 @@ func (cfg Config) Validate() error {
 	if cfg.Repository.Path == "" {
 		return errors.New("repository.path is required")
 	}
-	if cfg.Repository.RemoteURL == "" {
-		return errors.New("repository.remote_url is required")
+	if cfg.Repository.IsEnabled() && cfg.Repository.RemoteURL == "" {
+		return errors.New("repository.remote_url is required when repository.enabled is true")
 	}
-	if cfg.Repository.RemoteBranch == "" {
-		return errors.New("repository.remote_branch is required")
+	if cfg.Repository.IsEnabled() && cfg.Repository.RemoteBranch == "" {
+		return errors.New("repository.remote_branch is required when repository.enabled is true")
 	}
 	if cfg.Backup.Enabled && cfg.Backup.S3.Bucket == "" {
 		return errors.New("backup.s3.bucket is required when backup.enabled is true")

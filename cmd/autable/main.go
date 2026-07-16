@@ -46,12 +46,14 @@ func run(ctx context.Context, configPath string) error {
 	if err != nil {
 		return err
 	}
-	if err := repository.EnsureGitRepository(ctx, repository.GitOptions{
-		Path:         cfg.Repository.Path,
-		RemoteURL:    cfg.Repository.RemoteURL,
-		RemoteBranch: cfg.Repository.RemoteBranch,
-	}); err != nil {
-		return err
+	if cfg.Repository.IsEnabled() {
+		if err := repository.EnsureGitRepository(ctx, repository.GitOptions{
+			Path:         cfg.Repository.Path,
+			RemoteURL:    cfg.Repository.RemoteURL,
+			RemoteBranch: cfg.Repository.RemoteBranch,
+		}); err != nil {
+			return err
+		}
 	}
 	repoLayout := repository.NewLayout(cfg.Repository.Path)
 	metadataPath := repoLayout.MetadataPath()
@@ -82,28 +84,33 @@ func run(ctx context.Context, configPath string) error {
 		address = "127.0.0.1:8080"
 	}
 	startPprofServer(ctx, cfg.Debug.PprofAddress)
-	repoSync := repositorysync.New(repositorysync.Options{
-		Root:        cfg.Repository.Path,
-		RemoteURL:   cfg.Repository.RemoteURL,
-		Branch:      cfg.Repository.RemoteBranch,
-		Debounce:    configDuration(cfg.Repository.Sync.Debounce, 2*time.Second),
-		PushTimeout: configDuration(cfg.Repository.Sync.PushTimeout, 30*time.Second),
-		AuthorName:  cfg.Repository.Sync.AuthorName,
-		AuthorEmail: cfg.Repository.Sync.AuthorEmail,
-	})
-	defer func() {
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := repoSync.Shutdown(shutdownCtx); err != nil {
-			slog.Warn("repository sync shutdown failed", "error", err)
-		}
-	}()
-	repoSync.Notify(repositorysync.Change{
-		ActorID: "system",
-		Action:  "repository.start",
-		Summary: "started repository sync",
-		Paths:   []string{metadataPath},
-	})
+	var repoSync *repositorysync.Service
+	if cfg.Repository.IsEnabled() {
+		repoSync = repositorysync.New(repositorysync.Options{
+			Root:        cfg.Repository.Path,
+			RemoteURL:   cfg.Repository.RemoteURL,
+			Branch:      cfg.Repository.RemoteBranch,
+			Debounce:    configDuration(cfg.Repository.Sync.Debounce, 2*time.Second),
+			PushTimeout: configDuration(cfg.Repository.Sync.PushTimeout, 30*time.Second),
+			AuthorName:  cfg.Repository.Sync.AuthorName,
+			AuthorEmail: cfg.Repository.Sync.AuthorEmail,
+		})
+		defer func() {
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := repoSync.Shutdown(shutdownCtx); err != nil {
+				slog.Warn("repository sync shutdown failed", "error", err)
+			}
+		}()
+		repoSync.Notify(repositorysync.Change{
+			ActorID: "system",
+			Action:  "repository.start",
+			Summary: "started repository sync",
+			Paths:   []string{metadataPath},
+		})
+	} else {
+		slog.Info("repository git management is disabled")
+	}
 	if cfg.Backup.Enabled {
 		s3Uploader, err := backup.NewS3Uploader(ctx, backup.S3Options{
 			Endpoint:        cfg.Backup.S3.Endpoint,
@@ -148,7 +155,9 @@ func run(ctx context.Context, configPath string) error {
 		return rowRepository.OpenDatabase(ctx, name, cfg.DatabasePath(name))
 	})
 	server.SetCodeFileStore(codefiles.NewStore(cfg.Repository.Path))
-	server.SetRepositorySync(repoSync)
+	if repoSync != nil {
+		server.SetRepositorySync(repoSync)
+	}
 	if cfg.AI.Enabled {
 		aiWorkerURL := cfg.AI.WorkerURL
 		if aiWorkerURL == "" {

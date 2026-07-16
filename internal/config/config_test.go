@@ -71,6 +71,64 @@ func TestValidateRequiresCorePaths(t *testing.T) {
 	}
 }
 
+func TestValidateRepositoryRemoteOnlyWhenEnabled(t *testing.T) {
+	disabled := false
+	cfg := Config{
+		Data:       DataConfig{Path: "./data"},
+		Repository: RepositoryConfig{Enabled: &disabled, Path: "./repo"},
+		Auth:       AuthConfig{Password: PasswordAuthConfig{Enabled: true}},
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("expected disabled repository to skip remote validation, got %v", err)
+	}
+
+	cfg.Repository.Enabled = nil
+	err := cfg.Validate()
+	if err == nil || err.Error() != "repository.remote_url is required when repository.enabled is true" {
+		t.Fatalf("expected repository to default to enabled, got %v", err)
+	}
+
+	enabled := true
+	cfg.Repository.Enabled = &enabled
+	cfg.Repository.RemoteURL = "https://example.com/repo.git"
+	err = cfg.Validate()
+	if err == nil || err.Error() != "repository.remote_branch is required when repository.enabled is true" {
+		t.Fatalf("expected enabled repository to require remote branch, got %v", err)
+	}
+
+	cfg.Repository.Enabled = &disabled
+	cfg.Repository.Path = ""
+	err = cfg.Validate()
+	if err == nil || err.Error() != "repository.path is required" {
+		t.Fatalf("expected repository path to stay required when disabled, got %v", err)
+	}
+}
+
+func TestLoadDisabledRepositoryConfig(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yml")
+	data := []byte(`
+data:
+  path: ./data
+repository:
+  enabled: false
+  path: ./repo
+auth:
+  password:
+    enabled: true
+`)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Repository.IsEnabled() {
+		t.Fatal("expected repository to be disabled")
+	}
+}
+
 func TestValidateRequiresAtLeastOneAuthMethod(t *testing.T) {
 	cfg := Config{
 		Data:       DataConfig{Path: "./data"},
