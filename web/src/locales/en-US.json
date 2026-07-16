@@ -411,6 +411,11 @@
     "runInput": "Run input",
     "runOutput": "Run output",
     "saveConfig": "Save config",
+    "boundRunner": "runner {{name}}",
+    "runnerLabel": "Runner",
+    "runnerSelect": "Runner for {{instance}}",
+    "runnerServer": "Server (default)",
+    "runnerOffline": "{{name}} (offline)",
     "secretLabel": "Secret {{instance}}.{{name}}",
     "selectRunItem": "Select a run item",
     "variableLabel": "Variable {{instance}}.{{name}}",
@@ -419,5 +424,20 @@
     "workflowLabel": "{{database}} workflow",
     "workflowScriptLabel": "Workflow JavaScript",
     "workspaceTabs": "Workflow workspace tabs"
+  },
+  "runners": {
+    "title": "Remote runners",
+    "connected": "Connected runners",
+    "details": "{{version}} · {{nodes}} nodes · connected {{connectedAt}}",
+    "empty": "No runners connected",
+    "token": "Runner token",
+    "tokenCreatedAt": "Created {{createdAt}}",
+    "tokenMissing": "No token generated yet",
+    "tokenShownOnce": "Copy the token now — it will not be shown again:",
+    "tokenValue": "Runner token value",
+    "generate": "Generate token",
+    "reset": "Reset token",
+    "loadFailed": "Runners could not be loaded",
+    "resetFailed": "Runner token reset failed"
   }
 }

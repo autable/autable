@@ -411,6 +411,11 @@
     "runInput": "运行输入",
     "runOutput": "运行输出",
     "saveConfig": "保存配置",
+    "boundRunner": "运行器 {{name}}",
+    "runnerLabel": "运行器",
+    "runnerSelect": "{{instance}} 的运行器",
+    "runnerServer": "服务器（默认）",
+    "runnerOffline": "{{name}}（离线）",
     "secretLabel": "密钥 {{instance}}.{{name}}",
     "selectRunItem": "选择运行项",
     "variableLabel": "变量 {{instance}}.{{name}}",
@@ -419,5 +424,20 @@
     "workflowLabel": "{{database}} 工作流",
     "workflowScriptLabel": "工作流 JavaScript",
     "workspaceTabs": "工作流工作区标签"
+  },
+  "runners": {
+    "title": "远程运行器",
+    "connected": "已连接的运行器",
+    "details": "{{version}} · {{nodes}} 个节点 · 连接于 {{connectedAt}}",
+    "empty": "暂无运行器连接",
+    "token": "运行器令牌",
+    "tokenCreatedAt": "创建于 {{createdAt}}",
+    "tokenMissing": "尚未生成令牌",
+    "tokenShownOnce": "请立即复制令牌——之后不会再显示：",
+    "tokenValue": "运行器令牌值",
+    "generate": "生成令牌",
+    "reset": "重置令牌",
+    "loadFailed": "运行器加载失败",
+    "resetFailed": "运行器令牌重置失败"
   }
 }

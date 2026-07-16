@@ -473,7 +473,8 @@ export function useWorkflowFormWorkspace({
   async function saveSelectedWorkflowInstanceConfig(
     instanceID: string,
     variables: Record<string, string>,
-    secrets: Record<string, string>
+    secrets: Record<string, string>,
+    runnerName: string
   ) {
     if (!selectedWorkflow) {
       return;
@@ -489,11 +490,18 @@ export function useWorkflowFormWorkspace({
         nextSecretValues[prefix + name] = value;
       }
     }
+    const nextRunners = { ...(selectedWorkflow.runners ?? {}) };
+    if (runnerName === "") {
+      delete nextRunners[instanceID];
+    } else {
+      nextRunners[instanceID] = runnerName;
+    }
     try {
       const saved = await saveWorkflow(databaseName, {
         ...selectedWorkflow,
         variables: nextVariables,
-        secret_values: nextSecretValues
+        secret_values: nextSecretValues,
+        runners: nextRunners
       });
       setWorkflows((current) => replaceResource(current, saved));
       setSelectedWorkflowID(saved.id ?? 0);

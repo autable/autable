@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   Button,
   Dialog,
@@ -18,6 +18,7 @@ import {
   Popover,
   PopoverSurface,
   PopoverTrigger,
+  Select,
   Switch,
   Tab,
   TabList,
@@ -25,7 +26,9 @@ import {
 } from "@fluentui/react-components";
 import { EditRegular, HistoryRegular, InfoRegular, PlayRegular, SaveRegular } from "@fluentui/react-icons";
 import { useTranslation } from "react-i18next";
+import { fetchRunners } from "../api";
 import type {
+  RunnersResponse,
   WorkflowDefinition,
   WorkflowInstanceDeclaration,
   WorkflowNodeInfo,
@@ -47,7 +50,8 @@ type WorkflowWorkspaceProps = {
   onSaveInstanceConfig: (
     instanceID: string,
     variables: Record<string, string>,
-    secrets: Record<string, string>
+    secrets: Record<string, string>,
+    runnerName: string
   ) => void | Promise<void>;
   onSelectTab: (tab: WorkflowTab) => void;
   onSelectRunKey: (historyKey: string) => void;
@@ -96,6 +100,27 @@ export function WorkflowWorkspace({
   const { t } = useTranslation();
   const canWriteWorkflow = (workflow?.permission_level ?? 2) >= 2;
   const workflowNodesByType = new Map(workflowNodes.map((node) => [node.type, node]));
+  const [runnersInfo, setRunnersInfo] = useState<RunnersResponse | null>(null);
+  useEffect(() => {
+    if (activeTab !== "editor") {
+      return;
+    }
+    let cancelled = false;
+    fetchRunners()
+      .then((info) => {
+        if (!cancelled) {
+          setRunnersInfo(info);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setRunnersInfo(null);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, workflow?.id]);
   const editorExtraLibs = useMemo(
     () =>
       workflowEditorExtraLibs({
@@ -168,6 +193,8 @@ export function WorkflowWorkspace({
               {workflowInstances.ok ? (
                 Object.entries(workflowInstances.value).map(([instanceID, instance]) => {
                   const ports = effectiveInstancePorts(instance, workflowNodesByType);
+                  const remoteCapable = runnersInfo?.remote_node_types.includes(instance.node) ?? false;
+                  const boundRunner = workflow?.runners?.[instanceID] ?? "";
                   return (
                     <div key={instanceID} className="node-item">
                       <div className="node-title">
@@ -177,14 +204,17 @@ export function WorkflowWorkspace({
                       <div className="node-ports">
                         <span>{t("workflow.vars", { ports: formatPorts(ports.variables, t) })}</span>
                         <span>{t("workflow.secrets", { ports: formatPorts(ports.secrets, t) })}</span>
+                        {boundRunner !== "" && <span>{t("workflow.boundRunner", { name: boundRunner })}</span>}
                       </div>
-                      {(ports.variables.length > 0 || ports.secrets.length > 0) && (
+                      {(ports.variables.length > 0 || ports.secrets.length > 0 || remoteCapable) && (
                         <InstanceConfigPopover
                           canWriteWorkflow={canWriteWorkflow}
                           instanceID={instanceID}
                           instanceNode={instance.node}
                           onSaveInstanceConfig={onSaveInstanceConfig}
                           ports={ports}
+                          remoteCapable={remoteCapable}
+                          runnersInfo={runnersInfo}
                           workflow={workflow}
                         />
                       )}
@@ -377,10 +407,11 @@ function runListItems(
     },
     ...runResponse.run.steps.map((step, index): WorkflowRunListItem => {
       const id = `step-${index}`;
+      const subtitleParts = [step.node_type, step.runner ? `@ ${step.runner}` : ""].filter(Boolean);
       return {
         id,
         title: step.node_id,
-        subtitle: step.node_type,
+        subtitle: subtitleParts.length > 0 ? subtitleParts.join(" ") : undefined,
         input: step.input ?? {},
         output: step.output ?? {},
         error: step.error
@@ -499,6 +530,8 @@ function InstanceConfigPopover({
   instanceNode,
   onSaveInstanceConfig,
   ports,
+  remoteCapable,
+  runnersInfo,
   workflow
 }: {
   canWriteWorkflow: boolean;
@@ -507,9 +540,12 @@ function InstanceConfigPopover({
   onSaveInstanceConfig: (
     instanceID: string,
     variables: Record<string, string>,
-    secrets: Record<string, string>
+    secrets: Record<string, string>,
+    runnerName: string
   ) => void | Promise<void>;
   ports: { variables: WorkflowPort[]; secrets: WorkflowPort[] };
+  remoteCapable: boolean;
+  runnersInfo: RunnersResponse | null;
   workflow?: WorkflowDefinition;
 }) {
   const { t } = useTranslation();
@@ -517,6 +553,13 @@ function InstanceConfigPopover({
   const [variableDrafts, setVariableDrafts] = useState<Record<string, string>>({});
   const [secretDrafts, setSecretDrafts] = useState<Record<string, string>>({});
   const [dirtySecrets, setDirtySecrets] = useState<Record<string, boolean>>({});
+  const [runnerDraft, setRunnerDraft] = useState("");
+
+  const boundRunner = workflow?.runners?.[instanceID] ?? "";
+  const connectedNames = [...new Set((runnersInfo?.runners ?? []).map((runner) => runner.name))];
+  const runnerOptions = connectedNames.includes(boundRunner) || boundRunner === ""
+    ? connectedNames
+    : [boundRunner, ...connectedNames];
 
   function resetDrafts() {
     setVariableDrafts(
@@ -533,13 +576,14 @@ function InstanceConfigPopover({
       )
     );
     setDirtySecrets({});
+    setRunnerDraft(boundRunner);
   }
 
   async function saveDrafts() {
     const changedSecrets = Object.fromEntries(
       Object.entries(secretDrafts).filter(([name, value]) => dirtySecrets[name] && value !== "")
     );
-    await onSaveInstanceConfig(instanceID, variableDrafts, changedSecrets);
+    await onSaveInstanceConfig(instanceID, variableDrafts, changedSecrets, remoteCapable ? runnerDraft : boundRunner);
     setOpen(false);
   }
 
@@ -563,6 +607,23 @@ function InstanceConfigPopover({
             <span>{instanceNode}</span>
           </div>
         </div>
+        {remoteCapable && (
+          <FluentField label={t("workflow.runnerLabel")}>
+            <Select
+              aria-label={t("workflow.runnerSelect", { instance: instanceID })}
+              value={runnerDraft}
+              onChange={(_, data) => setRunnerDraft(data.value)}
+              disabled={!canWriteWorkflow}
+            >
+              <option value="">{t("workflow.runnerServer")}</option>
+              {runnerOptions.map((name) => (
+                <option key={name} value={name}>
+                  {connectedNames.includes(name) ? name : t("workflow.runnerOffline", { name })}
+                </option>
+              ))}
+            </Select>
+          </FluentField>
+        )}
         {ports.variables.map((port) => (
           <FluentField key={`variable-${instanceID}-${port.name}`} label={port.name}>
             <Input

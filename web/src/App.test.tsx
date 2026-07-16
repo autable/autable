@@ -77,6 +77,12 @@ const formFixture = [
   }
 ];
 
+const runnersFixture = {
+  token: { exists: true, created_at: 1781600000000 },
+  runners: [{ name: "intranet", version: "v1.0.0", node_types: ["echo", "dingtalk.robot.send"], connected_at: 1781603000000 }],
+  remote_node_types: ["dingtalk.robot.send", "echo"]
+};
+
 const workflowNodeFixture = [
   {
     type: "dingtalk.robot.send",
@@ -170,6 +176,12 @@ async function defaultFetch(input: RequestInfo | URL, init?: RequestInit): Promi
   }
   if (url === "/api/workflow/nodes") {
     return jsonResponse(workflowNodeFixture);
+  }
+  if (url === "/api/runners") {
+    return jsonResponse(runnersFixture);
+  }
+  if (url === "/api/runner-token/reset" && init?.method === "POST") {
+    return jsonResponse({ token: "atr_fresh-runner-token", created_at: 1781604000000 });
   }
   if (url === "/api/workflows/1/runs") {
     return jsonResponse([]);
@@ -715,6 +727,47 @@ describe("App", () => {
     expect(screen.getByLabelText("Secret ding.access_token")).toBeInTheDocument();
   }, 15_000);
 
+  it("binds workflow instances to remote runners from the config popover", async () => {
+    const saveBodies: Array<Record<string, unknown>> = [];
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url === "/api/databases/workspace/workflows" && init?.method === "POST") {
+        saveBodies.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+      }
+      return defaultFetch(input, init);
+    });
+
+    renderApp();
+    await waitForDefaultTableReady();
+    await userEvent.click(await screen.findByRole("button", { name: /^Workflow$/ }));
+    await userEvent.click(await findEnabledButton("Edit config review_echo"));
+
+    const runnerSelect = await screen.findByLabelText("Runner for review_echo");
+    expect(runnerSelect).toHaveValue("");
+    expect(within(runnerSelect as HTMLElement).getByRole("option", { name: "Server (default)" })).toBeInTheDocument();
+    await userEvent.selectOptions(runnerSelect, "intranet");
+    await userEvent.click(await findEnabledButton("Save config"));
+
+    await waitFor(() => expect(saveBodies.length).toBeGreaterThan(0));
+    expect(saveBodies.at(-1)?.runners).toEqual({ review_echo: "intranet" });
+    expect(await screen.findByText("runner intranet")).toBeInTheDocument();
+  }, 15_000);
+
+  it("manages remote runners and the token from the topbar", async () => {
+    renderApp();
+    await waitForDefaultTableReady();
+    await userEvent.click(await screen.findByRole("button", { name: "Remote runners" }));
+
+    const dialog = await findDialog("Remote runners");
+    expect(within(dialog).getByText("intranet")).toBeInTheDocument();
+    expect(within(dialog).getByText(/v1\.0\.0/)).toBeInTheDocument();
+    expect(within(dialog).queryByText(/atr_/)).not.toBeInTheDocument();
+
+    await userEvent.click(within(dialog).getByRole("button", { name: "Reset token" }));
+    expect(await within(dialog).findByText("atr_fresh-runner-token")).toBeInTheDocument();
+    expect(within(dialog).getByText(/will not be shown again/)).toBeInTheDocument();
+  }, 15_000);
+
   it("loads persisted workflow runs and renders their flow", async () => {
     vi.mocked(fetch).mockImplementation(async (input, init) => {
       const url = String(input);
@@ -737,7 +790,9 @@ describe("App", () => {
                 timestamp: 1781604000000,
                 inputs: { name: "Ada" },
                 outputs: { message: "Ada" },
-                steps: [{ node_id: "echo", input: { value: "Ada" }, output: { value: "Ada" } }]
+                steps: [
+                  { node_id: "echo", node_type: "echo", runner: "intranet", input: { value: "Ada" }, output: { value: "Ada" } }
+                ]
               }
             }
           ]),
@@ -762,6 +817,7 @@ describe("App", () => {
     expect(screen.getAllByText("Run input").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Run output").length).toBeGreaterThan(0);
     expect(screen.getByText(/"name": "Ada"/)).toBeInTheDocument();
+    expect(screen.getByText("echo @ intranet")).toBeInTheDocument();
   });
 
   it("renders read-only workflow and form resources as non-editable", async () => {

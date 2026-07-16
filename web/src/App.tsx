@@ -11,6 +11,7 @@ import { useTranslation } from "react-i18next";
 import { AuthDialog } from "./components/AuthDialog";
 import { FormWorkspace } from "./components/FormWorkspace";
 import { PermissionPanel } from "./components/PermissionPanel";
+import { RunnersPanel } from "./components/RunnersPanel";
 import { PublishedFormPage } from "./components/PublishedFormPage";
 import { TableWorkspace } from "./components/TableWorkspace";
 import { WorkflowWorkspace, type WorkflowTab } from "./components/WorkflowWorkspace";
@@ -704,6 +705,7 @@ function WorkspaceApp() {
             <ToolbarButton aria-label={t("language.switch")} onClick={cycleLanguage}>
               {t("language.toggleLabel")}
             </ToolbarButton>
+            <RunnersPanel disabled={!currentUser} />
             <Tooltip content={t("common.refreshMetadata")} relationship="label">
               <ToolbarButton
                 aria-label={t("common.refreshMetadata")}

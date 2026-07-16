@@ -82,6 +82,7 @@ export type WorkflowDefinition = {
   secrets: Record<string, number>;
   secret_values?: Record<string, string>;
   variables: Record<string, string>;
+  runners?: Record<string, string>;
   permission_level?: 0 | 1 | 2;
   created_at?: number;
   updated_at?: number;
@@ -116,9 +117,23 @@ export type WorkflowInstanceDeclaration = {
 export type WorkflowStepRecord = {
   node_id: string;
   node_type?: string;
+  runner?: string;
   input?: Record<string, unknown>;
   output?: Record<string, unknown>;
   error?: string;
+};
+
+export type RunnerStatus = {
+  name: string;
+  version: string;
+  node_types: string[];
+  connected_at: number;
+};
+
+export type RunnersResponse = {
+  token: { exists: boolean; created_at?: number };
+  runners: RunnerStatus[];
+  remote_node_types: string[];
 };
 
 export type WorkflowRun = {
@@ -596,6 +611,22 @@ export async function logout(): Promise<void> {
   }
 }
 
+export async function fetchRunners(): Promise<RunnersResponse> {
+  const response = await fetch("/api/runners");
+  if (!response.ok) {
+    throw new Error(`runners load failed: ${response.status}`);
+  }
+  return response.json() as Promise<RunnersResponse>;
+}
+
+export async function resetRunnerToken(): Promise<{ token: string; created_at: number }> {
+  const response = await fetch("/api/runner-token/reset", { method: "POST" });
+  if (!response.ok) {
+    throw new Error(`runner token reset failed: ${response.status}`);
+  }
+  return response.json() as Promise<{ token: string; created_at: number }>;
+}
+
 export async function listWorkflows(dbName: string): Promise<WorkflowDefinition[]> {
   const response = await fetch(`/api/databases/${dbName}/workflows`);
   if (!response.ok) {
@@ -617,6 +648,7 @@ export async function saveWorkflow(
     creator_id: workflow.creator_id,
     secrets: workflow.secret_values ?? {},
     variables: workflow.variables,
+    runners: workflow.runners ?? {},
     permission_level: workflow.permission_level,
     created_at: workflow.created_at,
     updated_at: workflow.updated_at
