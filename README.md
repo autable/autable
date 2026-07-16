@@ -42,7 +42,7 @@ This repository currently contains the backend core primitives:
 
 - This project is in active development; breaking changes are allowed.
 - Do not preserve backward-compatible or legacy behavior unless explicitly requested.
-- The product is live: existing databases must upgrade in place. System database schema changes ship as versioned migrations in `internal/systemdb/migrations.go`; they run once each, in order, before GORM AutoMigrate, and may use raw SQL (the no-hand-written-SQL rule does not apply there). Append new migrations only — never edit or reorder applied ones. Never ship a model change AutoMigrate cannot apply to populated tables, such as a new NOT NULL column without a default.
+- The product is live: existing databases must upgrade in place. The system database records a schema version; `migrations[i]` in `internal/systemdb/migrations.go` upgrades version i to i+1, runs unconditionally in a transaction, and may use raw SQL (the no-hand-written-SQL rule does not apply there). Migrations never probe for tables or columns — the version guarantees the starting state, and drift fails loudly. Append new migrations only; never edit or reorder released ones. Never ship a model change AutoMigrate cannot apply to populated tables, such as a new NOT NULL column without a default — that is what migrations are for.
 - When changing a contract, update callers, tests, and docs to the new contract and remove the old path.
 - Do not add fallback behavior for non-normal paths unless explicitly requested. Required data, metadata, and configuration failures should fail visibly instead of silently degrading to inferred or partial behavior.
 - Use the ORM for database access; do not hand-write SQL in application code.
