@@ -7,7 +7,7 @@ repository:
   # Set to false for local testing: metadata and scripts are still stored
   # under path, but no git repository, commits, or pushes are managed, and
   # remote_url/remote_branch are not required.
-  enabled: true
+  enabled: false
   path: "./repository"
   remote_url: "https://YOUR_PAT@github.com/example/autable-repository.git"
   remote_branch: "main"

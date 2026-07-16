@@ -9,6 +9,7 @@ import (
 	batchsendoto "autable/internal/workflow/nodes/dingtalk/robot/batchsendoto"
 	"autable/internal/workflow/nodes/echo"
 	githubcontent "autable/internal/workflow/nodes/github/file/content"
+	kingdeepurchaseorderlist "autable/internal/workflow/nodes/kingdee/purchaseorder/list"
 	"autable/internal/workflow/nodes/table/field"
 	"autable/internal/workflow/nodes/table/recordchanged"
 	rowcreate "autable/internal/workflow/nodes/table/row/create"
@@ -43,6 +44,7 @@ func Remote() []workflow.Node {
 		listrecords.NewNode(),
 		batchsendoto.NewNode(),
 		githubcontent.NewNode(),
+		kingdeepurchaseorderlist.NewNode(),
 	}
 }
 

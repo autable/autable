@@ -3000,6 +3000,7 @@ func TestWorkflowNodesAPI(t *testing.T) {
 		"dingtalk.robot.send",
 		"echo",
 		"github.file.content.get",
+		"kingdee.purchaseorder.list",
 		"table.field.create",
 		"table.record.changed",
 		"table.row.create",

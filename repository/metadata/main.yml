@@ -1,0 +1,3 @@
+databases:
+    - name: t55
+      tables: []
