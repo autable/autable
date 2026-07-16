@@ -15,8 +15,8 @@ type schemaVersionModel struct {
 
 const schemaVersionRowID = 1
 
-// Version 0 is the schema of the 0.1.8 release, the last release before
-// version tracking; databases older than 0.1.8 are not supported.
+// Version 0 is the schema of the 0.1.18 release, the last release before
+// version tracking; databases older than 0.1.18 are not supported.
 //
 // migrations[i] upgrades a version-i database to version i+1. Each runs
 // unconditionally inside a transaction: at version i the schema state is
@@ -66,7 +66,7 @@ func (db *DB) runSchemaMigrations(ctx context.Context) error {
 
 // ensureSchemaVersion returns the recorded schema version. A database
 // without a version row is either brand new (no tables yet, created at the
-// current version by AutoMigrate) or a 0.1.8 deployment (version 0).
+// current version by AutoMigrate) or a 0.1.18 deployment (version 0).
 func (db *DB) ensureSchemaVersion(orm *gorm.DB) (int64, error) {
 	var record schemaVersionModel
 	err := orm.First(&record, schemaVersionRowID).Error

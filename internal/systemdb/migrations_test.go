@@ -29,7 +29,7 @@ type preRunnersWorkflowModel struct {
 func (preRunnersWorkflowModel) TableName() string { return "workflow_models" }
 
 // createOldDatabase builds a database with historical GORM models plus one
-// saved workflow, exactly as the 0.1.8 release would have left it.
+// saved workflow, exactly as the 0.1.18 release would have left it.
 func createOldDatabase(t *testing.T, path string, models ...any) {
 	t.Helper()
 	orm, err := gorm.Open(sqlite.Open(path), &gorm.Config{})
