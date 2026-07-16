@@ -32,6 +32,7 @@ type WorkflowDefinition struct {
 	CreatorID       string            `json:"creator_id,omitempty"`
 	Secrets         map[string]string `json:"secrets"`
 	Variables       map[string]string `json:"variables"`
+	Runners         map[string]string `json:"runners"`
 	PermissionLevel permission.Level  `json:"permission_level,omitempty" gorm:"-"`
 	CreatedAt       int64             `json:"created_at"`
 	UpdatedAt       int64             `json:"updated_at"`
@@ -110,8 +111,15 @@ type workflowModel struct {
 	CreatorID     string `gorm:"index;not null;default:''"`
 	SecretsJSON   string `gorm:"not null"`
 	VariablesJSON string `gorm:"not null"`
+	RunnersJSON   string `gorm:"not null"`
 	CreatedAt     int64  `gorm:"autoCreateTime:milli"`
 	UpdatedAt     int64  `gorm:"autoUpdateTime:milli"`
+}
+
+type runnerTokenModel struct {
+	ID        int64  `gorm:"primaryKey"`
+	TokenHash string `gorm:"not null"`
+	CreatedAt int64  `gorm:"autoCreateTime:milli"`
 }
 
 type formModel struct {
@@ -180,6 +188,7 @@ func (db *DB) Migrate(ctx context.Context) error {
 		&formModel{},
 		&roleModel{},
 		&roleMemberModel{},
+		&runnerTokenModel{},
 	)
 }
 
@@ -783,6 +792,10 @@ func workflowToModel(workflow WorkflowDefinition) (workflowModel, error) {
 	if err != nil {
 		return workflowModel{}, err
 	}
+	runners, err := json.Marshal(emptyStringMap(workflow.Runners))
+	if err != nil {
+		return workflowModel{}, err
+	}
 	return workflowModel{
 		ID:            workflow.ID,
 		DatabaseName:  workflow.DatabaseName,
@@ -792,6 +805,7 @@ func workflowToModel(workflow WorkflowDefinition) (workflowModel, error) {
 		CreatorID:     workflow.CreatorID,
 		SecretsJSON:   string(secrets),
 		VariablesJSON: string(variables),
+		RunnersJSON:   string(runners),
 		CreatedAt:     workflow.CreatedAt,
 		UpdatedAt:     workflow.UpdatedAt,
 	}, nil
@@ -812,6 +826,9 @@ func modelToWorkflow(model workflowModel) (WorkflowDefinition, error) {
 		return WorkflowDefinition{}, err
 	}
 	if err := json.Unmarshal([]byte(model.VariablesJSON), &workflow.Variables); err != nil {
+		return WorkflowDefinition{}, err
+	}
+	if err := json.Unmarshal([]byte(model.RunnersJSON), &workflow.Runners); err != nil {
 		return WorkflowDefinition{}, err
 	}
 	return workflow, nil
