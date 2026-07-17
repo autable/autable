@@ -76,7 +76,7 @@ export function useFormRunner({ databaseName, script, onStatus, onRowCreated }: 
   function valuesWithDefaults(overrides: Record<string, string> = {}): Record<string, string> {
     return Object.fromEntries(
       rendered.elements.flatMap((element) => {
-        if (element.kind === "input" || element.kind === "relation") {
+        if (element.kind === "input" || element.kind === "relation" || element.kind === "file") {
           return [[element.field, overrides[element.field] ?? values[element.field] ?? ""]];
         }
         if (element.kind === "select") {
