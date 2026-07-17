@@ -383,7 +383,8 @@ func (server *Server) routes() {
 	server.mux.HandleFunc("GET /api/auth/config", server.handleAuthConfig)
 	server.mux.HandleFunc("POST /api/auth/register", server.handleRegister)
 	server.mux.HandleFunc("POST /api/auth/login", server.handleLogin)
-	server.mux.HandleFunc("GET /api/auth/oidc/", server.handleOIDC)
+	server.mux.HandleFunc("GET /api/auth/oidc/{provider}/start", server.handleOIDCStartRoute)
+	server.mux.HandleFunc("GET /api/auth/oidc/{provider}/callback", server.handleOIDCCallbackRoute)
 	server.mux.HandleFunc("GET /api/auth/me", server.handleMe)
 	server.mux.HandleFunc("POST /api/auth/logout", server.handleLogout)
 	server.mux.HandleFunc("GET /api/ai/auth/status", server.handleAIAuthStatus)
@@ -393,29 +394,50 @@ func (server *Server) routes() {
 	server.mux.HandleFunc("GET /api/users", server.handleUsers)
 	server.mux.HandleFunc("GET /api/metadata", server.handleMetadata)
 	server.mux.HandleFunc("POST /api/permissions/grants", server.handleSaveGrant)
-	server.mux.HandleFunc("POST /api/tables/", server.handlePostTableResource)
-	server.mux.HandleFunc("PATCH /api/tables/", server.handleUpdateRow)
-	server.mux.HandleFunc("DELETE /api/tables/", server.handleDeleteRow)
-	server.mux.HandleFunc("GET /api/tables/", server.handleGetTable)
+	server.mux.HandleFunc("POST /api/tables/{database}/{table}/rows", server.tableRoute(server.handleCreateRow))
+	server.mux.HandleFunc("POST /api/tables/{database}/{table}/rows/upsert", server.tableRoute(server.handleUpsertRow))
+	server.mux.HandleFunc("POST /api/tables/{database}/{table}/rows/query", server.tableRoute(server.handleQueryRows))
+	server.mux.HandleFunc("POST /api/tables/{database}/{table}/fields", server.tableRoute(server.handleCreateFields))
+	server.mux.HandleFunc("PATCH /api/tables/{database}/{table}/rows/{recordID}", server.handleUpdateRow)
+	server.mux.HandleFunc("DELETE /api/tables/{database}/{table}/rows/{recordID}", server.handleDeleteRow)
+	server.mux.HandleFunc("GET /api/tables/{database}/{table}/rows", server.tableRoute(server.handleListRows))
+	server.mux.HandleFunc("GET /api/tables/{database}/{table}/rows/{recordID}/history", server.handleRowHistory)
 	server.mux.HandleFunc("POST /api/databases", server.handleCreateDatabase)
-	server.mux.HandleFunc("GET /api/databases/", server.handleGetDatabaseResource)
-	server.mux.HandleFunc("POST /api/databases/", server.handlePostDatabaseResource)
-	server.mux.HandleFunc("PUT /api/databases/", server.handlePutDatabaseResource)
-	server.mux.HandleFunc("PATCH /api/databases/", server.handlePatchDatabaseResource)
+	server.mux.HandleFunc("POST /api/databases/{database}/workflows/{workflowID}/webhook", server.handleWorkflowWebhookRoute)
+	server.mux.HandleFunc("GET /api/databases/{database}/{resource}", server.handleGetDatabaseResource)
+	server.mux.HandleFunc("POST /api/databases/{database}/{resource}", server.handlePostDatabaseResource)
+	server.mux.HandleFunc("PUT /api/databases/{database}/tables/{table}", server.handleUpdateTableMetadataRoute)
+	server.mux.HandleFunc("PUT /api/databases/{database}/roles/{role}/{action}", server.handleRoleAction)
+	server.mux.HandleFunc("PATCH /api/databases/{database}/tables/{table}/fields/{field}/position", server.handleMoveFieldPosition)
 	server.mux.HandleFunc("GET /api/workflow/nodes", server.handleWorkflowNodes)
 	server.mux.HandleFunc("GET /api/runner/ws", server.runnerHub.ServeWS)
 	server.mux.HandleFunc("POST /api/workflows", server.handleSaveWorkflow)
-	server.mux.HandleFunc("POST /api/workflows/", server.handleRunWorkflow)
-	server.mux.HandleFunc("GET /api/workflows/", server.handleGetWorkflow)
-	server.mux.HandleFunc("DELETE /api/workflows/", server.handleDeleteWorkflow)
+	server.mux.HandleFunc("POST /api/workflows/{workflowID}/runs", server.handleRunWorkflow)
+	server.mux.HandleFunc("GET /api/workflows/{workflowID}", server.handleGetWorkflow)
+	server.mux.HandleFunc("GET /api/workflows/{workflowID}/runs", server.handleWorkflowRunsRoute)
+	server.mux.HandleFunc("GET /api/workflows/{workflowID}/runs/{historyKey}", server.handleWorkflowRunRoute)
+	server.mux.HandleFunc("DELETE /api/workflows/{workflowID}", server.handleDeleteWorkflow)
 	server.mux.HandleFunc("POST /api/files", server.handleUploadFile)
 	server.mux.HandleFunc("POST /api/files/metadata", server.handleFileMetadata)
-	server.mux.HandleFunc("GET /api/files/", server.handleDownloadFile)
+	server.mux.HandleFunc("GET /api/files/{fileID}", server.handleDownloadFile)
 	server.mux.HandleFunc("POST /api/forms", server.handleSaveForm)
-	server.mux.HandleFunc("POST /api/forms/", server.handlePostFormAction)
-	server.mux.HandleFunc("GET /api/forms/", server.handleGetForm)
-	server.mux.HandleFunc("DELETE /api/forms/", server.handleDeleteForm)
-	server.mux.HandleFunc("GET /api/published/forms/", server.handleGetPublishedForm)
+	server.mux.HandleFunc("POST /api/forms/{formID}/{action}", server.handlePostFormAction)
+	server.mux.HandleFunc("GET /api/forms/{formID}", server.handleGetForm)
+	server.mux.HandleFunc("DELETE /api/forms/{formID}", server.handleDeleteForm)
+	server.mux.HandleFunc("GET /api/published/forms/{token}", server.handleGetPublishedForm)
+}
+
+// tableRoute adapts a {database}/{table} handler to the wildcard mux.
+func (server *Server) tableRoute(handler func(http.ResponseWriter, *http.Request, string, string)) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		handler(w, r, r.PathValue("database"), r.PathValue("table"))
+	}
+}
+
+// pathID parses a numeric wildcard segment; ids are always positive.
+func pathID(r *http.Request, name string) (int64, bool) {
+	id, err := strconv.ParseInt(r.PathValue(name), 10, 64)
+	return id, err == nil && id > 0
 }
 
 func (server *Server) handleAuthConfig(w http.ResponseWriter, _ *http.Request) {
@@ -484,29 +506,34 @@ func (server *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, toUserResponse(user))
 }
 
-func (server *Server) handleOIDC(w http.ResponseWriter, r *http.Request) {
-	providerName, action, ok := parseOIDCPath(r.URL.Path)
-	if !ok || r.Method != http.MethodGet {
-		http.NotFound(w, r)
+func (server *Server) handleOIDCStartRoute(w http.ResponseWriter, r *http.Request) {
+	provider, ok := server.routedOIDCProvider(w, r)
+	if !ok {
 		return
 	}
+	server.handleOIDCStart(w, r, provider)
+}
+
+func (server *Server) handleOIDCCallbackRoute(w http.ResponseWriter, r *http.Request) {
+	provider, ok := server.routedOIDCProvider(w, r)
+	if !ok {
+		return
+	}
+	server.handleOIDCCallback(w, r, provider)
+}
+
+func (server *Server) routedOIDCProvider(w http.ResponseWriter, r *http.Request) (config.OIDCProvider, bool) {
 	if !server.auth.OIDC.Enabled {
 		http.NotFound(w, r)
-		return
+		return config.OIDCProvider{}, false
 	}
+	providerName := r.PathValue("provider")
 	provider, ok := server.oidcProvider(providerName)
 	if !ok {
 		writeError(w, http.StatusNotFound, fmt.Errorf("oidc provider %q not found", providerName))
-		return
+		return config.OIDCProvider{}, false
 	}
-	switch action {
-	case "start":
-		server.handleOIDCStart(w, r, provider)
-	case "callback":
-		server.handleOIDCCallback(w, r, provider)
-	default:
-		http.NotFound(w, r)
-	}
+	return provider, true
 }
 
 func (server *Server) handleOIDCStart(w http.ResponseWriter, r *http.Request, provider config.OIDCProvider) {
@@ -752,26 +779,6 @@ func (server *Server) handleSaveGrant(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, grant)
 }
 
-func (server *Server) handlePostTableResource(w http.ResponseWriter, r *http.Request) {
-	if dbName, tableName, ok := parseTableRowsPath(r.URL.Path); ok {
-		server.handleCreateRow(w, r, dbName, tableName)
-		return
-	}
-	if dbName, tableName, ok := parseTableRowsUpsertPath(r.URL.Path); ok {
-		server.handleUpsertRow(w, r, dbName, tableName)
-		return
-	}
-	if dbName, tableName, ok := parseTableRowsQueryPath(r.URL.Path); ok {
-		server.handleQueryRows(w, r, dbName, tableName)
-		return
-	}
-	if dbName, tableName, ok := parseTableFieldsPath(r.URL.Path); ok {
-		server.handleCreateFields(w, r, dbName, tableName)
-		return
-	}
-	http.NotFound(w, r)
-}
-
 func (server *Server) handleCreateRow(w http.ResponseWriter, r *http.Request, dbName, tableName string) {
 	actorID, ok := server.requireUserID(w, r)
 	if !ok {
@@ -927,7 +934,8 @@ func writeTableMutationError(w http.ResponseWriter, err error) {
 }
 
 func (server *Server) handleUpdateRow(w http.ResponseWriter, r *http.Request) {
-	dbName, tableName, recordID, ok := parseTableRowPath(r.URL.Path)
+	dbName, tableName := r.PathValue("database"), r.PathValue("table")
+	recordID, ok := pathID(r, "recordID")
 	if !ok {
 		http.NotFound(w, r)
 		return
@@ -956,7 +964,8 @@ func (server *Server) handleUpdateRow(w http.ResponseWriter, r *http.Request) {
 }
 
 func (server *Server) handleDeleteRow(w http.ResponseWriter, r *http.Request) {
-	dbName, tableName, recordID, ok := parseTableRowPath(r.URL.Path)
+	dbName, tableName := r.PathValue("database"), r.PathValue("table")
+	recordID, ok := pathID(r, "recordID")
 	if !ok {
 		http.NotFound(w, r)
 		return
@@ -976,14 +985,6 @@ func (server *Server) handleDeleteRow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, rowResponse{RecordID: row.RecordID, Values: row.Values})
-}
-
-func (server *Server) handleGetTable(w http.ResponseWriter, r *http.Request) {
-	if dbName, tableName, ok := parseTableRowsPath(r.URL.Path); ok {
-		server.handleListRows(w, r, dbName, tableName)
-		return
-	}
-	server.handleRowHistory(w, r)
 }
 
 func (server *Server) handleListRows(w http.ResponseWriter, r *http.Request, dbName, tableName string) {
@@ -1036,8 +1037,9 @@ func parseTemporaryRowSorts(query url.Values) ([]metadata.ViewSort, error) {
 }
 
 func (server *Server) handleRowHistory(w http.ResponseWriter, r *http.Request) {
-	dbName, tableName, recordID, ok := parseRowHistoryPath(r.URL.Path)
-	if !ok || r.Method != http.MethodGet {
+	dbName, tableName := r.PathValue("database"), r.PathValue("table")
+	recordID, ok := pathID(r, "recordID")
+	if !ok {
 		http.NotFound(w, r)
 		return
 	}
@@ -1132,11 +1134,7 @@ func (server *Server) handleWorkflowNodes(w http.ResponseWriter, _ *http.Request
 }
 
 func (server *Server) handleGetDatabaseResource(w http.ResponseWriter, r *http.Request) {
-	dbName, resource, ok := parseDatabaseResourcePath(r.URL.Path)
-	if !ok {
-		http.NotFound(w, r)
-		return
-	}
+	dbName, resource := r.PathValue("database"), r.PathValue("resource")
 	actorID, ok := server.requireUserID(w, r)
 	if !ok {
 		return
@@ -1199,16 +1197,7 @@ func (server *Server) handleGetDatabaseResource(w http.ResponseWriter, r *http.R
 }
 
 func (server *Server) handlePostDatabaseResource(w http.ResponseWriter, r *http.Request) {
-	// Webhooks authenticate with their own shared token instead of a session.
-	if dbName, workflowID, ok := parseWorkflowWebhookPath(r.URL.Path); ok {
-		server.handleWorkflowWebhook(w, r, dbName, workflowID)
-		return
-	}
-	dbName, resource, ok := parseDatabaseResourcePath(r.URL.Path)
-	if !ok {
-		http.NotFound(w, r)
-		return
-	}
+	dbName, resource := r.PathValue("database"), r.PathValue("resource")
 	actorID, ok := server.requireUserID(w, r)
 	if !ok {
 		return
@@ -1323,16 +1312,12 @@ func (server *Server) handlePostDatabaseResource(w http.ResponseWriter, r *http.
 	}
 }
 
-func (server *Server) handlePutDatabaseResource(w http.ResponseWriter, r *http.Request) {
-	if dbName, tableName, ok := parseDatabaseTablePath(r.URL.Path); ok {
-		server.handleUpdateTableMetadata(w, r, dbName, tableName)
-		return
-	}
-	dbName, roleName, action, ok := parseRoleActionPath(r.URL.Path)
-	if !ok {
-		http.NotFound(w, r)
-		return
-	}
+func (server *Server) handleUpdateTableMetadataRoute(w http.ResponseWriter, r *http.Request) {
+	server.handleUpdateTableMetadata(w, r, r.PathValue("database"), r.PathValue("table"))
+}
+
+func (server *Server) handleRoleAction(w http.ResponseWriter, r *http.Request) {
+	dbName, roleName, action := r.PathValue("database"), r.PathValue("role"), r.PathValue("action")
 	actorID, ok := server.requireUserID(w, r)
 	if !ok {
 		return
@@ -1381,12 +1366,8 @@ func (server *Server) handlePutDatabaseResource(w http.ResponseWriter, r *http.R
 	writeJSON(w, http.StatusOK, response)
 }
 
-func (server *Server) handlePatchDatabaseResource(w http.ResponseWriter, r *http.Request) {
-	dbName, tableName, fieldName, ok := parseDatabaseTableFieldPositionPath(r.URL.Path)
-	if !ok {
-		http.NotFound(w, r)
-		return
-	}
+func (server *Server) handleMoveFieldPosition(w http.ResponseWriter, r *http.Request) {
+	dbName, tableName, fieldName := r.PathValue("database"), r.PathValue("table"), r.PathValue("field")
 	actorID, ok := server.requireUserID(w, r)
 	if !ok {
 		return
@@ -1499,16 +1480,27 @@ func (server *Server) authorizeViewMetadataPatch(w http.ResponseWriter, actorID 
 	return true
 }
 
+func (server *Server) handleWorkflowRunsRoute(w http.ResponseWriter, r *http.Request) {
+	workflowID, ok := pathID(r, "workflowID")
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	server.handleWorkflowRuns(w, r, workflowID)
+}
+
+func (server *Server) handleWorkflowRunRoute(w http.ResponseWriter, r *http.Request) {
+	workflowID, ok := pathID(r, "workflowID")
+	historyKey := r.PathValue("historyKey")
+	if !ok || historyKey == "" {
+		http.NotFound(w, r)
+		return
+	}
+	server.handleWorkflowRun(w, r, workflowID, historyKey)
+}
+
 func (server *Server) handleGetWorkflow(w http.ResponseWriter, r *http.Request) {
-	if workflowID, historyKey, ok := parseWorkflowRunPath(r.URL.Path); ok {
-		server.handleWorkflowRun(w, r, workflowID, historyKey)
-		return
-	}
-	if id, ok := parseWorkflowRunsPath(r.URL.Path); ok {
-		server.handleWorkflowRuns(w, r, id)
-		return
-	}
-	id, ok := parseIDPath(r.URL.Path, "/api/workflows/")
+	id, ok := pathID(r, "workflowID")
 	if !ok {
 		http.NotFound(w, r)
 		return
@@ -1535,8 +1527,8 @@ func (server *Server) handleGetWorkflow(w http.ResponseWriter, r *http.Request) 
 }
 
 func (server *Server) handleRunWorkflow(w http.ResponseWriter, r *http.Request) {
-	id, ok := parseWorkflowRunsPath(r.URL.Path)
-	if !ok || r.Method != http.MethodPost {
+	id, ok := pathID(r, "workflowID")
+	if !ok {
 		http.NotFound(w, r)
 		return
 	}
@@ -2101,7 +2093,8 @@ func (server *Server) handleSaveForm(w http.ResponseWriter, r *http.Request) {
 }
 
 func (server *Server) handlePostFormAction(w http.ResponseWriter, r *http.Request) {
-	id, action, ok := parseFormActionPath(r.URL.Path)
+	id, ok := pathID(r, "formID")
+	action := r.PathValue("action")
 	if !ok || (action != "publish" && action != "unpublish") {
 		http.NotFound(w, r)
 		return
@@ -2134,7 +2127,7 @@ func (server *Server) handlePostFormAction(w http.ResponseWriter, r *http.Reques
 }
 
 func (server *Server) handleDeleteWorkflow(w http.ResponseWriter, r *http.Request) {
-	id, ok := parseIDPath(r.URL.Path, "/api/workflows/")
+	id, ok := pathID(r, "workflowID")
 	if !ok {
 		http.NotFound(w, r)
 		return
@@ -2166,7 +2159,7 @@ func (server *Server) handleDeleteWorkflow(w http.ResponseWriter, r *http.Reques
 }
 
 func (server *Server) handleDeleteForm(w http.ResponseWriter, r *http.Request) {
-	id, ok := parseIDPath(r.URL.Path, "/api/forms/")
+	id, ok := pathID(r, "formID")
 	if !ok {
 		http.NotFound(w, r)
 		return
@@ -2198,7 +2191,7 @@ func (server *Server) handleDeleteForm(w http.ResponseWriter, r *http.Request) {
 }
 
 func (server *Server) handleGetForm(w http.ResponseWriter, r *http.Request) {
-	id, ok := parseIDPath(r.URL.Path, "/api/forms/")
+	id, ok := pathID(r, "formID")
 	if !ok {
 		http.NotFound(w, r)
 		return
@@ -2225,8 +2218,8 @@ func (server *Server) handleGetForm(w http.ResponseWriter, r *http.Request) {
 }
 
 func (server *Server) handleGetPublishedForm(w http.ResponseWriter, r *http.Request) {
-	token, ok := parsePublishedFormPath(r.URL.Path, false)
-	if !ok {
+	token := r.PathValue("token")
+	if token == "" {
 		http.NotFound(w, r)
 		return
 	}
@@ -2251,118 +2244,27 @@ func (server *Server) handleGetPublishedForm(w http.ResponseWriter, r *http.Requ
 	writeJSON(w, http.StatusOK, form)
 }
 
-func parseTableRowsPath(path string) (string, string, bool) {
-	parts := strings.Split(strings.Trim(path, "/"), "/")
-	if len(parts) != 5 || parts[0] != "api" || parts[1] != "tables" || parts[4] != "rows" {
-		return "", "", false
-	}
-	return parts[2], parts[3], true
-}
 
-func parseTableFieldsPath(path string) (string, string, bool) {
-	parts := strings.Split(strings.Trim(path, "/"), "/")
-	if len(parts) != 5 || parts[0] != "api" || parts[1] != "tables" || parts[4] != "fields" {
-		return "", "", false
-	}
-	return parts[2], parts[3], true
-}
 
-func parseTableRowsUpsertPath(path string) (string, string, bool) {
-	parts := strings.Split(strings.Trim(path, "/"), "/")
-	if len(parts) != 6 || parts[0] != "api" || parts[1] != "tables" || parts[4] != "rows" || parts[5] != "upsert" {
-		return "", "", false
-	}
-	return parts[2], parts[3], true
-}
 
-func parseTableRowsQueryPath(path string) (string, string, bool) {
-	parts := strings.Split(strings.Trim(path, "/"), "/")
-	if len(parts) != 6 || parts[0] != "api" || parts[1] != "tables" || parts[4] != "rows" || parts[5] != "query" {
-		return "", "", false
-	}
-	return parts[2], parts[3], true
-}
 
-func parseFormActionPath(path string) (int64, string, bool) {
-	parts := strings.Split(strings.Trim(path, "/"), "/")
-	if len(parts) != 4 || parts[0] != "api" || parts[1] != "forms" {
-		return 0, "", false
-	}
-	id, err := strconv.ParseInt(parts[2], 10, 64)
-	if err != nil {
-		return 0, "", false
-	}
-	return id, parts[3], true
-}
 
-func parsePublishedFormPath(path string, submit bool) (string, bool) {
-	parts := strings.Split(strings.Trim(path, "/"), "/")
-	expectedLen := 4
-	if submit {
-		expectedLen = 5
-	}
-	if len(parts) != expectedLen || parts[0] != "api" || parts[1] != "published" || parts[2] != "forms" {
-		return "", false
-	}
-	if submit && parts[4] != "submit" {
-		return "", false
-	}
-	token, err := url.PathUnescape(parts[3])
-	if err != nil || token == "" {
-		return "", false
-	}
-	return token, true
-}
 
-func parseOIDCPath(path string) (string, string, bool) {
-	parts := strings.Split(strings.Trim(path, "/"), "/")
-	if len(parts) != 5 || parts[0] != "api" || parts[1] != "auth" || parts[2] != "oidc" {
-		return "", "", false
-	}
-	providerName, err := url.PathUnescape(parts[3])
-	if err != nil || providerName == "" {
-		return "", "", false
-	}
-	return providerName, parts[4], true
-}
 
-func parseRowHistoryPath(path string) (string, string, int64, bool) {
-	parts := strings.Split(strings.Trim(path, "/"), "/")
-	if len(parts) != 7 || parts[0] != "api" || parts[1] != "tables" || parts[4] != "rows" || parts[6] != "history" {
-		return "", "", 0, false
-	}
-	recordID, err := strconv.ParseInt(parts[5], 10, 64)
-	if err != nil {
-		return "", "", 0, false
-	}
-	return parts[2], parts[3], recordID, true
-}
 
-func parseTableRowPath(path string) (string, string, int64, bool) {
-	parts := strings.Split(strings.Trim(path, "/"), "/")
-	if len(parts) != 6 || parts[0] != "api" || parts[1] != "tables" || parts[4] != "rows" {
-		return "", "", 0, false
-	}
-	recordID, err := strconv.ParseInt(parts[5], 10, 64)
-	if err != nil {
-		return "", "", 0, false
-	}
-	return parts[2], parts[3], recordID, true
-}
-
-func parseWorkflowWebhookPath(path string) (string, int64, bool) {
-	parts := strings.Split(strings.Trim(path, "/"), "/")
-	if len(parts) != 6 || parts[0] != "api" || parts[1] != "databases" || parts[3] != "workflows" || parts[5] != "webhook" {
-		return "", 0, false
-	}
-	workflowID, err := strconv.ParseInt(parts[4], 10, 64)
-	if err != nil || workflowID <= 0 {
-		return "", 0, false
-	}
-	return parts[2], workflowID, true
-}
 
 const maxWebhookBodyBytes = 1 << 20
+
+// handleWorkflowWebhookRoute is registered with a wildcard pattern; webhooks
+// authenticate with their shared token instead of a session.
+func (server *Server) handleWorkflowWebhookRoute(w http.ResponseWriter, r *http.Request) {
+	workflowID, err := strconv.ParseInt(r.PathValue("workflowID"), 10, 64)
+	if err != nil || workflowID <= 0 {
+		http.NotFound(w, r)
+		return
+	}
+	server.handleWorkflowWebhook(w, r, r.PathValue("database"), workflowID)
+}
 
 type workflowWebhookRequest struct {
 	Token   string         `json:"token"`
@@ -2436,99 +2338,12 @@ func (server *Server) handleWorkflowWebhook(w http.ResponseWriter, r *http.Reque
 	writeJSON(w, http.StatusAccepted, map[string]any{"accepted": true})
 }
 
-func parseDatabaseResourcePath(path string) (string, string, bool) {
-	parts := strings.Split(strings.Trim(path, "/"), "/")
-	if len(parts) != 4 || parts[0] != "api" || parts[1] != "databases" {
-		return "", "", false
-	}
-	if parts[3] != "tables" && parts[3] != "workflows" && parts[3] != "forms" && parts[3] != "roles" && parts[3] != "runners" {
-		return "", "", false
-	}
-	return parts[2], parts[3], true
-}
 
-func parseDatabaseTablePath(path string) (string, string, bool) {
-	parts := strings.Split(strings.Trim(path, "/"), "/")
-	if len(parts) != 5 || parts[0] != "api" || parts[1] != "databases" || parts[3] != "tables" {
-		return "", "", false
-	}
-	if parts[2] == "" || parts[4] == "" {
-		return "", "", false
-	}
-	return parts[2], parts[4], true
-}
 
-func parseDatabaseTableFieldPositionPath(path string) (string, string, string, bool) {
-	parts := strings.Split(strings.Trim(path, "/"), "/")
-	if len(parts) != 8 || parts[0] != "api" || parts[1] != "databases" || parts[3] != "tables" || parts[5] != "fields" || parts[7] != "position" {
-		return "", "", "", false
-	}
-	if parts[2] == "" || parts[4] == "" || parts[6] == "" {
-		return "", "", "", false
-	}
-	dbName, err := url.PathUnescape(parts[2])
-	if err != nil || dbName == "" {
-		return "", "", "", false
-	}
-	tableName, err := url.PathUnescape(parts[4])
-	if err != nil || tableName == "" {
-		return "", "", "", false
-	}
-	fieldName, err := url.PathUnescape(parts[6])
-	if err != nil || fieldName == "" {
-		return "", "", "", false
-	}
-	return dbName, tableName, fieldName, true
-}
 
-func parseRoleActionPath(path string) (string, string, string, bool) {
-	parts := strings.Split(strings.Trim(path, "/"), "/")
-	if len(parts) != 6 || parts[0] != "api" || parts[1] != "databases" || parts[3] != "roles" {
-		return "", "", "", false
-	}
-	if parts[5] != "grants" && parts[5] != "members" {
-		return "", "", "", false
-	}
-	roleName, err := url.PathUnescape(parts[4])
-	if err != nil || roleName == "" {
-		return "", "", "", false
-	}
-	return parts[2], roleName, parts[5], true
-}
 
-func parseWorkflowRunsPath(path string) (int64, bool) {
-	parts := strings.Split(strings.Trim(path, "/"), "/")
-	if len(parts) != 4 || parts[0] != "api" || parts[1] != "workflows" || parts[3] != "runs" {
-		return 0, false
-	}
-	id, err := strconv.ParseInt(parts[2], 10, 64)
-	return id, err == nil
-}
 
-func parseWorkflowRunPath(path string) (int64, string, bool) {
-	parts := strings.Split(strings.Trim(path, "/"), "/")
-	if len(parts) != 5 || parts[0] != "api" || parts[1] != "workflows" || parts[3] != "runs" {
-		return 0, "", false
-	}
-	id, err := strconv.ParseInt(parts[2], 10, 64)
-	if err != nil {
-		return 0, "", false
-	}
-	historyKey, err := url.PathUnescape(parts[4])
-	if err != nil || historyKey == "" {
-		return 0, "", false
-	}
-	return id, historyKey, true
-}
 
-func parseIDPath(path, prefix string) (int64, bool) {
-	rawID := strings.TrimPrefix(path, prefix)
-	if rawID == "" || rawID == path || strings.Contains(rawID, "/") {
-		return 0, false
-	}
-	id, err := strconv.ParseInt(rawID, 10, 64)
-	return id, err == nil
-}
 
 func readJSON(r *http.Request, target any) error {
 	defer r.Body.Close()
@@ -3878,8 +3693,8 @@ func (server *Server) handleDownloadFile(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusUnauthorized, errors.New("authentication is required"))
 		return
 	}
-	id, err := strconv.ParseInt(strings.TrimPrefix(r.URL.Path, "/api/files/"), 10, 64)
-	if err != nil || id <= 0 {
+	id, ok := pathID(r, "fileID")
+	if !ok {
 		http.NotFound(w, r)
 		return
 	}
