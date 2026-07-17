@@ -236,6 +236,53 @@ func TestRunnerPersistsFailedRuns(t *testing.T) {
 	}
 }
 
+func TestRunnerPersistsRunsWithUnserializableOutputs(t *testing.T) {
+	ctx := context.Background()
+	store := history.NewMemoryStore()
+	runner := NewRunner(store, testEchoNode{})
+
+	run, key, err := runner.Run(ctx, Definition{
+		ID:     11,
+		Script: `function instances(info) { return { main: "echo" }; } function run(info) { info.instance("main").exec({ value: 1 }); return { info }; }`,
+	}, nil)
+	if err == nil || !strings.Contains(err.Error(), "cannot be serialized to JSON") {
+		t.Fatalf("expected serialization error, got %v", err)
+	}
+	if key == "" {
+		t.Fatal("expected the failed run to be persisted with a history key")
+	}
+	if run.Error == "" || len(run.Steps) != 1 {
+		t.Fatalf("expected failed run with the executed step, got %#v", run)
+	}
+	entries, err := store.GetPrefix(ctx, history.WorkflowPrefix(11))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected failed run to be persisted, got %d", len(entries))
+	}
+}
+
+func TestRunnerRejectsUnserializableExecInput(t *testing.T) {
+	ctx := context.Background()
+	store := history.NewMemoryStore()
+	runner := NewRunner(store, testEchoNode{})
+
+	run, key, err := runner.Run(ctx, Definition{
+		ID:     12,
+		Script: `function instances(info) { return { main: "echo" }; } function run(info) { return info.instance("main").exec({ callback: function() {} }); }`,
+	}, nil)
+	if err == nil || !strings.Contains(err.Error(), "cannot be serialized to JSON") {
+		t.Fatalf("expected serialization error, got %v", err)
+	}
+	if key == "" {
+		t.Fatal("expected the failed run to be persisted with a history key")
+	}
+	if run.Error == "" || len(run.Steps) != 0 {
+		t.Fatalf("expected failed run without steps, got %#v", run)
+	}
+}
+
 func TestRunnerUsesCreatorIdentityOnlyInsideNodes(t *testing.T) {
 	ctx := context.Background()
 	capture := &creatorCaptureNode{}

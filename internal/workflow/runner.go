@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -111,6 +112,9 @@ func (runner *Runner) RunAt(ctx context.Context, definition Definition, inputs m
 			"node": declaration.Node,
 			"exec": func(call goja.FunctionCall) goja.Value {
 				nodeInput := exportedMap(call.Argument(0).Export())
+				if err := ensureSerializable(nodeInput); err != nil {
+					panic(runtime.ToValue(fmt.Sprintf("exec input for instance %q cannot be serialized to JSON: %v", instanceID, err)))
+				}
 				output, err := runner.runInstance(ctx, definition, runID, instanceID, declaration, nodeInput, &run)
 				if err != nil {
 					panic(runtime.ToValue(err.Error()))
@@ -131,8 +135,19 @@ func (runner *Runner) RunAt(ctx context.Context, definition Definition, inputs m
 	if err != nil {
 		return runner.finish(ctx, run, err)
 	}
-	run.Outputs = exportedMap(output.Export())
+	outputs := exportedMap(output.Export())
+	if err := ensureSerializable(outputs); err != nil {
+		return runner.finish(ctx, run, fmt.Errorf("run() returned a value that cannot be serialized to JSON (return plain data, not the info object): %w", err))
+	}
+	run.Outputs = outputs
 	return runner.finish(ctx, run, nil)
+}
+
+// ensureSerializable rejects script values the history store cannot persist,
+// such as functions the runtime injects into info.
+func ensureSerializable(value map[string]any) error {
+	_, err := json.Marshal(value)
+	return err
 }
 
 func (runner *Runner) Instances(ctx context.Context, definition Definition) (map[string]InstanceDeclaration, error) {
