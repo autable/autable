@@ -4607,3 +4607,42 @@ function run(info) { return info.instance("main").exec({ value: info.inputs.payl
 		t.Fatalf("expected the bystander workflow to stay idle, got %d runs", len(otherRuns))
 	}
 }
+
+func TestDatabaseScopedWorkflowSaveCarriesHistoryRetention(t *testing.T) {
+	server, system := newTestServer(t)
+	cookie := testSessionCookie(t, system, "retention-db-save")
+	saveTestGrants(t, system,
+		permission.Grant{SubjectID: "retention-db-save", Scope: permission.ScopeWorkflowSet, Resource: "db", Level: permission.Write},
+	)
+
+	request := httptest.NewRequest(http.MethodPost, "/api/databases/db/workflows", strings.NewReader(`{
+		"database_name":"db",
+		"name":"retained-db",
+		"script":"function instances(info) { return { main: \"echo\" }; } function run(info) { return {}; }",
+		"secrets":{},
+		"variables":{},
+		"history_retention_days":30
+	}`))
+	request.Header.Set("Content-Type", "application/json")
+	request.AddCookie(cookie)
+	recorder := httptest.NewRecorder()
+	server.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+	var saved workflowDefinitionResponse
+	if err := json.NewDecoder(recorder.Body).Decode(&saved); err != nil {
+		t.Fatal(err)
+	}
+	if saved.HistoryRetentionDays == nil || *saved.HistoryRetentionDays != 30 {
+		t.Fatalf("expected retention 30, got %#v", saved.HistoryRetentionDays)
+	}
+
+	stored, err := system.Workflow(context.Background(), saved.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.HistoryRetentionDays == nil || *stored.HistoryRetentionDays != 30 {
+		t.Fatalf("expected persisted retention 30, got %#v", stored.HistoryRetentionDays)
+	}
+}

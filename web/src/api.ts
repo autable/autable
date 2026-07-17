@@ -694,6 +694,7 @@ export async function saveWorkflow(
     secrets: workflow.secret_values ?? {},
     variables: workflow.variables,
     runners: workflow.runners ?? {},
+    history_retention_days: workflow.history_retention_days ?? null,
     permission_level: workflow.permission_level,
     created_at: workflow.created_at,
     updated_at: workflow.updated_at

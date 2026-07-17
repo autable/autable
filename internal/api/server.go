@@ -1243,6 +1243,10 @@ func (server *Server) handlePostDatabaseResource(w http.ResponseWriter, r *http.
 			writeError(w, http.StatusBadRequest, err)
 			return
 		}
+		if workflow.HistoryRetentionDays != nil && *workflow.HistoryRetentionDays < 0 {
+			writeError(w, http.StatusBadRequest, fmt.Errorf("history_retention_days must be at least 0, got %d", *workflow.HistoryRetentionDays))
+			return
+		}
 		saved, err := server.saveWorkflowDefinition(r.Context(), actorID, workflow)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err)
