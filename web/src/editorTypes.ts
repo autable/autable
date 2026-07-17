@@ -84,6 +84,7 @@ declare global {
     input(config: { field: string; label?: string; type?: AutableFormInputType; scanner?: boolean | AutableFormScannerConfig; onChange?: AutableFormAction }): AutableFormElement;
     relation(config: { field: string; label?: string; table: string; view?: string; fields?: string[] }): AutableFormElement;
     select(config: { field: string; label?: string; options: string[] }): AutableFormElement;
+    file(config: { field: string; label?: string }): AutableFormElement;
     button(label: string, action: AutableFormAction): AutableFormElement;
     button(config: { id?: string; label: string; action: AutableFormAction }): AutableFormElement;
     submit(label: string): AutableFormElement;

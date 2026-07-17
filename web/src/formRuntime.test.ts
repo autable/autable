@@ -159,4 +159,16 @@ describe("renderFormScript", () => {
     expect(result.error).toBeUndefined();
     expect(result.elements).toEqual([{ kind: "html", html: "<strong>Custom note</strong>" }]);
   });
+
+  it("renders file inputs from api.file", () => {
+    const rendered = renderFormScript(`
+      function render(api, root) {
+        root.append(api.file({ field: "attachment", label: "Attachment" }), api.submit("Save"));
+        return { table: "contacts" };
+      }
+    `);
+    expect(rendered.error).toBeUndefined();
+    expect(rendered.elements[0]).toEqual({ kind: "file", field: "attachment", label: "Attachment" });
+    expect(rendered.table).toBe("contacts");
+  });
 });

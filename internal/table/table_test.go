@@ -1026,3 +1026,66 @@ func TestRowsWithOptionsRejectsUnreadableQueryFields(t *testing.T) {
 		t.Fatalf("expected unreadable query field permission error, got %v", err)
 	}
 }
+
+type recordingFileBinder struct {
+	bound map[int64]string
+	fail  map[int64]string
+}
+
+func (binder *recordingFileBinder) BindFileToRecord(_ context.Context, actorID string, fileID int64, dbName, tableName string, recordID int64) error {
+	if message, ok := binder.fail[fileID]; ok {
+		return errors.New(message)
+	}
+	if binder.bound == nil {
+		binder.bound = map[int64]string{}
+	}
+	binder.bound[fileID] = fmt.Sprintf("%s@%s.%s#%d", actorID, dbName, tableName, recordID)
+	return nil
+}
+
+func testFileCatalog() metadata.Catalog {
+	return metadata.Catalog{Databases: []metadata.Database{{
+		Name: "db",
+		Tables: []metadata.Table{{
+			Name: "contacts",
+			Fields: []metadata.Field{
+				{Name: "name", Type: "string"},
+				{Name: "attachment", Type: "file"},
+			},
+		}},
+	}}}
+}
+
+func TestRowWritesBindFileCells(t *testing.T) {
+	ctx := context.Background()
+	service, catalog, _ := newSQLiteService(t, history.NewMemoryStore(), testFileCatalog())
+	binder := &recordingFileBinder{fail: map[int64]string{9: "file 9 is already bound to record 3 and cannot be moved"}}
+	service.SetFileBinder(binder)
+	perms := testWritePerms()
+
+	row, err := service.CreateRow(ctx, catalog, perms, "u1", false, "db", "contacts", map[string]any{"name": "Ada", "attachment": 5})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if binder.bound[5] != fmt.Sprintf("u1@db.contacts#%d", row.RecordID) {
+		t.Fatalf("expected file 5 bound to the new record, got %#v", binder.bound)
+	}
+
+	if _, err := service.UpdateRow(ctx, catalog, perms, "u1", false, "db", "contacts", row.RecordID, map[string]any{"attachment": 9}); err == nil {
+		t.Fatal("expected rebinding a bound file to fail the update")
+	}
+
+	if _, err := service.UpdateRow(ctx, catalog, perms, "u1", false, "db", "contacts", row.RecordID, map[string]any{"attachment": nil}); err != nil {
+		t.Fatalf("expected clearing the file cell to succeed, got %v", err)
+	}
+}
+
+func TestRowWritesRejectFileCellsWithoutBinder(t *testing.T) {
+	ctx := context.Background()
+	service, catalog, _ := newSQLiteService(t, history.NewMemoryStore(), testFileCatalog())
+	perms := testWritePerms()
+
+	if _, err := service.CreateRow(ctx, catalog, perms, "u1", false, "db", "contacts", map[string]any{"attachment": 5}); err == nil {
+		t.Fatal("expected file cell write without a binder to fail")
+	}
+}

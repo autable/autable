@@ -8,6 +8,7 @@ export type FormElement =
       onChangeActionID?: string;
     }
   | { kind: "select"; field: string; label: string; options: string[] }
+  | { kind: "file"; field: string; label: string }
   | { kind: "relation"; field: string; label: string; table: string; view?: string; fields?: string[] }
   | { kind: "button"; id: string; label: string; actionID: string }
   | { kind: "submit"; id: string; label: string; actionID: string }
@@ -39,6 +40,11 @@ type SelectConfig = {
   field: string;
   label?: string;
   options?: string[];
+};
+
+type FileConfig = {
+  field: string;
+  label?: string;
 };
 
 type RelationConfig = {
@@ -108,6 +114,14 @@ export function renderFormScript(script: string): FormRenderResult {
         field,
         label: config.label ?? field,
         options: Array.isArray(config.options) ? config.options.map(String) : []
+      };
+    },
+    file: (config: FileConfig): FormElement => {
+      const field = formControlField(config);
+      return {
+        kind: "file",
+        field,
+        label: config.label ?? field
       };
     },
     relation: (config: RelationConfig): FormElement => {
@@ -312,5 +326,5 @@ function isFormElement(value: unknown): value is FormElement {
     return false;
   }
   const kind = (value as { kind?: unknown }).kind;
-  return kind === "input" || kind === "select" || kind === "relation" || kind === "button" || kind === "submit" || kind === "html";
+  return kind === "input" || kind === "select" || kind === "file" || kind === "relation" || kind === "button" || kind === "submit" || kind === "html";
 }

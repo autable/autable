@@ -147,6 +147,9 @@ s3:
     backup: "backup"
     files: "files"
 
+files:
+  max_upload_size_mb: 20
+
 backup:
   enabled: true
   interval: "24h"

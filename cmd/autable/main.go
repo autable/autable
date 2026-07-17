@@ -158,10 +158,12 @@ func run(ctx context.Context, configPath string) error {
 		}
 		fileStore = s3Files
 	}
+	tableService := table.NewServiceWithRepository(historyStore, rowRepository)
+	tableService.SetFileBinder(system)
 	server := api.NewServerWithAuthConfig(
 		catalog,
 		system,
-		table.NewServiceWithRepository(historyStore, rowRepository),
+		tableService,
 		historyStore,
 		cfg.Auth,
 	)
@@ -169,6 +171,7 @@ func run(ctx context.Context, configPath string) error {
 	if fileStore != nil {
 		server.SetFileStore(fileStore)
 	}
+	server.SetFileUploadLimit(cfg.Files.MaxUploadSizeMB << 20)
 	server.EnableMetadataWrites(metadataPath)
 	server.SetRepositoryPath(cfg.Repository.Path)
 	server.SetDatabaseOpener(func(ctx context.Context, name string) error {

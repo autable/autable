@@ -16,6 +16,7 @@ type Config struct {
 	Data       DataConfig       `yaml:"data"`
 	Repository RepositoryConfig `yaml:"repository"`
 	S3         S3Config         `yaml:"s3"`
+	Files      FilesConfig      `yaml:"files"`
 	Backup     BackupConfig     `yaml:"backup"`
 	Auth       AuthConfig       `yaml:"auth"`
 	AI         AIConfig         `yaml:"ai"`
@@ -96,6 +97,11 @@ func (s3 S3Config) IsConfigured() bool {
 	return s3.Connection.Bucket != ""
 }
 
+type FilesConfig struct {
+	// MaxUploadSizeMB caps a single uploaded file, defaults to 20.
+	MaxUploadSizeMB int64 `yaml:"max_upload_size_mb"`
+}
+
 type AuthConfig struct {
 	Password PasswordAuthConfig `yaml:"password"`
 	OIDC     OIDCConfig         `yaml:"oidc"`
@@ -134,6 +140,9 @@ func Load(path string) (Config, error) {
 	if cfg.S3.Directories.Files == "" {
 		cfg.S3.Directories.Files = "files"
 	}
+	if cfg.Files.MaxUploadSizeMB == 0 {
+		cfg.Files.MaxUploadSizeMB = 20
+	}
 
 	if err := cfg.Validate(); err != nil {
 		return Config{}, err
@@ -156,6 +165,9 @@ func (cfg Config) Validate() error {
 	}
 	if cfg.Backup.Enabled && !cfg.S3.IsConfigured() {
 		return errors.New("s3.connection.bucket is required when backup.enabled is true")
+	}
+	if cfg.Files.MaxUploadSizeMB < 0 {
+		return errors.New("files.max_upload_size_mb must be positive")
 	}
 	if !cfg.Auth.Password.Enabled && !cfg.Auth.OIDC.Enabled {
 		return errors.New("at least one auth method is required")

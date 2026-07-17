@@ -80,10 +80,14 @@
     "noRoleDescription": "在「角色」列表点 + 新建第一个角色。"
   },
   "form": {
+    "chooseFile": "选择文件",
     "chooseRelation": "选择",
     "databaseMetadataMissing": "数据库元数据缺失：{{database}}",
+    "fileUploadFailed": "文件上传失败",
+    "fileUploading": "上传中…",
     "formScriptLabel": "表单 JavaScript",
     "loadingRelationRecords": "正在加载记录",
+    "noFileSelected": "未选择文件",
     "noRelationRecords": "没有记录",
     "noRelationSelected": "未选择记录",
     "publishedForm": "公开表单",

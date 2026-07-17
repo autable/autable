@@ -36,6 +36,7 @@ export function FormRunner({
       <FormPreviewFields
         databaseName={databaseName}
         elements={renderedForm.elements}
+        formTable={renderedForm.table}
         formValues={values}
         result={result}
         onAction={onAction}

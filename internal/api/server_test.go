@@ -3739,7 +3739,9 @@ func newTestServerWithAuth(t *testing.T, authConfig config.AuthConfig) (*Server,
 			t.Fatal(err)
 		}
 	})
-	server := NewServerWithAuthConfig(catalog, system, table.NewServiceWithRepository(historyStore, repository), historyStore, authConfig)
+	tableService := table.NewServiceWithRepository(historyStore, repository)
+	tableService.SetFileBinder(system)
+	server := NewServerWithAuthConfig(catalog, system, tableService, historyStore, authConfig)
 	if authConfig.OIDC.Enabled {
 		server.SetPublicURL("https://configured.example")
 	}
@@ -4284,5 +4286,56 @@ func TestFilePermissionsGateUploadAndDownload(t *testing.T) {
 	}
 	if len(records) != 0 {
 		t.Fatalf("expected metadata to hide unauthorized files, got %#v", records)
+	}
+}
+
+func TestUnboundFilesAreNotDownloadable(t *testing.T) {
+	server, system := newTestServer(t)
+	server.SetFileStore(newMemoryFileStore())
+	ownerCookie := testSessionCookie(t, system, "owner2")
+	if err := system.SaveDatabaseOwner(context.Background(), "db", "owner2"); err != nil {
+		t.Fatal(err)
+	}
+
+	recorder := uploadTestFileRequest(t, server, ownerCookie, "pending.txt", "x", map[string]string{
+		"database_name": "db", "table_name": "contacts", "record_id": "0",
+	})
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("expected upload 201, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+	var record systemdb.FileRecord
+	if err := json.NewDecoder(recorder.Body).Decode(&record); err != nil {
+		t.Fatal(err)
+	}
+
+	download := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/files/%d", record.ID), nil)
+	download.AddCookie(ownerCookie)
+	downloadRecorder := httptest.NewRecorder()
+	server.ServeHTTP(downloadRecorder, download)
+	if downloadRecorder.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for an unbound file even for the owner, got %d", downloadRecorder.Code)
+	}
+}
+
+func TestUploadRejectsFilesOverTheLimit(t *testing.T) {
+	server, system := newTestServer(t)
+	server.SetFileStore(newMemoryFileStore())
+	server.SetFileUploadLimit(8)
+	cookie := testSessionCookie(t, system, "owner3")
+	if err := system.SaveDatabaseOwner(context.Background(), "db", "owner3"); err != nil {
+		t.Fatal(err)
+	}
+
+	recorder := uploadTestFileRequest(t, server, cookie, "big.bin", "123456789", map[string]string{
+		"database_name": "db", "table_name": "contacts",
+	})
+	if recorder.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("expected 413 over the upload limit, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+	small := uploadTestFileRequest(t, server, cookie, "small.bin", "1234", map[string]string{
+		"database_name": "db", "table_name": "contacts",
+	})
+	if small.Code != http.StatusCreated {
+		t.Fatalf("expected 201 under the limit, got %d: %s", small.Code, small.Body.String())
 	}
 }

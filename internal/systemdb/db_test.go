@@ -489,3 +489,49 @@ func openTestDB(t *testing.T) *DB {
 	})
 	return db
 }
+
+func TestBindFileToRecordIsOneShot(t *testing.T) {
+	ctx := context.Background()
+	db := openTestDB(t)
+
+	file, err := db.CreateFile(ctx, FileRecord{Name: "a.pdf", DatabaseName: "db", TableName: "contacts", CreatorID: "alice"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if file.RecordID != 0 {
+		t.Fatalf("expected unbound file, got %#v", file)
+	}
+
+	if err := db.BindFileToRecord(ctx, "bob", file.ID, "db", "contacts", 7); err == nil {
+		t.Fatal("expected binding by a non-uploader to fail")
+	}
+	if err := db.BindFileToRecord(ctx, "alice", file.ID, "db", "contacts", 7); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.BindFileToRecord(ctx, "alice", file.ID, "db", "contacts", 7); err != nil {
+		t.Fatalf("expected rebinding to the same record to be a no-op, got %v", err)
+	}
+	if err := db.BindFileToRecord(ctx, "bob", file.ID, "db", "contacts", 7); err != nil {
+		t.Fatalf("expected the already-bound no-op to pass for other actors, got %v", err)
+	}
+	if err := db.BindFileToRecord(ctx, "alice", file.ID, "db", "contacts", 8); err == nil {
+		t.Fatal("expected binding to a second record to fail")
+	}
+	if err := db.BindFileToRecord(ctx, "alice", file.ID, "db", "orders", 7); err == nil {
+		t.Fatal("expected binding to another table to fail")
+	}
+	if err := db.BindFileToRecord(ctx, "alice", file.ID+99, "db", "contacts", 7); err == nil {
+		t.Fatal("expected binding a missing file to fail")
+	}
+
+	bound, err := db.File(ctx, file.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bound.RecordID != 7 {
+		t.Fatalf("expected file bound to record 7, got %#v", bound)
+	}
+	if bound.CreatedAt <= 0 {
+		t.Fatalf("expected a created_at timestamp, got %#v", bound)
+	}
+}

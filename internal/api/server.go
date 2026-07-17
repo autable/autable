@@ -48,6 +48,7 @@ type Server struct {
 	runner           *workflow.Runner
 	runnerHub        *runnerhub.Hub
 	files            FileStore
+	fileUploadLimit  int64
 	auth             config.AuthConfig
 	publicURL        string
 	workflowWorkers  map[string]*workflowEventWorker
@@ -80,6 +81,20 @@ type FileStore interface {
 // SetFileStore enables the file upload and download endpoints.
 func (server *Server) SetFileStore(files FileStore) {
 	server.files = files
+}
+
+// SetFileUploadLimit caps a single uploaded file in bytes.
+func (server *Server) SetFileUploadLimit(limit int64) {
+	if limit > 0 {
+		server.fileUploadLimit = limit
+	}
+}
+
+func (server *Server) uploadLimit() int64 {
+	if server.fileUploadLimit > 0 {
+		return server.fileUploadLimit
+	}
+	return defaultFileUploadBytes
 }
 
 type createDatabaseRequest struct {
@@ -3580,7 +3595,11 @@ func ContextWithUser(ctx context.Context, userID string) context.Context {
 
 type userContextKey struct{}
 
-const maxFileUploadBytes = 100 << 20
+const defaultFileUploadBytes = 20 << 20
+
+// multipart form overhead on top of the file itself: boundaries plus the
+// binding fields.
+const uploadFormOverheadBytes = 1 << 20
 
 func (server *Server) handleUploadFile(w http.ResponseWriter, r *http.Request) {
 	actorID, ok := server.requireUserID(w, r)
@@ -3591,13 +3610,18 @@ func (server *Server) handleUploadFile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, errors.New("file storage is not configured"))
 		return
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, maxFileUploadBytes)
+	limit := server.uploadLimit()
+	r.Body = http.MaxBytesReader(w, r.Body, limit+uploadFormOverheadBytes)
 	file, header, err := r.FormFile("file")
 	if err != nil {
 		writeError(w, http.StatusBadRequest, fmt.Errorf("read multipart file field: %w", err))
 		return
 	}
 	defer file.Close()
+	if header.Size > limit {
+		writeError(w, http.StatusRequestEntityTooLarge, fmt.Errorf("file is %d bytes, the upload limit is %d bytes", header.Size, limit))
+		return
+	}
 	dbName := strings.TrimSpace(r.FormValue("database_name"))
 	tableName := strings.TrimSpace(r.FormValue("table_name"))
 	if dbName == "" || tableName == "" {
@@ -3668,7 +3692,7 @@ func (server *Server) handleFileMetadata(w http.ResponseWriter, r *http.Request)
 			writeError(w, http.StatusInternalServerError, err)
 			return
 		}
-		if !server.canAccessTableFiles(r.Context(), actorID, record.DatabaseName, record.TableName) {
+		if !server.canViewFile(r.Context(), actorID, record) {
 			continue
 		}
 		records = append(records, record)
@@ -3695,7 +3719,7 @@ func (server *Server) handleDownloadFile(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	if !server.canAccessTableFiles(r.Context(), actorID, record.DatabaseName, record.TableName) {
+	if !server.canViewFile(r.Context(), actorID, record) {
 		writeError(w, http.StatusForbidden, table.ErrPermissionDenied)
 		return
 	}
@@ -3716,10 +3740,19 @@ func (server *Server) handleDownloadFile(w http.ResponseWriter, r *http.Request)
 	_, _ = io.Copy(w, body)
 }
 
-// canAccessTableFiles reports whether the actor may view or upload files
-// bound to the given table: the database owner always may, everyone else
-// needs a file-scope grant on the table. Files without a binding (uploaded
-// before bindings existed) are accessible to database owners only.
+// canViewFile allows downloads only for files already bound to a record:
+// permissions are mandatory, so an upload that no row references yet is
+// visible to nobody. The viewer additionally needs table file access.
+func (server *Server) canViewFile(ctx context.Context, actorID string, record systemdb.FileRecord) bool {
+	if record.RecordID <= 0 {
+		return false
+	}
+	return server.canAccessTableFiles(ctx, actorID, record.DatabaseName, record.TableName)
+}
+
+// canAccessTableFiles reports whether the actor may work with files of the
+// given table: the database owner always may, everyone else needs a
+// file-scope grant on the table.
 func (server *Server) canAccessTableFiles(ctx context.Context, actorID string, dbName string, tableName string) bool {
 	if dbName == "" {
 		return false

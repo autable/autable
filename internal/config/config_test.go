@@ -235,4 +235,7 @@ s3:
 	if cfg.S3.Directories.Backup != "backup" || cfg.S3.Directories.Files != "files" {
 		t.Fatalf("expected default directories, got %#v", cfg.S3.Directories)
 	}
+	if cfg.Files.MaxUploadSizeMB != 20 {
+		t.Fatalf("expected default upload limit of 20 MB, got %d", cfg.Files.MaxUploadSizeMB)
+	}
 }

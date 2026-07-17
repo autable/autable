@@ -15,7 +15,7 @@ import {
 import { Flash24Regular, FlashOff24Regular, ScanQrCode24Regular } from "@fluentui/react-icons";
 import type { Column } from "react-data-grid";
 import { useTranslation } from "react-i18next";
-import { listRows, type RowRecord, type TableMetadata } from "../api";
+import { listRows, uploadFile, type RowRecord, type TableMetadata } from "../api";
 import type { FormElement } from "../formRuntime";
 import { useBarcodeScanner, type BarcodeScanResult } from "../hooks/useBarcodeScanner";
 import { rowRecordToValues, type TableGridRow } from "../tableGrid";
@@ -24,6 +24,7 @@ import { RecordDataGrid } from "./RecordDataGrid";
 type FormPreviewFieldsProps = {
   databaseName: string;
   elements: FormElement[];
+  formTable?: string;
   formValues: Record<string, string>;
   result?: unknown;
   onAction: (actionID: string, valueOverrides?: Record<string, string>) => void | Promise<void>;
@@ -34,6 +35,7 @@ type FormPreviewFieldsProps = {
 export function FormPreviewFields({
   databaseName,
   elements,
+  formTable,
   formValues,
   result,
   onAction,
@@ -82,6 +84,18 @@ export function FormPreviewFields({
                 ))}
               </Select>
             </label>
+          );
+        }
+        if (element.kind === "file") {
+          return (
+            <FileFormInput
+              key={element.field}
+              databaseName={databaseName}
+              element={element}
+              formTable={formTable}
+              onChange={(value) => onFormValueChange(element.field, value)}
+              value={formValues[element.field] ?? ""}
+            />
           );
         }
         if (element.kind === "relation") {
@@ -302,6 +316,72 @@ function ScannerInput({
           </DialogSurface>
         </Dialog>
       )}
+    </div>
+  );
+}
+
+function FileFormInput({
+  databaseName,
+  element,
+  formTable,
+  onChange,
+  value
+}: {
+  databaseName: string;
+  element: Extract<FormElement, { kind: "file" }>;
+  formTable?: string;
+  onChange: (value: string) => void;
+  value: string;
+}) {
+  const { t } = useTranslation();
+  const [fileName, setFileName] = useState("");
+  const [error, setError] = useState("");
+  const [uploading, setUploading] = useState(false);
+
+  function pickFile() {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      if (!file) {
+        return;
+      }
+      setUploading(true);
+      setError("");
+      try {
+        const record = await uploadFile(file, databaseName, formTable ?? "", 0);
+        setFileName(record.name);
+        onChange(String(record.id));
+      } catch (uploadError) {
+        setError(uploadError instanceof Error ? uploadError.message : t("form.fileUploadFailed"));
+      } finally {
+        setUploading(false);
+      }
+    };
+    input.click();
+  }
+
+  return (
+    <div className="field-stack">
+      <span>{element.label}</span>
+      <div className="relation-input">
+        <Input readOnly value={fileName || (value ? `#${value}` : "")} placeholder={t("form.noFileSelected")} />
+        {value && (
+          <Button
+            type="button"
+            onClick={() => {
+              onChange("");
+              setFileName("");
+            }}
+          >
+            {t("common.clear")}
+          </Button>
+        )}
+        <Button type="button" appearance="primary" disabled={uploading || !formTable} onClick={pickFile}>
+          {uploading ? t("form.fileUploading") : t("form.chooseFile")}
+        </Button>
+      </div>
+      {error && <Text className="form-error">{error}</Text>}
     </div>
   );
 }

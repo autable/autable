@@ -80,10 +80,14 @@
     "noRoleDescription": "Use + in the Roles list to create your first role."
   },
   "form": {
+    "chooseFile": "Choose file",
     "chooseRelation": "Choose",
     "databaseMetadataMissing": "Database metadata is missing: {{database}}",
+    "fileUploadFailed": "File upload failed",
+    "fileUploading": "Uploading…",
     "formScriptLabel": "Form JavaScript",
     "loadingRelationRecords": "Loading records",
+    "noFileSelected": "No file selected",
     "noRelationRecords": "No records",
     "noRelationSelected": "No record selected",
     "publishedForm": "Published form",

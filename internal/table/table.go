@@ -48,11 +48,19 @@ type RowRepository interface {
 	Rows(ctx context.Context, dbName string, tableMeta metadata.Table, views ...metadata.ResolvedView) ([]Row, error)
 }
 
+// FileBinder permanently binds an uploaded file to the record whose file
+// cell references it; a file can be bound to exactly one record, once, and
+// only by the user who uploaded it.
+type FileBinder interface {
+	BindFileToRecord(ctx context.Context, actorID string, fileID int64, dbName, tableName string, recordID int64) error
+}
+
 type Service struct {
 	mu          sync.RWMutex
 	rows        RowRepository
 	history     history.Store
 	rowChangeFn RowChangeHandler
+	fileBinder  FileBinder
 }
 
 func NewServiceWithRepository(historyStore history.Store, rows RowRepository) *Service {
@@ -66,6 +74,42 @@ func (service *Service) SetRowChangeHandler(handler RowChangeHandler) {
 	service.mu.Lock()
 	defer service.mu.Unlock()
 	service.rowChangeFn = handler
+}
+
+// SetFileBinder enables writes to file fields; without it any non-null file
+// cell value is rejected.
+func (service *Service) SetFileBinder(binder FileBinder) {
+	service.mu.Lock()
+	defer service.mu.Unlock()
+	service.fileBinder = binder
+}
+
+// bindFileValues locks every referenced file to this record. Binding is
+// one-shot: a file already bound to another record fails the whole write.
+func (service *Service) bindFileValues(ctx context.Context, tableMeta metadata.Table, actorID string, dbName string, recordID int64, values map[string]any) error {
+	service.mu.RLock()
+	binder := service.fileBinder
+	service.mu.RUnlock()
+	for _, field := range tableMeta.Fields {
+		if field.Deleted || field.Type != "file" {
+			continue
+		}
+		value, ok := values[field.Name]
+		if !ok || value == nil {
+			continue
+		}
+		fileID, ok := value.(int64)
+		if !ok || fileID <= 0 {
+			return fmt.Errorf("field %q requires a positive file id, got %v", field.Name, value)
+		}
+		if binder == nil {
+			return fmt.Errorf("field %q cannot store files because file binding is not configured", field.Name)
+		}
+		if err := binder.BindFileToRecord(ctx, actorID, fileID, dbName, tableMeta.Name, recordID); err != nil {
+			return fmt.Errorf("field %q: %w", field.Name, err)
+		}
+	}
+	return nil
 }
 
 func (service *Service) CreateRow(ctx context.Context, catalog metadata.Catalog, perms permission.Set, actorID string, isDatabaseOwner bool, dbName, tableName string, values map[string]any) (Row, error) {
@@ -87,6 +131,10 @@ func (service *Service) CreateRow(ctx context.Context, catalog metadata.Catalog,
 
 	row, err := service.rows.CreateRow(ctx, dbName, tableMeta, storedValues)
 	if err != nil {
+		return Row{}, err
+	}
+	if err := service.bindFileValues(ctx, tableMeta, actorID, dbName, row.RecordID, storedValues); err != nil {
+		_, _ = service.rows.DeleteRow(ctx, dbName, tableMeta, row.RecordID)
 		return Row{}, err
 	}
 	storedValues, err = calculateFormulaValues(tableMeta, row.RecordID, row.Values)
@@ -142,6 +190,9 @@ func (service *Service) UpdateRow(ctx context.Context, catalog metadata.Catalog,
 	}
 	nextValues, err = calculateFormulaValues(tableMeta, recordID, nextValues)
 	if err != nil {
+		return Row{}, err
+	}
+	if err := service.bindFileValues(ctx, tableMeta, actorID, dbName, recordID, normalizedValues); err != nil {
 		return Row{}, err
 	}
 	updated, err := service.rows.UpdateRow(ctx, dbName, tableMeta, recordID, nextValues)

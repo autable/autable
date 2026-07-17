@@ -1012,6 +1012,45 @@ func (db *DB) File(ctx context.Context, id int64) (FileRecord, error) {
 	return fileRecordFromModel(model), nil
 }
 
+// BindFileToRecord permanently associates a file with one record of the
+// table it was uploaded for. Binding happens at most once and only by the
+// uploader: a file already bound to a different record, uploaded for a
+// different table, or uploaded by someone else is rejected. Binding to the
+// same record again is a no-op.
+func (db *DB) BindFileToRecord(ctx context.Context, actorID string, fileID int64, dbName, tableName string, recordID int64) error {
+	if recordID <= 0 {
+		return fmt.Errorf("file %d cannot be bound to record %d", fileID, recordID)
+	}
+	file, err := db.File(ctx, fileID)
+	if err != nil {
+		return err
+	}
+	if file.DatabaseName != dbName || file.TableName != tableName {
+		return fmt.Errorf("file %d was uploaded for %s.%s and cannot be used in %s.%s",
+			fileID, file.DatabaseName, file.TableName, dbName, tableName)
+	}
+	if file.RecordID == recordID {
+		return nil
+	}
+	if file.RecordID != 0 {
+		return fmt.Errorf("file %d is already bound to record %d and cannot be moved", fileID, file.RecordID)
+	}
+	if file.CreatorID != actorID {
+		return fmt.Errorf("file %d can only be attached to a record by its uploader", fileID)
+	}
+	result := db.orm.WithContext(ctx).
+		Model(&fileModel{}).
+		Where("id = ? AND record_id = 0", fileID).
+		Update("record_id", recordID)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return fmt.Errorf("file %d was bound to another record concurrently", fileID)
+	}
+	return nil
+}
+
 func fileRecordFromModel(model fileModel) FileRecord {
 	return FileRecord{
 		ID:           model.ID,
