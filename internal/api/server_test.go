@@ -2998,6 +2998,7 @@ func TestWorkflowNodesAPI(t *testing.T) {
 		t.Fatal(err)
 	}
 	expectedTypes := []string{
+		"dingtalk.approval.create",
 		"dingtalk.notable.records.list",
 		"dingtalk.robot.oto.batch_send",
 		"dingtalk.robot.send",
