@@ -188,12 +188,14 @@ func executeJob(ctx context.Context, registry map[string]workflow.Node, logger *
 		return runnerhub.ResultMessage{Kind: "result", JobID: job.JobID, Error: fmt.Sprintf("node %q is not registered on this runner", job.NodeType)}
 	}
 	logger.Info("job started", "job_id", job.JobID, "node", job.NodeType, "instance", job.Runtime.InstanceID)
+	started := time.Now()
 	output, err := runNode(ctx, node, job)
+	elapsed := time.Since(started).Round(time.Millisecond)
 	if err != nil {
-		logger.Warn("job failed", "job_id", job.JobID, "node", job.NodeType, "error", err)
+		logger.Warn("job failed", "job_id", job.JobID, "node", job.NodeType, "elapsed", elapsed, "error", err)
 		return runnerhub.ResultMessage{Kind: "result", JobID: job.JobID, Error: err.Error()}
 	}
-	logger.Info("job finished", "job_id", job.JobID, "node", job.NodeType)
+	logger.Info("job finished", "job_id", job.JobID, "node", job.NodeType, "elapsed", elapsed)
 	return runnerhub.ResultMessage{Kind: "result", JobID: job.JobID, Output: output}
 }
 

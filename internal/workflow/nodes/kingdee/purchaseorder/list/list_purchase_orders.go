@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"strings"
+	"time"
 
 	"autable/internal/kingdee"
 	"autable/internal/workflow"
@@ -102,8 +104,10 @@ func (node Node) Run(ctx context.Context, input map[string]any, info workflow.Ru
 		return nil, err
 	}
 
+	logger := slog.Default().With("node", info.NodeType, "run_id", info.RunID, "instance", info.InstanceID)
 	records := make([]map[string]any, 0)
 	for startRow := 0; ; startRow += limit {
+		pageStarted := time.Now()
 		rows, err := client.ExecuteBillQuery(ctx, map[string]any{
 			"FormId":       "PUR_PurchaseOrder",
 			"FieldKeys":    strings.Join(fields, ","),
@@ -115,8 +119,9 @@ func (node Node) Run(ctx context.Context, input map[string]any, info workflow.Ru
 			"SubSystemId":  "",
 		})
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("bill query at row %d: %w", startRow, err)
 		}
+		logger.Info("kingdee page fetched", "start_row", startRow, "rows", len(rows), "total", len(records)+len(rows), "elapsed", time.Since(pageStarted).Round(time.Millisecond))
 		for _, row := range rows {
 			if len(row) != len(columns) {
 				return nil, fmt.Errorf("kingdee returned %d values for %d fields", len(row), len(columns))
