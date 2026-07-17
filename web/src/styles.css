@@ -447,6 +447,27 @@ select {
   z-index: 4;
 }
 
+.file-cell {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--colorBrandForegroundLink);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.file-cell-upload {
+  border: 1px dashed var(--colorNeutralStroke1);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--colorNeutralForeground3);
+  cursor: pointer;
+  padding: 0 8px;
+  line-height: 20px;
+}
+
 .field-header {
   display: flex;
   align-items: center;

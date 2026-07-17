@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -120,6 +121,15 @@ type workflowModel struct {
 	UpdatedAt            int64 `gorm:"autoUpdateTime:milli"`
 }
 
+type fileModel struct {
+	ID          int64  `gorm:"primaryKey;autoIncrement"`
+	Name        string `gorm:"not null"`
+	Size        int64  `gorm:"not null"`
+	ContentType string `gorm:"not null;default:''"`
+	CreatorID   string `gorm:"index;not null;default:''"`
+	CreatedAt   int64  `gorm:"autoCreateTime:milli"`
+}
+
 type runnerTokenModel struct {
 	ID           int64  `gorm:"primaryKey;autoIncrement"`
 	DatabaseName string `gorm:"uniqueIndex;not null"`
@@ -194,6 +204,7 @@ func (db *DB) Migrate(ctx context.Context) error {
 		&roleModel{},
 		&roleMemberModel{},
 		&runnerTokenModel{},
+		&fileModel{},
 	)
 }
 
@@ -939,4 +950,57 @@ func mergeStringMaps(base map[string]string, updates map[string]string) map[stri
 		merged[key] = value
 	}
 	return merged
+}
+
+type FileRecord struct {
+	ID          int64  `json:"id"`
+	Name        string `json:"name"`
+	Size        int64  `json:"size"`
+	ContentType string `json:"content_type"`
+	CreatorID   string `json:"creator_id,omitempty"`
+	CreatedAt   int64  `json:"created_at"`
+}
+
+func (db *DB) CreateFile(ctx context.Context, file FileRecord) (FileRecord, error) {
+	if strings.TrimSpace(file.Name) == "" {
+		return FileRecord{}, errors.New("file name is required")
+	}
+	if file.Size < 0 {
+		return FileRecord{}, errors.New("file size must not be negative")
+	}
+	model := fileModel{
+		Name:        file.Name,
+		Size:        file.Size,
+		ContentType: file.ContentType,
+		CreatorID:   file.CreatorID,
+	}
+	if err := db.orm.WithContext(ctx).Create(&model).Error; err != nil {
+		return FileRecord{}, err
+	}
+	return fileRecordFromModel(model), nil
+}
+
+var ErrFileNotFound = errors.New("file not found")
+
+func (db *DB) File(ctx context.Context, id int64) (FileRecord, error) {
+	var model fileModel
+	err := db.orm.WithContext(ctx).First(&model, id).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return FileRecord{}, fmt.Errorf("%w: %d", ErrFileNotFound, id)
+	}
+	if err != nil {
+		return FileRecord{}, err
+	}
+	return fileRecordFromModel(model), nil
+}
+
+func fileRecordFromModel(model fileModel) FileRecord {
+	return FileRecord{
+		ID:          model.ID,
+		Name:        model.Name,
+		Size:        model.Size,
+		ContentType: model.ContentType,
+		CreatorID:   model.CreatorID,
+		CreatedAt:   model.CreatedAt,
+	}
 }

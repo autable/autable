@@ -530,6 +530,7 @@ export function TableWorkspace({
                   <option value="float">float</option>
                   <option value="relation">relation</option>
                   <option value="formula">formula</option>
+                  <option value="file">file</option>
                 </Select>
               </FluentField>
               {newFieldType === "relation" && (

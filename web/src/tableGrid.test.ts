@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildTableColumns, rowRecordToValues } from "./tableGrid";
+import { buildTableColumns, displayTableCellValue, rowRecordToValues } from "./tableGrid";
 
 describe("tableGrid", () => {
   it("builds columns from user fields without exposing ct_record_id", () => {
@@ -27,5 +27,21 @@ describe("tableGrid", () => {
       name: "Ada",
       ct_record_id: 7
     });
+  });
+
+  it("does not make file fields editable and shows resolved file names", () => {
+    const columns = buildTableColumns([{ name: "attachment", type: "file", deleted: false }]);
+    expect(
+      typeof columns[0].editable === "function" ? columns[0].editable({ ct_record_id: 1 }) : columns[0].editable
+    ).toBe(false);
+
+    const row = { ct_record_id: 1, attachment: 5 };
+    expect(displayTableCellValue(row, { name: "attachment", type: "file", deleted: false }, {}, { 5: "报价单.pdf" })).toBe(
+      "报价单.pdf"
+    );
+    expect(displayTableCellValue(row, { name: "attachment", type: "file", deleted: false })).toBe("#5");
+    expect(
+      displayTableCellValue({ ct_record_id: 1, attachment: null }, { name: "attachment", type: "file", deleted: false })
+    ).toBe("");
   });
 });

@@ -629,6 +629,42 @@ export async function resetRunnerToken(dbName: string): Promise<{ token: string;
   return response.json() as Promise<{ token: string; created_at: number }>;
 }
 
+export type FileRecord = {
+  id: number;
+  name: string;
+  size: number;
+  content_type: string;
+  created_at?: number;
+};
+
+export async function uploadFile(file: File): Promise<FileRecord> {
+  const body = new FormData();
+  body.append("file", file);
+  const response = await fetch("/api/files", { method: "POST", body });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: response.statusText }));
+    throw new Error(error.error ?? `file upload failed: ${response.status}`);
+  }
+  return response.json() as Promise<FileRecord>;
+}
+
+export async function fetchFileMetadata(ids: number[]): Promise<FileRecord[]> {
+  const response = await fetch("/api/files/metadata", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ids })
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: response.statusText }));
+    throw new Error(error.error ?? `file metadata failed: ${response.status}`);
+  }
+  return response.json() as Promise<FileRecord[]>;
+}
+
+export function fileDownloadURL(id: number): string {
+  return `/api/files/${id}`;
+}
+
 export async function listWorkflows(dbName: string): Promise<WorkflowDefinition[]> {
   const response = await fetch(`/api/databases/${dbName}/workflows`);
   if (!response.ok) {

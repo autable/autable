@@ -5,9 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
+	"mime"
 	"net/http"
 	"net/url"
+	"path"
 	"strconv"
 	"strings"
 	"sync"
@@ -44,6 +47,7 @@ type Server struct {
 	history          history.Store
 	runner           *workflow.Runner
 	runnerHub        *runnerhub.Hub
+	files            FileStore
 	auth             config.AuthConfig
 	publicURL        string
 	workflowWorkers  map[string]*workflowEventWorker
@@ -65,6 +69,17 @@ type codeFileStore interface {
 
 type repositorySyncer interface {
 	Notify(repositorysync.Change)
+}
+
+// FileStore persists uploaded file contents; metadata lives in systemdb.
+type FileStore interface {
+	Put(ctx context.Context, id int64, name string, contentType string, size int64, body io.Reader) error
+	Get(ctx context.Context, id int64, name string) (io.ReadCloser, error)
+}
+
+// SetFileStore enables the file upload and download endpoints.
+func (server *Server) SetFileStore(files FileStore) {
+	server.files = files
 }
 
 type createDatabaseRequest struct {
@@ -369,6 +384,9 @@ func (server *Server) routes() {
 	server.mux.HandleFunc("POST /api/workflows/", server.handleRunWorkflow)
 	server.mux.HandleFunc("GET /api/workflows/", server.handleGetWorkflow)
 	server.mux.HandleFunc("DELETE /api/workflows/", server.handleDeleteWorkflow)
+	server.mux.HandleFunc("POST /api/files", server.handleUploadFile)
+	server.mux.HandleFunc("POST /api/files/metadata", server.handleFileMetadata)
+	server.mux.HandleFunc("GET /api/files/", server.handleDownloadFile)
 	server.mux.HandleFunc("POST /api/forms", server.handleSaveForm)
 	server.mux.HandleFunc("POST /api/forms/", server.handlePostFormAction)
 	server.mux.HandleFunc("GET /api/forms/", server.handleGetForm)
@@ -3561,3 +3579,122 @@ func ContextWithUser(ctx context.Context, userID string) context.Context {
 }
 
 type userContextKey struct{}
+
+const maxFileUploadBytes = 100 << 20
+
+func (server *Server) handleUploadFile(w http.ResponseWriter, r *http.Request) {
+	actorID, ok := server.requireUserID(w, r)
+	if !ok {
+		return
+	}
+	if server.files == nil {
+		writeError(w, http.StatusServiceUnavailable, errors.New("file storage is not configured"))
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxFileUploadBytes)
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("read multipart file field: %w", err))
+		return
+	}
+	defer file.Close()
+	contentType := header.Header.Get("Content-Type")
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	record, err := server.system.CreateFile(r.Context(), systemdb.FileRecord{
+		Name:        sanitizeFileName(header.Filename),
+		Size:        header.Size,
+		ContentType: contentType,
+		CreatorID:   actorID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if err := server.files.Put(r.Context(), record.ID, record.Name, record.ContentType, record.Size, file); err != nil {
+		writeError(w, http.StatusBadGateway, fmt.Errorf("store file object: %w", err))
+		return
+	}
+	writeJSON(w, http.StatusCreated, record)
+}
+
+type fileMetadataRequest struct {
+	IDs []int64 `json:"ids"`
+}
+
+func (server *Server) handleFileMetadata(w http.ResponseWriter, r *http.Request) {
+	if _, ok := server.requireUserID(w, r); !ok {
+		return
+	}
+	var request fileMetadataRequest
+	if err := readJSON(r, &request); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	records := make([]systemdb.FileRecord, 0, len(request.IDs))
+	for _, id := range request.IDs {
+		record, err := server.system.File(r.Context(), id)
+		if errors.Is(err, systemdb.ErrFileNotFound) {
+			continue
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		records = append(records, record)
+	}
+	writeJSON(w, http.StatusOK, records)
+}
+
+func (server *Server) handleDownloadFile(w http.ResponseWriter, r *http.Request) {
+	if _, ok := server.requireUserID(w, r); !ok {
+		return
+	}
+	id, err := strconv.ParseInt(strings.TrimPrefix(r.URL.Path, "/api/files/"), 10, 64)
+	if err != nil || id <= 0 {
+		http.NotFound(w, r)
+		return
+	}
+	record, err := server.system.File(r.Context(), id)
+	if errors.Is(err, systemdb.ErrFileNotFound) {
+		writeError(w, http.StatusNotFound, err)
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if server.files == nil {
+		writeError(w, http.StatusServiceUnavailable, errors.New("file storage is not configured"))
+		return
+	}
+	body, err := server.files.Get(r.Context(), record.ID, record.Name)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, fmt.Errorf("load file object: %w", err))
+		return
+	}
+	defer body.Close()
+	w.Header().Set("Content-Type", record.ContentType)
+	w.Header().Set("Content-Length", strconv.FormatInt(record.Size, 10))
+	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": record.Name}))
+	w.WriteHeader(http.StatusOK)
+	_, _ = io.Copy(w, body)
+}
+
+// sanitizeFileName keeps the original filename as the S3 object name while
+// stripping path segments and control characters.
+func sanitizeFileName(name string) string {
+	name = path.Base(strings.ReplaceAll(name, "\\", "/"))
+	name = strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return -1
+		}
+		return r
+	}, name)
+	name = strings.TrimSpace(name)
+	if name == "" || name == "." || name == ".." {
+		return "file"
+	}
+	return name
+}

@@ -5,11 +5,14 @@ import { useTranslation } from "react-i18next";
 import {
   createRow,
   deleteRow,
+  fetchFileMetadata,
+  fileDownloadURL,
   listRowHistory,
   listRows,
   loadMetadata,
   moveTableFieldPosition,
   updateRow,
+  uploadFile,
   updateTableMetadata,
   type Catalog,
   type Field,
@@ -59,6 +62,7 @@ export function useTableWorkspace({
   const [newViewSortDirection, setNewViewSortDirection] = useState<TableViewSort["direction"]>("asc");
   const [temporarySort, setTemporarySort] = useState<TableViewSort | undefined>(undefined);
   const [relationRows, setRelationRows] = useState<Record<string, TableGridRow[]>>({});
+  const [fileLabels, setFileLabels] = useState<Record<number, string>>({});
   const [relationDetail, setRelationDetail] = useState<{
     field: Field;
     table: TableMetadata;
@@ -93,15 +97,93 @@ export function useTableWorkspace({
   }, [activeFields, relationRows, tables]);
   const columns = useMemo(
     () =>
-      buildTableColumns(activeFields, relationLabels, (field, recordID) => {
-        const targetTable = tables.find((item) => item.name === field.relation_table);
-        const row = relationRows[field.relation_table ?? ""]?.find((item) => Number(item.ct_record_id) === recordID);
-        if (targetTable && row) {
-          setRelationDetail({ field, table: targetTable, row });
+      buildTableColumns(
+        activeFields,
+        relationLabels,
+        (field, recordID) => {
+          const targetTable = tables.find((item) => item.name === field.relation_table);
+          const row = relationRows[field.relation_table ?? ""]?.find((item) => Number(item.ct_record_id) === recordID);
+          if (targetTable && row) {
+            setRelationDetail({ field, table: targetTable, row });
+          }
+        },
+        {
+          labels: fileLabels,
+          onUpload: uploadFileToCell,
+          onDownload: (fileID) => window.open(fileDownloadURL(fileID), "_blank")
         }
-      }),
-    [activeFields, relationLabels, relationRows, tables]
+      ),
+    [activeFields, fileLabels, relationLabels, relationRows, tables]
   );
+
+  useEffect(() => {
+    let cancelled = false;
+    const fileFieldNames = activeFields.filter((field) => field.type === "file").map((field) => field.name);
+    if (fileFieldNames.length === 0) {
+      return () => {
+        cancelled = true;
+      };
+    }
+    const missing = new Set<number>();
+    for (const row of displayedRows) {
+      for (const fieldName of fileFieldNames) {
+        const fileID = Number(row[fieldName]);
+        if (Number.isFinite(fileID) && fileID > 0 && fileLabels[fileID] === undefined) {
+          missing.add(fileID);
+        }
+      }
+    }
+    if (missing.size === 0) {
+      return () => {
+        cancelled = true;
+      };
+    }
+    void fetchFileMetadata([...missing])
+      .then((records) => {
+        if (cancelled) {
+          return;
+        }
+        setFileLabels((current) => {
+          const next = { ...current };
+          for (const id of missing) {
+            // Missing metadata (deleted files) keeps the #id fallback and
+            // stops this effect from refetching the same ids.
+            next[id] = next[id] ?? `#${id}`;
+          }
+          for (const record of records) {
+            next[record.id] = record.name;
+          }
+          return next;
+        });
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [activeFields, displayedRows, fileLabels]);
+
+  function uploadFileToCell(field: Field, recordID: number) {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      if (!file) {
+        return;
+      }
+      try {
+        const record = await uploadFile(file);
+        setFileLabels((current) => ({ ...current, [record.id]: record.name }));
+        const saved = await updateRow(databaseName, table.name, recordID, { [field.name]: record.id });
+        setRows((current) =>
+          current.map((item) => (Number(item.ct_record_id) === saved.record_id ? rowRecordToValues(saved) : item))
+        );
+        onStatus(t("status.uploadedFile", { name: record.name }));
+      } catch (error) {
+        onStatus(error instanceof Error ? error.message : t("status.fileUploadFailed"), "error");
+      }
+    };
+    input.click();
+  }
 
   useEffect(() => {
     setSelectedRowDraft(rowDraftFromRecord(selectedRow, activeFieldNames));

@@ -132,22 +132,26 @@ npm run build
 npm run e2e
 ```
 
-Autable can upload scheduled backups to S3-compatible storage. SQLite databases are copied with SQLite's online backup API, so the service does not need to stop while a backup is created. LevelDB history is optional; when `backup.include_leveldb` is enabled, Autable exports a consistent snapshot into a restorable LevelDB directory inside the archive:
+Autable uses one shared S3-compatible bucket, configured once under `s3.connection`; each feature stores its objects under its own directory from `s3.directories`. Scheduled backups go under `s3.directories.backup` and user-uploaded files (the `file` field type) under `s3.directories.files`, where each upload lives at `<files directory>/<file id>/<file name>`. SQLite databases are copied with SQLite's online backup API, so the service does not need to stop while a backup is created. LevelDB history is optional; when `backup.include_leveldb` is enabled, Autable exports a consistent snapshot into a restorable LevelDB directory inside the archive:
 
 ```yaml
+s3:
+  connection:
+    endpoint: "https://s3.example.com"
+    region: "us-east-1"
+    bucket: "autable"
+    access_key_id: "..."
+    secret_access_key: "..."
+    force_path_style: true
+  directories:
+    backup: "backup"
+    files: "files"
+
 backup:
   enabled: true
   interval: "24h"
   include_leveldb: false
   tmp_dir: "/tmp/autable-backups"
-  s3:
-    endpoint: "https://s3.example.com"
-    region: "us-east-1"
-    bucket: "autable-backups"
-    prefix: "prod/autable"
-    access_key_id: "..."
-    secret_access_key: "..."
-    force_path_style: true
 ```
 
 The project keeps generated runtime data out of git while keeping user-authored metadata, workflows, and forms in the configured repository remote.

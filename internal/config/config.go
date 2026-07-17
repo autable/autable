@@ -15,6 +15,7 @@ type Config struct {
 	Server     ServerConfig     `yaml:"server"`
 	Data       DataConfig       `yaml:"data"`
 	Repository RepositoryConfig `yaml:"repository"`
+	S3         S3Config         `yaml:"s3"`
 	Backup     BackupConfig     `yaml:"backup"`
 	Auth       AuthConfig       `yaml:"auth"`
 	AI         AIConfig         `yaml:"ai"`
@@ -62,21 +63,37 @@ type RepositorySyncConfig struct {
 }
 
 type BackupConfig struct {
-	Enabled        bool           `yaml:"enabled"`
-	Interval       string         `yaml:"interval"`
-	IncludeLevelDB bool           `yaml:"include_leveldb"`
-	TmpDir         string         `yaml:"tmp_dir"`
-	S3             BackupS3Config `yaml:"s3"`
+	Enabled        bool   `yaml:"enabled"`
+	Interval       string `yaml:"interval"`
+	IncludeLevelDB bool   `yaml:"include_leveldb"`
+	TmpDir         string `yaml:"tmp_dir"`
 }
 
-type BackupS3Config struct {
+// S3Config is the shared S3-compatible storage: one connection, with each
+// feature assigned its own directory inside the bucket.
+type S3Config struct {
+	Connection  S3ConnectionConfig  `yaml:"connection"`
+	Directories S3DirectoriesConfig `yaml:"directories"`
+}
+
+type S3ConnectionConfig struct {
 	Endpoint        string `yaml:"endpoint"`
 	Region          string `yaml:"region"`
 	Bucket          string `yaml:"bucket"`
-	Prefix          string `yaml:"prefix"`
 	AccessKeyID     string `yaml:"access_key_id"`
 	SecretAccessKey string `yaml:"secret_access_key"`
 	ForcePathStyle  bool   `yaml:"force_path_style"`
+}
+
+type S3DirectoriesConfig struct {
+	// Backup holds scheduled backup archives, defaults to "backup".
+	Backup string `yaml:"backup"`
+	// Files holds user-uploaded files, defaults to "files".
+	Files string `yaml:"files"`
+}
+
+func (s3 S3Config) IsConfigured() bool {
+	return s3.Connection.Bucket != ""
 }
 
 type AuthConfig struct {
@@ -111,6 +128,12 @@ func Load(path string) (Config, error) {
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return Config{}, err
 	}
+	if cfg.S3.Directories.Backup == "" {
+		cfg.S3.Directories.Backup = "backup"
+	}
+	if cfg.S3.Directories.Files == "" {
+		cfg.S3.Directories.Files = "files"
+	}
 
 	if err := cfg.Validate(); err != nil {
 		return Config{}, err
@@ -131,8 +154,8 @@ func (cfg Config) Validate() error {
 	if cfg.Repository.IsEnabled() && cfg.Repository.RemoteBranch == "" {
 		return errors.New("repository.remote_branch is required when repository.enabled is true")
 	}
-	if cfg.Backup.Enabled && cfg.Backup.S3.Bucket == "" {
-		return errors.New("backup.s3.bucket is required when backup.enabled is true")
+	if cfg.Backup.Enabled && !cfg.S3.IsConfigured() {
+		return errors.New("s3.connection.bucket is required when backup.enabled is true")
 	}
 	if !cfg.Auth.Password.Enabled && !cfg.Auth.OIDC.Enabled {
 		return errors.New("at least one auth method is required")

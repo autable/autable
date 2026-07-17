@@ -196,8 +196,43 @@ func TestValidateRequiresBackupBucketWhenEnabled(t *testing.T) {
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("expected validation error")
 	}
-	cfg.Backup.S3.Bucket = "autable-backups"
+	cfg.S3.Connection.Bucket = "autable-backups"
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("unexpected validation error: %v", err)
+	}
+}
+
+func TestLoadS3ConfigWithDirectoryDefaults(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yml")
+	data := []byte(`
+data:
+  path: ./data
+repository:
+  enabled: false
+  path: ./repo
+auth:
+  password:
+    enabled: true
+s3:
+  connection:
+    endpoint: https://s3.example.com
+    bucket: autable
+    access_key_id: key
+    secret_access_key: secret
+    force_path_style: true
+`)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.S3.IsConfigured() || cfg.S3.Connection.Bucket != "autable" || !cfg.S3.Connection.ForcePathStyle {
+		t.Fatalf("unexpected s3 connection: %#v", cfg.S3.Connection)
+	}
+	if cfg.S3.Directories.Backup != "backup" || cfg.S3.Directories.Files != "files" {
+		t.Fatalf("expected default directories, got %#v", cfg.S3.Directories)
 	}
 }

@@ -10,7 +10,10 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"math/big"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -4073,5 +4076,122 @@ func TestSaveWorkflowRejectsNegativeRetention(t *testing.T) {
 	server.ServeHTTP(response, request)
 	if response.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 for negative retention, got %d: %s", response.Code, response.Body.String())
+	}
+}
+
+type memoryFileStore struct {
+	objects map[string][]byte
+}
+
+func newMemoryFileStore() *memoryFileStore {
+	return &memoryFileStore{objects: map[string][]byte{}}
+}
+
+func (store *memoryFileStore) Put(_ context.Context, id int64, name string, _ string, _ int64, body io.Reader) error {
+	data, err := io.ReadAll(body)
+	if err != nil {
+		return err
+	}
+	store.objects[fmt.Sprintf("%d/%s", id, name)] = data
+	return nil
+}
+
+func (store *memoryFileStore) Get(_ context.Context, id int64, name string) (io.ReadCloser, error) {
+	data, ok := store.objects[fmt.Sprintf("%d/%s", id, name)]
+	if !ok {
+		return nil, fmt.Errorf("object %d/%s not found", id, name)
+	}
+	return io.NopCloser(bytes.NewReader(data)), nil
+}
+
+func uploadTestFile(t *testing.T, server *Server, cookie *http.Cookie, fileName string, content string) systemdb.FileRecord {
+	t.Helper()
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	part, err := writer.CreateFormFile("file", fileName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := part.Write([]byte(content)); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/api/files", body)
+	request.Header.Set("Content-Type", writer.FormDataContentType())
+	request.AddCookie(cookie)
+	recorder := httptest.NewRecorder()
+	server.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("expected upload 201, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+	var record systemdb.FileRecord
+	if err := json.NewDecoder(recorder.Body).Decode(&record); err != nil {
+		t.Fatal(err)
+	}
+	return record
+}
+
+func TestFileUploadDownloadAndMetadata(t *testing.T) {
+	server, system := newTestServer(t)
+	files := newMemoryFileStore()
+	server.SetFileStore(files)
+	cookie := testSessionCookie(t, system, "uploader")
+
+	record := uploadTestFile(t, server, cookie, "../weird/../报价单.pdf", "pdf-bytes")
+	if record.ID != 1 || record.Name != "报价单.pdf" || record.Size != int64(len("pdf-bytes")) {
+		t.Fatalf("unexpected file record: %#v", record)
+	}
+	second := uploadTestFile(t, server, cookie, "notes.txt", "hello")
+	if second.ID != 2 {
+		t.Fatalf("expected increasing file ids, got %#v", second)
+	}
+
+	download := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/files/%d", record.ID), nil)
+	download.AddCookie(cookie)
+	downloadRecorder := httptest.NewRecorder()
+	server.ServeHTTP(downloadRecorder, download)
+	if downloadRecorder.Code != http.StatusOK || downloadRecorder.Body.String() != "pdf-bytes" {
+		t.Fatalf("unexpected download response %d: %s", downloadRecorder.Code, downloadRecorder.Body.String())
+	}
+	if disposition := downloadRecorder.Header().Get("Content-Disposition"); !strings.Contains(disposition, "attachment") {
+		t.Fatalf("unexpected content disposition %q", disposition)
+	}
+
+	metadata := httptest.NewRequest(http.MethodPost, "/api/files/metadata", strings.NewReader(`{"ids":[1,2,999]}`))
+	metadata.Header.Set("Content-Type", "application/json")
+	metadata.AddCookie(cookie)
+	metadataRecorder := httptest.NewRecorder()
+	server.ServeHTTP(metadataRecorder, metadata)
+	if metadataRecorder.Code != http.StatusOK {
+		t.Fatalf("expected metadata 200, got %d: %s", metadataRecorder.Code, metadataRecorder.Body.String())
+	}
+	var records []systemdb.FileRecord
+	if err := json.NewDecoder(metadataRecorder.Body).Decode(&records); err != nil {
+		t.Fatal(err)
+	}
+	if len(records) != 2 || records[0].Name != "报价单.pdf" || records[1].Name != "notes.txt" {
+		t.Fatalf("unexpected metadata records: %#v", records)
+	}
+}
+
+func TestFileEndpointsWithoutStoreOrSession(t *testing.T) {
+	server, system := newTestServer(t)
+	cookie := testSessionCookie(t, system, "uploader")
+
+	request := httptest.NewRequest(http.MethodPost, "/api/files", strings.NewReader("ignored"))
+	request.AddCookie(cookie)
+	recorder := httptest.NewRecorder()
+	server.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503 without a file store, got %d", recorder.Code)
+	}
+
+	anonymous := httptest.NewRequest(http.MethodGet, "/api/files/1", nil)
+	anonymousRecorder := httptest.NewRecorder()
+	server.ServeHTTP(anonymousRecorder, anonymous)
+	if anonymousRecorder.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 without a session, got %d", anonymousRecorder.Code)
 	}
 }

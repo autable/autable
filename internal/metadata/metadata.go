@@ -399,7 +399,7 @@ func (table Table) validate(dbName string, tableIndex int) error {
 		if field.Type == "" {
 			return fmt.Errorf("database %q table %q field %q type is required", dbName, table.Name, field.Name)
 		}
-		if field.Type != "int" && field.Type != "float" && field.Type != "string" && field.Type != "formula" && field.Type != "relation" {
+		if field.Type != "int" && field.Type != "float" && field.Type != "string" && field.Type != "formula" && field.Type != "relation" && field.Type != "file" {
 			return fmt.Errorf("database %q table %q field %q type %q is unsupported", dbName, table.Name, field.Name, field.Type)
 		}
 		if field.Type == "relation" && strings.TrimSpace(field.RelationTable) == "" {
@@ -556,7 +556,9 @@ func (field Field) StorageType() string {
 	if field.Type == "formula" {
 		return field.ValueType
 	}
-	if field.Type == "relation" {
+	// Relation cells store the target record ID; file cells store the
+	// uploaded file ID.
+	if field.Type == "relation" || field.Type == "file" {
 		return "int"
 	}
 	return field.Type

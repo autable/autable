@@ -15,6 +15,7 @@ import (
 	"autable/internal/backup"
 	"autable/internal/codefiles"
 	"autable/internal/config"
+	"autable/internal/filestore"
 	"autable/internal/history"
 	"autable/internal/metadata"
 	"autable/internal/recorddb"
@@ -113,12 +114,12 @@ func run(ctx context.Context, configPath string) error {
 	}
 	if cfg.Backup.Enabled {
 		s3Uploader, err := backup.NewS3Uploader(ctx, backup.S3Options{
-			Endpoint:        cfg.Backup.S3.Endpoint,
-			Region:          cfg.Backup.S3.Region,
-			Bucket:          cfg.Backup.S3.Bucket,
-			AccessKeyID:     cfg.Backup.S3.AccessKeyID,
-			SecretAccessKey: cfg.Backup.S3.SecretAccessKey,
-			ForcePathStyle:  cfg.Backup.S3.ForcePathStyle,
+			Endpoint:        cfg.S3.Connection.Endpoint,
+			Region:          cfg.S3.Connection.Region,
+			Bucket:          cfg.S3.Connection.Bucket,
+			AccessKeyID:     cfg.S3.Connection.AccessKeyID,
+			SecretAccessKey: cfg.S3.Connection.SecretAccessKey,
+			ForcePathStyle:  cfg.S3.Connection.ForcePathStyle,
 		})
 		if err != nil {
 			return err
@@ -129,7 +130,7 @@ func run(ctx context.Context, configPath string) error {
 			Catalog:        catalog,
 			IncludeLevelDB: cfg.Backup.IncludeLevelDB,
 			TmpDir:         cfg.Backup.TmpDir,
-			ObjectPrefix:   cfg.Backup.S3.Prefix,
+			ObjectPrefix:   cfg.S3.Directories.Backup,
 			Uploader:       s3Uploader,
 		}, configDuration(cfg.Backup.Interval, 24*time.Hour), historyStore)
 		backupService.Start(ctx)
@@ -141,6 +142,22 @@ func run(ctx context.Context, configPath string) error {
 			}
 		}()
 	}
+	var fileStore api.FileStore
+	if cfg.S3.IsConfigured() {
+		s3Files, err := filestore.NewS3Store(ctx, filestore.Options{
+			Endpoint:        cfg.S3.Connection.Endpoint,
+			Region:          cfg.S3.Connection.Region,
+			Bucket:          cfg.S3.Connection.Bucket,
+			AccessKeyID:     cfg.S3.Connection.AccessKeyID,
+			SecretAccessKey: cfg.S3.Connection.SecretAccessKey,
+			ForcePathStyle:  cfg.S3.Connection.ForcePathStyle,
+			Prefix:          cfg.S3.Directories.Files,
+		})
+		if err != nil {
+			return err
+		}
+		fileStore = s3Files
+	}
 	server := api.NewServerWithAuthConfig(
 		catalog,
 		system,
@@ -149,6 +166,9 @@ func run(ctx context.Context, configPath string) error {
 		cfg.Auth,
 	)
 	server.SetPublicURL(cfg.Server.PublicURL)
+	if fileStore != nil {
+		server.SetFileStore(fileStore)
+	}
 	server.EnableMetadataWrites(metadataPath)
 	server.SetRepositoryPath(cfg.Repository.Path)
 	server.SetDatabaseOpener(func(ctx context.Context, name string) error {

@@ -373,3 +373,35 @@ func TestFormulaFieldValidationAndEditableExpression(t *testing.T) {
 		t.Fatal("expected formula on non-formula field validation error")
 	}
 }
+
+func TestFileFieldValidationAndStorageType(t *testing.T) {
+	catalog := Catalog{Databases: []Database{{
+		Name: "workspace",
+		Tables: []Table{{
+			Name: "contacts",
+			Fields: []Field{
+				{Name: "name", Type: "string"},
+				{Name: "attachment", Type: "file"},
+			},
+		}},
+	}}}
+	if err := catalog.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if storage := (Field{Type: "file"}).StorageType(); storage != "int" {
+		t.Fatalf("expected file fields to store the file id as int, got %q", storage)
+	}
+
+	invalid := Catalog{Databases: []Database{{
+		Name: "workspace",
+		Tables: []Table{{
+			Name: "contacts",
+			Fields: []Field{
+				{Name: "attachment", Type: "file", RelationTable: "other"},
+			},
+		}},
+	}}}
+	if err := invalid.Validate(); err == nil {
+		t.Fatal("expected relation_table on a file field to be rejected")
+	}
+}
