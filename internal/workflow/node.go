@@ -40,6 +40,16 @@ type TriggerEvent struct {
 	HistoryKey  string
 	RowChange   history.RowChange
 	ScheduledAt int64
+	Webhook     WebhookEvent
+}
+
+// WebhookEvent carries an inbound webhook call: the presented token (checked
+// again by the trigger node against its configured secret) and the request
+// payload.
+type WebhookEvent struct {
+	Token      string
+	Payload    map[string]any
+	ReceivedAt int64
 }
 
 type RuntimeInfo struct {

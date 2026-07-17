@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -220,6 +221,7 @@ type workflowEventKind string
 const (
 	workflowEventRowChange workflowEventKind = "row_change"
 	workflowEventSchedule  workflowEventKind = "schedule"
+	workflowEventWebhook   workflowEventKind = "webhook"
 )
 
 type workflowEvent struct {
@@ -228,6 +230,11 @@ type workflowEvent struct {
 	HistoryKey   string
 	RowChange    history.RowChange
 	ScheduledAt  time.Time
+	// WorkflowID targets webhook events at exactly one workflow.
+	WorkflowID     int64
+	WebhookToken   string
+	WebhookPayload map[string]any
+	ReceivedAt     int64
 }
 
 type workflowEventWorker struct {
@@ -1192,6 +1199,11 @@ func (server *Server) handleGetDatabaseResource(w http.ResponseWriter, r *http.R
 }
 
 func (server *Server) handlePostDatabaseResource(w http.ResponseWriter, r *http.Request) {
+	// Webhooks authenticate with their own shared token instead of a session.
+	if dbName, workflowID, ok := parseWorkflowWebhookPath(r.URL.Path); ok {
+		server.handleWorkflowWebhook(w, r, dbName, workflowID)
+		return
+	}
 	dbName, resource, ok := parseDatabaseResourcePath(r.URL.Path)
 	if !ok {
 		http.NotFound(w, r)
@@ -1931,6 +1943,8 @@ func (server *Server) workflowEventMayRun(ctx context.Context, workflowID int64,
 		return server.scheduleTriggerMatches(ctx, workflowID, declaration, event.ScheduledAt)
 	case workflowEventRowChange:
 		return declaration.Node == "table.record.changed"
+	case workflowEventWebhook:
+		return event.WorkflowID == workflowID && declaration.Node == "webhook.trigger"
 	default:
 		return false
 	}
@@ -1949,6 +1963,15 @@ func workflowTriggerEvent(event workflowEvent) workflow.TriggerEvent {
 			HistoryKey: event.HistoryKey,
 			RowChange:  event.RowChange,
 		}
+	case workflowEventWebhook:
+		return workflow.TriggerEvent{
+			Kind: "webhook",
+			Webhook: workflow.WebhookEvent{
+				Token:      event.WebhookToken,
+				Payload:    event.WebhookPayload,
+				ReceivedAt: event.ReceivedAt,
+			},
+		}
 	default:
 		return workflow.TriggerEvent{}
 	}
@@ -1956,7 +1979,7 @@ func workflowTriggerEvent(event workflowEvent) workflow.TriggerEvent {
 
 func (server *Server) workflowTriggerEventForSubject(ctx context.Context, subjectID string, event workflowEvent) (workflow.TriggerEvent, bool) {
 	switch event.Kind {
-	case workflowEventSchedule:
+	case workflowEventSchedule, workflowEventWebhook:
 		return workflowTriggerEvent(event), true
 	case workflowEventRowChange:
 		change, ok := server.readableRowChangeForSubject(ctx, subjectID, event.RowChange)
@@ -2325,6 +2348,92 @@ func parseTableRowPath(path string) (string, string, int64, bool) {
 		return "", "", 0, false
 	}
 	return parts[2], parts[3], recordID, true
+}
+
+func parseWorkflowWebhookPath(path string) (string, int64, bool) {
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(parts) != 6 || parts[0] != "api" || parts[1] != "databases" || parts[3] != "workflows" || parts[5] != "webhook" {
+		return "", 0, false
+	}
+	workflowID, err := strconv.ParseInt(parts[4], 10, 64)
+	if err != nil || workflowID <= 0 {
+		return "", 0, false
+	}
+	return parts[2], workflowID, true
+}
+
+const maxWebhookBodyBytes = 1 << 20
+
+type workflowWebhookRequest struct {
+	Token   string         `json:"token"`
+	Payload map[string]any `json:"payload"`
+}
+
+// handleWorkflowWebhook lets external systems push events into a workflow.
+// The shared token configured on the webhook trigger instance is the only
+// credential; no session is involved.
+func (server *Server) handleWorkflowWebhook(w http.ResponseWriter, r *http.Request, dbName string, workflowID int64) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxWebhookBodyBytes)
+	var request workflowWebhookRequest
+	if err := readJSON(r, &request); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if request.Token == "" {
+		writeError(w, http.StatusUnauthorized, errors.New("webhook token is required"))
+		return
+	}
+	workflowDefinition, err := server.system.Workflow(r.Context(), workflowID)
+	if err != nil || workflowDefinition.DatabaseName != dbName {
+		writeError(w, http.StatusNotFound, fmt.Errorf("workflow %d not found in database %q", workflowID, dbName))
+		return
+	}
+	if !workflowDefinition.Enabled {
+		writeError(w, http.StatusBadRequest, errors.New("workflow is disabled"))
+		return
+	}
+	workflowDefinition, err = server.workflowDefinitionWithFileScript(r.Context(), workflowDefinition)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	definition := workflow.Definition{
+		ID:                   workflowDefinition.ID,
+		DatabaseName:         workflowDefinition.DatabaseName,
+		Script:               workflowDefinition.Script,
+		CreatorID:            systemdb.WorkflowSubjectID(workflowDefinition.ID),
+		Secrets:              workflowDefinition.Secrets,
+		Variables:            workflowDefinition.Variables,
+		Runners:              workflowDefinition.Runners,
+		HistoryRetentionDays: workflowDefinition.HistoryRetentionDays,
+	}
+	declaration, err := server.runner.Trigger(r.Context(), definition)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if declaration.Node != "webhook.trigger" {
+		writeError(w, http.StatusBadRequest, errors.New("workflow trigger is not a webhook"))
+		return
+	}
+	configured := strings.TrimSpace(definition.Secrets[declaration.Instance+".token"])
+	if configured == "" {
+		writeError(w, http.StatusUnauthorized, errors.New("webhook token is not configured on the trigger instance"))
+		return
+	}
+	if subtle.ConstantTimeCompare([]byte(configured), []byte(request.Token)) != 1 {
+		writeError(w, http.StatusUnauthorized, errors.New("invalid webhook token"))
+		return
+	}
+	server.dispatchWorkflowEvent(r.Context(), workflowEvent{
+		Kind:           workflowEventWebhook,
+		DatabaseName:   dbName,
+		WorkflowID:     workflowID,
+		WebhookToken:   request.Token,
+		WebhookPayload: request.Payload,
+		ReceivedAt:     time.Now().UTC().UnixMilli(),
+	})
+	writeJSON(w, http.StatusAccepted, map[string]any{"accepted": true})
 }
 
 func parseDatabaseResourcePath(path string) (string, string, bool) {

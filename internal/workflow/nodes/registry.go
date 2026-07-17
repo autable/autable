@@ -20,6 +20,7 @@ import (
 	rowupdate "autable/internal/workflow/nodes/table/row/update"
 	rowupsert "autable/internal/workflow/nodes/table/row/upsert"
 	"autable/internal/workflow/nodes/time/schedule"
+	webhooktrigger "autable/internal/workflow/nodes/webhook/trigger"
 )
 
 type Dependencies struct {
@@ -31,6 +32,7 @@ func All(deps Dependencies) []workflow.Node {
 	nodes := append(Remote(),
 		recordchanged.NewNode(deps.History),
 		schedule.Node{},
+		webhooktrigger.Node{},
 	)
 	nodes = append(nodes, AutableNodes(deps.Autable)...)
 	return nodes

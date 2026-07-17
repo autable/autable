@@ -3015,6 +3015,7 @@ func TestWorkflowNodesAPI(t *testing.T) {
 		"table.row.upsert",
 		"table.row.update",
 		"time.schedule",
+		"webhook.trigger",
 	}
 	if len(nodes) != len(expectedTypes) {
 		t.Fatalf("unexpected nodes: %#v", nodes)
@@ -4537,5 +4538,72 @@ func TestWorkflowResponsesCarryHistoryRetention(t *testing.T) {
 	}
 	if !strings.Contains(listRecorder.Body.String(), `"history_retention_days":7`) {
 		t.Fatalf("expected retention in workflow list, got %s", listRecorder.Body.String())
+	}
+}
+
+func TestWorkflowWebhookRunsTargetWorkflow(t *testing.T) {
+	server, system := newTestServer(t)
+	ctx := context.Background()
+	script := `function instances(info) { return { hook: "webhook.trigger", main: "echo" }; }
+function trigger(info) { return { instance: "hook" }; }
+function run(info) { return info.instance("main").exec({ value: info.inputs.payload.result }); }`
+	hooked, err := system.SaveWorkflow(ctx, systemdb.WorkflowDefinition{
+		DatabaseName: "db",
+		Name:         "hooked",
+		Script:       script,
+		Secrets:      map[string]string{"hook.token": "s3cret"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bystander, err := system.SaveWorkflow(ctx, systemdb.WorkflowDefinition{
+		DatabaseName: "db",
+		Name:         "bystander",
+		Script:       script,
+		Secrets:      map[string]string{"hook.token": "s3cret"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	post := func(path string, body string) *httptest.ResponseRecorder {
+		request := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+		request.Header.Set("Content-Type", "application/json")
+		recorder := httptest.NewRecorder()
+		server.ServeHTTP(recorder, request)
+		return recorder
+	}
+
+	webhookPath := fmt.Sprintf("/api/databases/db/workflows/%d/webhook", hooked.ID)
+	if recorder := post(webhookPath, `{"payload":{}}`); recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 without token, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+	if recorder := post(webhookPath, `{"token":"wrong","payload":{}}`); recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for wrong token, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+	if recorder := post(fmt.Sprintf("/api/databases/other/workflows/%d/webhook", hooked.ID), `{"token":"s3cret"}`); recorder.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 for wrong database, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+	accepted := post(webhookPath, `{"token":"s3cret","payload":{"result":"agree"}}`)
+	if accepted.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d: %s", accepted.Code, accepted.Body.String())
+	}
+
+	runs, err := server.history.GetPrefix(ctx, history.WorkflowPrefix(hooked.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("expected one webhook run, got %d", len(runs))
+	}
+	if !strings.Contains(string(runs[0].Value), `"agree"`) {
+		t.Fatalf("expected payload to reach the run, got %s", runs[0].Value)
+	}
+	otherRuns, err := server.history.GetPrefix(ctx, history.WorkflowPrefix(bystander.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(otherRuns) != 0 {
+		t.Fatalf("expected the bystander workflow to stay idle, got %d runs", len(otherRuns))
 	}
 }
