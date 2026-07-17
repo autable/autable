@@ -4340,3 +4340,33 @@ func TestUploadRejectsFilesOverTheLimit(t *testing.T) {
 		t.Fatalf("expected 201 under the limit, got %d: %s", small.Code, small.Body.String())
 	}
 }
+
+func TestSaveFileGrant(t *testing.T) {
+	server, system := newTestServer(t)
+	cookie := testSessionCookie(t, system, "grant-owner")
+	if err := system.SaveDatabaseOwner(context.Background(), "db", "grant-owner"); err != nil {
+		t.Fatal(err)
+	}
+
+	save := func(body string) *httptest.ResponseRecorder {
+		request := httptest.NewRequest(http.MethodPost, "/api/permissions/grants", strings.NewReader(body))
+		request.Header.Set("Content-Type", "application/json")
+		request.AddCookie(cookie)
+		recorder := httptest.NewRecorder()
+		server.ServeHTTP(recorder, request)
+		return recorder
+	}
+
+	granted := save(`{"subject_id":"viewer","scope":"file","resource":"db.contacts","field":"","level":1}`)
+	if granted.Code != http.StatusCreated {
+		t.Fatalf("expected file grant 201, got %d: %s", granted.Code, granted.Body.String())
+	}
+	badTable := save(`{"subject_id":"viewer","scope":"file","resource":"db.missing","field":"","level":1}`)
+	if badTable.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for unknown table, got %d: %s", badTable.Code, badTable.Body.String())
+	}
+	withField := save(`{"subject_id":"viewer","scope":"file","resource":"db.contacts","field":"x","level":1}`)
+	if withField.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for file grant with field, got %d: %s", withField.Code, withField.Body.String())
+	}
+}

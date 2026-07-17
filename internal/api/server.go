@@ -2654,7 +2654,7 @@ func (server *Server) requireDatabaseOwner(w http.ResponseWriter, r *http.Reques
 
 func (server *Server) grantDatabaseName(ctx context.Context, grant permission.Grant) (string, error) {
 	switch grant.Scope {
-	case permission.ScopeFieldSet, permission.ScopeField, permission.ScopeRecord, permission.ScopeViewSet, permission.ScopeView:
+	case permission.ScopeFieldSet, permission.ScopeField, permission.ScopeRecord, permission.ScopeViewSet, permission.ScopeView, permission.ScopeFile:
 		dbName, _, ok := strings.Cut(grant.Resource, ".")
 		if !ok || dbName == "" {
 			return "", fmt.Errorf("grant resource %q must be db.table", grant.Resource)
@@ -2956,6 +2956,17 @@ func (server *Server) validateGrantResource(ctx context.Context, dbName string, 
 		}
 		if !found {
 			return fmt.Errorf("view %s.%s.%s not found", dbName, tableName, grant.Field)
+		}
+	case permission.ScopeFile:
+		if grant.Field != "" {
+			return errors.New("file grant cannot include field")
+		}
+		_, tableName, ok := strings.Cut(grant.Resource, ".")
+		if !ok || tableName == "" {
+			return fmt.Errorf("grant resource %q must be db.table", grant.Resource)
+		}
+		if _, ok := server.catalogSnapshot().Table(dbName, tableName); !ok {
+			return fmt.Errorf("table %s.%s not found", dbName, tableName)
 		}
 	case permission.ScopeWorkflowSet:
 		if grant.Resource != dbName {
