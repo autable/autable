@@ -163,6 +163,8 @@
     "empty": "Create a role to configure table, field, workflow, and form permissions.",
     "fieldSet": "{{table}} fields",
     "fields": "Fields",
+    "fileView": "View",
+    "files": "Files",
     "formPartialPermissions": "Form partial permissions",
     "formSet": "All forms",
     "forms": "Forms",

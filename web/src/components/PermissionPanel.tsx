@@ -323,6 +323,11 @@ function PermissionMatrix({
               grants={grants}
               onGrantChange={onGrantChange}
             />
+            <FilePermissionToggle
+              resource={`${database.name}.${table.name}`}
+              grants={grants}
+              onGrantChange={onGrantChange}
+            />
             <PermissionScopeGroup
               label={t("permission.fields")}
               setScope="field_set"
@@ -431,6 +436,38 @@ function RecordPermissionToggle(props: {
           onClick={() => props.onGrantChange("record", props.resource, "delete", canDelete ? 0 : 2)}
         >
           {deleteLabel}
+        </ToggleButton>
+      </div>
+    </div>
+  );
+}
+
+function FilePermissionToggle(props: {
+  grants: PermissionGrant[];
+  resource: string;
+  onGrantChange: (
+    scope: PermissionGrant["scope"],
+    resource: string,
+    field: string,
+    level: PermissionGrant["level"]
+  ) => void;
+}) {
+  const { t } = useTranslation();
+  const canView = grantLevel(props.grants, "file", props.resource, "") >= 1;
+  const viewLabel = t("permission.fileView", "View");
+
+  return (
+    <div className="permission-scope">
+      <span className="permission-scope-label">{t("permission.files")}</span>
+      <div className="perm-split" role="group" aria-label={t("permission.files")}>
+        <ToggleButton
+          className="perm-split-all"
+          appearance={canView ? "primary" : "secondary"}
+          checked={canView}
+          aria-label={viewLabel}
+          onClick={() => props.onGrantChange("file", props.resource, "", canView ? 0 : 1)}
+        >
+          {viewLabel}
         </ToggleButton>
       </div>
     </div>

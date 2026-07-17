@@ -171,7 +171,7 @@ export function useTableWorkspace({
         return;
       }
       try {
-        const record = await uploadFile(file);
+        const record = await uploadFile(file, databaseName, table.name, recordID);
         setFileLabels((current) => ({ ...current, [record.id]: record.name }));
         const saved = await updateRow(databaseName, table.name, recordID, { [field.name]: record.id });
         setRows((current) =>

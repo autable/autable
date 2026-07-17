@@ -166,7 +166,7 @@ export type FormDefinition = {
 
 export type PermissionGrant = {
   subject_id: string;
-  scope: "field_set" | "field" | "record" | "view_set" | "view" | "workflow_set" | "workflow" | "form_set" | "form";
+  scope: "field_set" | "field" | "record" | "view_set" | "view" | "workflow_set" | "workflow" | "form_set" | "form" | "file";
   resource: string;
   field: string;
   level: 0 | 1 | 2;
@@ -634,12 +634,18 @@ export type FileRecord = {
   name: string;
   size: number;
   content_type: string;
+  database_name: string;
+  table_name: string;
+  record_id: number;
   created_at?: number;
 };
 
-export async function uploadFile(file: File): Promise<FileRecord> {
+export async function uploadFile(file: File, databaseName: string, tableName: string, recordID: number): Promise<FileRecord> {
   const body = new FormData();
   body.append("file", file);
+  body.append("database_name", databaseName);
+  body.append("table_name", tableName);
+  body.append("record_id", String(recordID));
   const response = await fetch("/api/files", { method: "POST", body });
   if (!response.ok) {
     const error = await response.json().catch(() => ({ error: response.statusText }));

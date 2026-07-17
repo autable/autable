@@ -163,6 +163,8 @@
     "empty": "创建角色后即可配置表、字段、工作流和表单权限。",
     "fieldSet": "{{table}} 字段",
     "fields": "字段",
+    "fileView": "查看",
+    "files": "文件",
     "formPartialPermissions": "表单部分权限",
     "formSet": "全部表单",
     "forms": "表单",

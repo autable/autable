@@ -122,12 +122,17 @@ type workflowModel struct {
 }
 
 type fileModel struct {
-	ID          int64  `gorm:"primaryKey;autoIncrement"`
-	Name        string `gorm:"not null"`
-	Size        int64  `gorm:"not null"`
-	ContentType string `gorm:"not null;default:''"`
-	CreatorID   string `gorm:"index;not null;default:''"`
-	CreatedAt   int64  `gorm:"autoCreateTime:milli"`
+	ID           int64  `gorm:"primaryKey;autoIncrement"`
+	Name         string `gorm:"not null"`
+	Size         int64  `gorm:"not null"`
+	ContentType  string `gorm:"not null;default:''"`
+	CreatorID    string `gorm:"index;not null;default:''"`
+	DatabaseName string `gorm:"index:idx_file_table;not null;default:''"`
+	TableName    string `gorm:"index:idx_file_table;not null;default:''"`
+	// RecordID is the row the file was uploaded for; 0 when unknown. Stored
+	// for future row-level permission checks.
+	RecordID  int64 `gorm:"not null;default:0"`
+	CreatedAt int64 `gorm:"autoCreateTime:milli"`
 }
 
 type runnerTokenModel struct {
@@ -953,12 +958,16 @@ func mergeStringMaps(base map[string]string, updates map[string]string) map[stri
 }
 
 type FileRecord struct {
-	ID          int64  `json:"id"`
-	Name        string `json:"name"`
-	Size        int64  `json:"size"`
-	ContentType string `json:"content_type"`
-	CreatorID   string `json:"creator_id,omitempty"`
-	CreatedAt   int64  `json:"created_at"`
+	ID           int64  `json:"id"`
+	Name         string `json:"name"`
+	Size         int64  `json:"size"`
+	ContentType  string `json:"content_type"`
+	CreatorID    string `json:"creator_id,omitempty"`
+	DatabaseName string `json:"database_name"`
+	TableName    string `json:"table_name"`
+	// RecordID is the row the file was uploaded for; 0 when unknown.
+	RecordID  int64 `json:"record_id"`
+	CreatedAt int64 `json:"created_at"`
 }
 
 func (db *DB) CreateFile(ctx context.Context, file FileRecord) (FileRecord, error) {
@@ -968,11 +977,20 @@ func (db *DB) CreateFile(ctx context.Context, file FileRecord) (FileRecord, erro
 	if file.Size < 0 {
 		return FileRecord{}, errors.New("file size must not be negative")
 	}
+	if file.DatabaseName == "" || file.TableName == "" {
+		return FileRecord{}, errors.New("file database_name and table_name are required")
+	}
+	if file.RecordID < 0 {
+		return FileRecord{}, errors.New("file record_id must not be negative")
+	}
 	model := fileModel{
-		Name:        file.Name,
-		Size:        file.Size,
-		ContentType: file.ContentType,
-		CreatorID:   file.CreatorID,
+		Name:         file.Name,
+		Size:         file.Size,
+		ContentType:  file.ContentType,
+		CreatorID:    file.CreatorID,
+		DatabaseName: file.DatabaseName,
+		TableName:    file.TableName,
+		RecordID:     file.RecordID,
 	}
 	if err := db.orm.WithContext(ctx).Create(&model).Error; err != nil {
 		return FileRecord{}, err
@@ -996,11 +1014,14 @@ func (db *DB) File(ctx context.Context, id int64) (FileRecord, error) {
 
 func fileRecordFromModel(model fileModel) FileRecord {
 	return FileRecord{
-		ID:          model.ID,
-		Name:        model.Name,
-		Size:        model.Size,
-		ContentType: model.ContentType,
-		CreatorID:   model.CreatorID,
-		CreatedAt:   model.CreatedAt,
+		ID:           model.ID,
+		Name:         model.Name,
+		Size:         model.Size,
+		ContentType:  model.ContentType,
+		CreatorID:    model.CreatorID,
+		DatabaseName: model.DatabaseName,
+		TableName:    model.TableName,
+		RecordID:     model.RecordID,
+		CreatedAt:    model.CreatedAt,
 	}
 }

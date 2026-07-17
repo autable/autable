@@ -3598,15 +3598,40 @@ func (server *Server) handleUploadFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer file.Close()
+	dbName := strings.TrimSpace(r.FormValue("database_name"))
+	tableName := strings.TrimSpace(r.FormValue("table_name"))
+	if dbName == "" || tableName == "" {
+		writeError(w, http.StatusBadRequest, errors.New("database_name and table_name are required"))
+		return
+	}
+	recordID := int64(0)
+	if recordText := strings.TrimSpace(r.FormValue("record_id")); recordText != "" {
+		recordID, err = strconv.ParseInt(recordText, 10, 64)
+		if err != nil || recordID < 0 {
+			writeError(w, http.StatusBadRequest, fmt.Errorf("record_id must be a non-negative integer, got %q", recordText))
+			return
+		}
+	}
+	if _, ok := server.catalogSnapshot().Table(dbName, tableName); !ok {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("table %s.%s does not exist", dbName, tableName))
+		return
+	}
+	if !server.canAccessTableFiles(r.Context(), actorID, dbName, tableName) {
+		writeError(w, http.StatusForbidden, table.ErrPermissionDenied)
+		return
+	}
 	contentType := header.Header.Get("Content-Type")
 	if contentType == "" {
 		contentType = "application/octet-stream"
 	}
 	record, err := server.system.CreateFile(r.Context(), systemdb.FileRecord{
-		Name:        sanitizeFileName(header.Filename),
-		Size:        header.Size,
-		ContentType: contentType,
-		CreatorID:   actorID,
+		Name:         sanitizeFileName(header.Filename),
+		Size:         header.Size,
+		ContentType:  contentType,
+		CreatorID:    actorID,
+		DatabaseName: dbName,
+		TableName:    tableName,
+		RecordID:     recordID,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
@@ -3624,7 +3649,8 @@ type fileMetadataRequest struct {
 }
 
 func (server *Server) handleFileMetadata(w http.ResponseWriter, r *http.Request) {
-	if _, ok := server.requireUserID(w, r); !ok {
+	actorID, ok := server.requireUserID(w, r)
+	if !ok {
 		return
 	}
 	var request fileMetadataRequest
@@ -3642,13 +3668,17 @@ func (server *Server) handleFileMetadata(w http.ResponseWriter, r *http.Request)
 			writeError(w, http.StatusInternalServerError, err)
 			return
 		}
+		if !server.canAccessTableFiles(r.Context(), actorID, record.DatabaseName, record.TableName) {
+			continue
+		}
 		records = append(records, record)
 	}
 	writeJSON(w, http.StatusOK, records)
 }
 
 func (server *Server) handleDownloadFile(w http.ResponseWriter, r *http.Request) {
-	if _, ok := server.requireUserID(w, r); !ok {
+	actorID, ok := server.requireUserID(w, r)
+	if !ok {
 		return
 	}
 	id, err := strconv.ParseInt(strings.TrimPrefix(r.URL.Path, "/api/files/"), 10, 64)
@@ -3663,6 +3693,10 @@ func (server *Server) handleDownloadFile(w http.ResponseWriter, r *http.Request)
 	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if !server.canAccessTableFiles(r.Context(), actorID, record.DatabaseName, record.TableName) {
+		writeError(w, http.StatusForbidden, table.ErrPermissionDenied)
 		return
 	}
 	if server.files == nil {
@@ -3680,6 +3714,25 @@ func (server *Server) handleDownloadFile(w http.ResponseWriter, r *http.Request)
 	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": record.Name}))
 	w.WriteHeader(http.StatusOK)
 	_, _ = io.Copy(w, body)
+}
+
+// canAccessTableFiles reports whether the actor may view or upload files
+// bound to the given table: the database owner always may, everyone else
+// needs a file-scope grant on the table. Files without a binding (uploaded
+// before bindings existed) are accessible to database owners only.
+func (server *Server) canAccessTableFiles(ctx context.Context, actorID string, dbName string, tableName string) bool {
+	if dbName == "" {
+		return false
+	}
+	if server.isDatabaseOwner(ctx, actorID, dbName) {
+		return true
+	}
+	perms, err := server.system.EffectiveGrantsForSubject(ctx, actorID)
+	if err != nil {
+		return false
+	}
+	resource := tableResource(dbName, tableName)
+	return resource != "" && perms.CanReadResource(actorID, permission.ScopeFile, resource)
 }
 
 // sanitizeFileName keeps the original filename as the S3 object name while

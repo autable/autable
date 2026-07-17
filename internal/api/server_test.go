@@ -4104,7 +4104,7 @@ func (store *memoryFileStore) Get(_ context.Context, id int64, name string) (io.
 	return io.NopCloser(bytes.NewReader(data)), nil
 }
 
-func uploadTestFile(t *testing.T, server *Server, cookie *http.Cookie, fileName string, content string) systemdb.FileRecord {
+func uploadTestFileRequest(t *testing.T, server *Server, cookie *http.Cookie, fileName string, content string, fields map[string]string) *httptest.ResponseRecorder {
 	t.Helper()
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
@@ -4115,6 +4115,11 @@ func uploadTestFile(t *testing.T, server *Server, cookie *http.Cookie, fileName 
 	if _, err := part.Write([]byte(content)); err != nil {
 		t.Fatal(err)
 	}
+	for name, value := range fields {
+		if err := writer.WriteField(name, value); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if err := writer.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -4123,6 +4128,16 @@ func uploadTestFile(t *testing.T, server *Server, cookie *http.Cookie, fileName 
 	request.AddCookie(cookie)
 	recorder := httptest.NewRecorder()
 	server.ServeHTTP(recorder, request)
+	return recorder
+}
+
+func uploadTestFile(t *testing.T, server *Server, cookie *http.Cookie, fileName string, content string) systemdb.FileRecord {
+	t.Helper()
+	recorder := uploadTestFileRequest(t, server, cookie, fileName, content, map[string]string{
+		"database_name": "db",
+		"table_name":    "contacts",
+		"record_id":     "1",
+	})
 	if recorder.Code != http.StatusCreated {
 		t.Fatalf("expected upload 201, got %d: %s", recorder.Code, recorder.Body.String())
 	}
@@ -4138,10 +4153,16 @@ func TestFileUploadDownloadAndMetadata(t *testing.T) {
 	files := newMemoryFileStore()
 	server.SetFileStore(files)
 	cookie := testSessionCookie(t, system, "uploader")
+	saveTestGrants(t, system,
+		permission.Grant{SubjectID: "uploader", Scope: permission.ScopeFile, Resource: "db.contacts", Level: permission.Read},
+	)
 
 	record := uploadTestFile(t, server, cookie, "../weird/../报价单.pdf", "pdf-bytes")
 	if record.ID != 1 || record.Name != "报价单.pdf" || record.Size != int64(len("pdf-bytes")) {
 		t.Fatalf("unexpected file record: %#v", record)
+	}
+	if record.DatabaseName != "db" || record.TableName != "contacts" || record.RecordID != 1 {
+		t.Fatalf("unexpected file binding: %#v", record)
 	}
 	second := uploadTestFile(t, server, cookie, "notes.txt", "hello")
 	if second.ID != 2 {
@@ -4193,5 +4214,75 @@ func TestFileEndpointsWithoutStoreOrSession(t *testing.T) {
 	server.ServeHTTP(anonymousRecorder, anonymous)
 	if anonymousRecorder.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401 without a session, got %d", anonymousRecorder.Code)
+	}
+}
+
+func TestFilePermissionsGateUploadAndDownload(t *testing.T) {
+	server, system := newTestServer(t)
+	server.SetFileStore(newMemoryFileStore())
+	ctx := context.Background()
+
+	ownerCookie := testSessionCookie(t, system, "owner")
+	if err := system.SaveDatabaseOwner(ctx, "db", "owner"); err != nil {
+		t.Fatal(err)
+	}
+	grantedCookie := testSessionCookie(t, system, "granted")
+	saveTestGrants(t, system,
+		permission.Grant{SubjectID: "granted", Scope: permission.ScopeFile, Resource: "db.contacts", Level: permission.Read},
+	)
+	strangerCookie := testSessionCookie(t, system, "stranger")
+
+	missingBinding := uploadTestFileRequest(t, server, ownerCookie, "a.txt", "x", map[string]string{})
+	if missingBinding.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 without table binding, got %d", missingBinding.Code)
+	}
+	unknownTable := uploadTestFileRequest(t, server, ownerCookie, "a.txt", "x", map[string]string{
+		"database_name": "db", "table_name": "missing",
+	})
+	if unknownTable.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for unknown table, got %d", unknownTable.Code)
+	}
+	denied := uploadTestFileRequest(t, server, strangerCookie, "a.txt", "x", map[string]string{
+		"database_name": "db", "table_name": "contacts",
+	})
+	if denied.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for uploader without a file grant, got %d", denied.Code)
+	}
+
+	record := uploadTestFile(t, server, ownerCookie, "report.pdf", "pdf")
+
+	cases := []struct {
+		name     string
+		cookie   *http.Cookie
+		expected int
+	}{
+		{"owner", ownerCookie, http.StatusOK},
+		{"granted", grantedCookie, http.StatusOK},
+		{"stranger", strangerCookie, http.StatusForbidden},
+	}
+	for _, testCase := range cases {
+		request := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/files/%d", record.ID), nil)
+		request.AddCookie(testCase.cookie)
+		recorder := httptest.NewRecorder()
+		server.ServeHTTP(recorder, request)
+		if recorder.Code != testCase.expected {
+			t.Fatalf("%s: expected download %d, got %d: %s", testCase.name, testCase.expected, recorder.Code, recorder.Body.String())
+		}
+	}
+
+	metadata := httptest.NewRequest(http.MethodPost, "/api/files/metadata", strings.NewReader(fmt.Sprintf(`{"ids":[%d]}`, record.ID)))
+	metadata.Header.Set("Content-Type", "application/json")
+	metadata.AddCookie(strangerCookie)
+	metadataRecorder := httptest.NewRecorder()
+	server.ServeHTTP(metadataRecorder, metadata)
+	if metadataRecorder.Code != http.StatusOK {
+		t.Fatalf("expected metadata 200, got %d", metadataRecorder.Code)
+	}
+	var records []systemdb.FileRecord
+	if err := json.NewDecoder(metadataRecorder.Body).Decode(&records); err != nil {
+		t.Fatal(err)
+	}
+	if len(records) != 0 {
+		t.Fatalf("expected metadata to hide unauthorized files, got %#v", records)
 	}
 }

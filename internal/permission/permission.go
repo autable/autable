@@ -20,6 +20,9 @@ const (
 	ScopeWorkflow    Scope = "workflow"
 	ScopeFormSet     Scope = "form_set"
 	ScopeForm        Scope = "form"
+	// ScopeFile guards viewing and uploading files bound to a table; the
+	// resource is db.table.
+	ScopeFile Scope = "file"
 )
 
 type Grant struct {
