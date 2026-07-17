@@ -4585,8 +4585,8 @@ function run(info) { return info.instance("main").exec({ value: info.inputs.payl
 		t.Fatalf("expected 404 for wrong database, got %d: %s", recorder.Code, recorder.Body.String())
 	}
 	accepted := post(webhookPath, `{"token":"s3cret","payload":{"result":"agree"}}`)
-	if accepted.Code != http.StatusAccepted {
-		t.Fatalf("expected 202, got %d: %s", accepted.Code, accepted.Body.String())
+	if accepted.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", accepted.Code, accepted.Body.String())
 	}
 
 	runs, err := server.history.GetPrefix(ctx, history.WorkflowPrefix(hooked.ID))

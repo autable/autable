@@ -2339,7 +2339,9 @@ func (server *Server) handleWorkflowWebhook(w http.ResponseWriter, r *http.Reque
 		WebhookPayload: request.Payload,
 		ReceivedAt:     time.Now().UTC().UnixMilli(),
 	})
-	writeJSON(w, http.StatusAccepted, map[string]any{"accepted": true})
+	// 200 instead of 202: webhook senders like DingTalk's HTTP connector
+	// treat any non-200 status as a delivery failure and retry.
+	writeJSON(w, http.StatusOK, map[string]any{"accepted": true})
 }
 
 

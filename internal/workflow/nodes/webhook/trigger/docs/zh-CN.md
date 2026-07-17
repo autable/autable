@@ -14,7 +14,7 @@ Content-Type: application/json
 }
 ```
 
-- 校验通过返回 `202 {"accepted":true}`,工作流异步执行;
+- 校验通过返回 `200 {"accepted":true}`,工作流异步执行;
 - token 缺失或不匹配返回 401;未配置 token 时 webhook 视为关闭,拒绝所有调用;
 - `payload` 上限 1MB,可省略(默认为空对象)。
 

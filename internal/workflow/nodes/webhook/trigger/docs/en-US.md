@@ -14,7 +14,7 @@ Content-Type: application/json
 }
 ```
 
-- On success the server answers `202 {"accepted":true}` and runs the workflow asynchronously;
+- On success the server answers `200 {"accepted":true}` and runs the workflow asynchronously;
 - A missing or mismatched token answers 401; while no token is configured the webhook is considered disabled and rejects every call;
 - `payload` is limited to 1MB and may be omitted (defaults to an empty object).
 
