@@ -12,6 +12,7 @@ import { AuthDialog } from "./components/AuthDialog";
 import { FormWorkspace } from "./components/FormWorkspace";
 import { PermissionPanel } from "./components/PermissionPanel";
 import { PublishedFormPage } from "./components/PublishedFormPage";
+import { LoginPage } from "./components/LoginPage";
 import { TableWorkspace } from "./components/TableWorkspace";
 import { WorkflowWorkspace, type WorkflowTab } from "./components/WorkflowWorkspace";
 import { WorkspaceEmptyState } from "./components/WorkspaceEmptyState";
@@ -47,6 +48,9 @@ const emptyTable: TableMetadata = { name: "", display_name: "", fields: [], view
 const emptyCatalog: Catalog = { databases: [] };
 
 export function App() {
+  if (window.location.pathname === "/login") {
+    return <LoginPage />;
+  }
   const publishedFormToken = publishedFormTokenFromPath();
   return publishedFormToken ? <PublishedFormPage token={publishedFormToken} /> : <WorkspaceApp />;
 }

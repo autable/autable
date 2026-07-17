@@ -14,6 +14,7 @@ import (
 	"io"
 	"math/big"
 	"mime/multipart"
+	"net/textproto"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -4368,5 +4369,133 @@ func TestSaveFileGrant(t *testing.T) {
 	withField := save(`{"subject_id":"viewer","scope":"file","resource":"db.contacts","field":"x","level":1}`)
 	if withField.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 for file grant with field, got %d: %s", withField.Code, withField.Body.String())
+	}
+}
+
+func TestDownloadRedirectsBrowsersToLogin(t *testing.T) {
+	server, _ := newTestServer(t)
+
+	browser := httptest.NewRequest(http.MethodGet, "/api/files/6", nil)
+	browser.Header.Set("Accept", "text/html,application/xhtml+xml")
+	browserRecorder := httptest.NewRecorder()
+	server.ServeHTTP(browserRecorder, browser)
+	if browserRecorder.Code != http.StatusFound {
+		t.Fatalf("expected 302 for browser navigation, got %d", browserRecorder.Code)
+	}
+	if location := browserRecorder.Header().Get("Location"); location != "/login?redirect=%2Fapi%2Ffiles%2F6" {
+		t.Fatalf("unexpected redirect target %q", location)
+	}
+
+	apiClient := httptest.NewRequest(http.MethodGet, "/api/files/6", nil)
+	apiRecorder := httptest.NewRecorder()
+	server.ServeHTTP(apiRecorder, apiClient)
+	if apiRecorder.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for api clients, got %d", apiRecorder.Code)
+	}
+}
+
+func TestDownloadServesPreviewableTypesInline(t *testing.T) {
+	server, system := newTestServer(t)
+	server.SetFileStore(newMemoryFileStore())
+	cookie := testSessionCookie(t, system, "preview-owner")
+	if err := system.SaveDatabaseOwner(context.Background(), "db", "preview-owner"); err != nil {
+		t.Fatal(err)
+	}
+
+	upload := func(fileName string, contentType string) systemdb.FileRecord {
+		t.Helper()
+		body := &bytes.Buffer{}
+		writer := multipart.NewWriter(body)
+		header := make(textproto.MIMEHeader)
+		header.Set("Content-Disposition", fmt.Sprintf(`form-data; name="file"; filename=%q`, fileName))
+		header.Set("Content-Type", contentType)
+		part, err := writer.CreatePart(header)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := part.Write([]byte("content")); err != nil {
+			t.Fatal(err)
+		}
+		for name, value := range map[string]string{"database_name": "db", "table_name": "contacts", "record_id": "1"} {
+			if err := writer.WriteField(name, value); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := writer.Close(); err != nil {
+			t.Fatal(err)
+		}
+		request := httptest.NewRequest(http.MethodPost, "/api/files", body)
+		request.Header.Set("Content-Type", writer.FormDataContentType())
+		request.AddCookie(cookie)
+		recorder := httptest.NewRecorder()
+		server.ServeHTTP(recorder, request)
+		if recorder.Code != http.StatusCreated {
+			t.Fatalf("expected upload 201, got %d: %s", recorder.Code, recorder.Body.String())
+		}
+		var record systemdb.FileRecord
+		if err := json.NewDecoder(recorder.Body).Decode(&record); err != nil {
+			t.Fatal(err)
+		}
+		return record
+	}
+
+	cases := []struct {
+		fileName    string
+		contentType string
+		disposition string
+	}{
+		{"contract.pdf", "application/pdf", "inline"},
+		{"photo.png", "image/png", "inline"},
+		{"vector.svg", "image/svg+xml", "attachment"},
+		{"data.bin", "application/octet-stream", "attachment"},
+	}
+	for _, testCase := range cases {
+		record := upload(testCase.fileName, testCase.contentType)
+		request := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/files/%d", record.ID), nil)
+		request.AddCookie(cookie)
+		recorder := httptest.NewRecorder()
+		server.ServeHTTP(recorder, request)
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("%s: expected 200, got %d: %s", testCase.fileName, recorder.Code, recorder.Body.String())
+		}
+		if disposition := recorder.Header().Get("Content-Disposition"); !strings.HasPrefix(disposition, testCase.disposition) {
+			t.Fatalf("%s: expected %s disposition, got %q", testCase.fileName, testCase.disposition, disposition)
+		}
+		if sniff := recorder.Header().Get("X-Content-Type-Options"); sniff != "nosniff" {
+			t.Fatalf("%s: expected nosniff, got %q", testCase.fileName, sniff)
+		}
+	}
+}
+
+func TestOIDCStartStoresSafeRedirect(t *testing.T) {
+	server, _ := newTestServerWithOIDC(t, []config.OIDCProvider{{
+		Name:      "main",
+		IssuerURL: "https://issuer.example",
+		ClientID:  "autable",
+	}})
+
+	request := httptest.NewRequest(http.MethodGet, "/api/auth/oidc/main/start?redirect=%2Fapi%2Ffiles%2F6", nil)
+	recorder := httptest.NewRecorder()
+	server.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusFound {
+		t.Fatalf("expected 302, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+	redirectCookie := ""
+	for _, cookie := range recorder.Result().Cookies() {
+		if cookie.Name == "autable_oidc_redirect" {
+			redirectCookie = cookie.Value
+		}
+	}
+	if redirectCookie != "%2Fapi%2Ffiles%2F6" {
+		t.Fatalf("expected redirect cookie, got %q", redirectCookie)
+	}
+
+	evil := httptest.NewRequest(http.MethodGet, "/api/auth/oidc/main/start?redirect=https%3A%2F%2Fevil.example", nil)
+	evilRecorder := httptest.NewRecorder()
+	server.ServeHTTP(evilRecorder, evil)
+	for _, cookie := range evilRecorder.Result().Cookies() {
+		if cookie.Name == "autable_oidc_redirect" && cookie.Value != "" {
+			t.Fatalf("expected absolute redirect to be dropped, got %q", cookie.Value)
+		}
 	}
 }

@@ -602,8 +602,9 @@ export async function suggestScriptWithAI(request: {
   return response.json() as Promise<AIScriptSuggestion>;
 }
 
-export function oidcStartURL(providerName: string): string {
-  return `/api/auth/oidc/${encodeURIComponent(providerName)}/start`;
+export function oidcStartURL(providerName: string, redirect?: string): string {
+  const base = `/api/auth/oidc/${encodeURIComponent(providerName)}/start`;
+  return redirect ? `${base}?redirect=${encodeURIComponent(redirect)}` : base;
 }
 
 export async function logout(): Promise<void> {

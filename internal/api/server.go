@@ -244,9 +244,10 @@ type roleMembersRequest struct {
 
 const (
 	sessionCookieName   = "autable_session"
-	oidcStateCookieName = "autable_oidc_state"
-	sessionTTL          = 14 * 24 * time.Hour
-	oidcStateTTL        = 10 * time.Minute
+	oidcStateCookieName    = "autable_oidc_state"
+	oidcRedirectCookieName = "autable_oidc_redirect"
+	sessionTTL             = 14 * 24 * time.Hour
+	oidcStateTTL           = 10 * time.Minute
 )
 
 func NewServer(catalog metadata.Catalog, system *systemdb.DB, tables *table.Service, historyStore history.Store) *Server {
@@ -507,6 +508,9 @@ func (server *Server) handleOIDCStart(w http.ResponseWriter, r *http.Request, pr
 		return
 	}
 	setOIDCStateCookie(w, provider.Name, state)
+	if redirect := safeLocalRedirect(r.URL.Query().Get("redirect")); redirect != "" {
+		setOIDCRedirectCookie(w, redirect)
+	}
 	callbackURL, err := oidcCallbackURL(server.publicURL, provider.Name)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
@@ -600,7 +604,25 @@ func (server *Server) handleOIDCCallback(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	setSessionCookie(w, session)
-	http.Redirect(w, r, "/", http.StatusFound)
+	target := "/"
+	if cookie, err := r.Cookie(oidcRedirectCookieName); err == nil {
+		if decoded, err := url.QueryUnescape(cookie.Value); err == nil {
+			if redirect := safeLocalRedirect(decoded); redirect != "" {
+				target = redirect
+			}
+		}
+	}
+	clearOIDCRedirectCookie(w)
+	http.Redirect(w, r, target, http.StatusFound)
+}
+
+// safeLocalRedirect keeps post-login redirects on this site: only rooted
+// paths pass, anything absolute or protocol-relative is dropped.
+func safeLocalRedirect(target string) string {
+	if !strings.HasPrefix(target, "/") || strings.HasPrefix(target, "//") || strings.Contains(target, "\\") {
+		return ""
+	}
+	return target
 }
 
 func (server *Server) handleMe(w http.ResponseWriter, r *http.Request) {
@@ -3522,6 +3544,28 @@ func setOIDCStateCookie(w http.ResponseWriter, providerName, state string) {
 	})
 }
 
+func setOIDCRedirectCookie(w http.ResponseWriter, redirect string) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     oidcRedirectCookieName,
+		Value:    url.QueryEscape(redirect),
+		Path:     "/api/auth/oidc",
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		Expires:  time.Now().Add(oidcStateTTL),
+	})
+}
+
+func clearOIDCRedirectCookie(w http.ResponseWriter) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     oidcRedirectCookieName,
+		Value:    "",
+		Path:     "/api/auth/oidc",
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   -1,
+	})
+}
+
 func clearOIDCStateCookie(w http.ResponseWriter) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     oidcStateCookieName,
@@ -3712,8 +3756,15 @@ func (server *Server) handleFileMetadata(w http.ResponseWriter, r *http.Request)
 }
 
 func (server *Server) handleDownloadFile(w http.ResponseWriter, r *http.Request) {
-	actorID, ok := server.requireUserID(w, r)
-	if !ok {
+	actorID, hasSession, err := server.currentUserID(r)
+	if err != nil || !hasSession {
+		// A browser navigating to a shared file link goes through the login
+		// page and comes back; API clients keep getting a plain 401.
+		if strings.Contains(r.Header.Get("Accept"), "text/html") {
+			http.Redirect(w, r, "/login?redirect="+url.QueryEscape(r.URL.Path), http.StatusFound)
+			return
+		}
+		writeError(w, http.StatusUnauthorized, errors.New("authentication is required"))
 		return
 	}
 	id, err := strconv.ParseInt(strings.TrimPrefix(r.URL.Path, "/api/files/"), 10, 64)
@@ -3744,11 +3795,27 @@ func (server *Server) handleDownloadFile(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	defer body.Close()
+	disposition := "attachment"
+	if previewableContentType(record.ContentType) {
+		disposition = "inline"
+	}
 	w.Header().Set("Content-Type", record.ContentType)
 	w.Header().Set("Content-Length", strconv.FormatInt(record.Size, 10))
-	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": record.Name}))
+	w.Header().Set("Content-Disposition", mime.FormatMediaType(disposition, map[string]string{"filename": record.Name}))
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(http.StatusOK)
 	_, _ = io.Copy(w, body)
+}
+
+// previewableContentType lists types browsers render safely inline. SVG is
+// deliberately excluded: it can carry scripts and would run on our origin.
+func previewableContentType(contentType string) bool {
+	switch strings.ToLower(strings.TrimSpace(strings.Split(contentType, ";")[0])) {
+	case "application/pdf", "image/png", "image/jpeg", "image/gif", "image/webp", "image/bmp", "image/avif":
+		return true
+	default:
+		return false
+	}
 }
 
 // canViewFile allows downloads only for files already bound to a record:
