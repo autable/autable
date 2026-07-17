@@ -63,6 +63,7 @@ func (node Node) Info() workflow.NodeInfo {
 		Inputs: []workflow.Port{
 			{Name: "filter_string", Type: "string", Description: "Optional Kingdee filter expression, e.g. FDocumentStatus='C'; empty matches all rows."},
 			{Name: "field_keys", Type: "string[]", Description: "Optional Kingdee field keys to fetch instead of the built-in purchase order columns."},
+			{Name: "order_string", Type: "string", Description: "Optional Kingdee sort expression, e.g. FDate DESC, FID DESC; defaults to FID ASC."},
 			{Name: "start_row", Type: "int", Description: "Optional zero-based row offset to start the page at, defaults to 0."},
 			{Name: "limit", Type: "int", Description: "Optional page size, 1-2000; defaults to the Kingdee maximum of 2000."},
 		},
@@ -101,6 +102,10 @@ func (node Node) Run(ctx context.Context, input map[string]any, info workflow.Ru
 		return nil, err
 	}
 	filter := strings.TrimSpace(stringInput(input, "filter_string"))
+	order := strings.TrimSpace(stringInput(input, "order_string"))
+	if order == "" {
+		order = "FID ASC"
+	}
 	limit, err := pageLimit(input)
 	if err != nil {
 		return nil, err
@@ -115,7 +120,7 @@ func (node Node) Run(ctx context.Context, input map[string]any, info workflow.Ru
 		"FormId":       "PUR_PurchaseOrder",
 		"FieldKeys":    strings.Join(fields, ","),
 		"FilterString": filter,
-		"OrderString":  "FID ASC",
+		"OrderString":  order,
 		"TopRowCount":  0,
 		"StartRow":     startRow,
 		"Limit":        limit,

@@ -81,6 +81,9 @@ func TestNodeFetchesSinglePage(t *testing.T) {
 	if request["FormId"] != "PUR_PurchaseOrder" || request["FilterString"] != "" || request["StartRow"] != 0 {
 		t.Fatalf("unexpected request: %#v", request)
 	}
+	if request["OrderString"] != "FID ASC" {
+		t.Fatalf("unexpected default order: %#v", request["OrderString"])
+	}
 	if !strings.HasPrefix(request["FieldKeys"].(string), "FID,FBillNo,FDate,") {
 		t.Fatalf("unexpected field keys: %#v", request["FieldKeys"])
 	}
@@ -123,6 +126,7 @@ func TestNodeSupportsCustomFilterFieldsAndLimit(t *testing.T) {
 	output, err := node.Run(context.Background(), map[string]any{
 		"filter_string": "FDate>='2026-01-01'",
 		"field_keys":    []any{"FBillNo", "FQty"},
+		"order_string":  "FDate DESC, FID DESC",
 		"limit":         500,
 	}, testRuntimeInfo())
 	if err != nil {
@@ -138,6 +142,9 @@ func TestNodeSupportsCustomFilterFieldsAndLimit(t *testing.T) {
 	request := client.requests[0]
 	if request["FilterString"] != "FDate>='2026-01-01'" || request["FieldKeys"] != "FBillNo,FQty" || request["Limit"] != 500 {
 		t.Fatalf("unexpected request: %#v", request)
+	}
+	if request["OrderString"] != "FDate DESC, FID DESC" {
+		t.Fatalf("unexpected order: %#v", request["OrderString"])
 	}
 }
 
