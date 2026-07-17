@@ -326,6 +326,20 @@ export function useWorkflowFormWorkspace({
     }
   }
 
+  async function setSelectedWorkflowHistoryRetention(days: number | null) {
+    if (!selectedWorkflow) {
+      return;
+    }
+    try {
+      const saved = await saveWorkflow(databaseName, { ...selectedWorkflow, history_retention_days: days });
+      setWorkflows((current) => replaceResource(current, saved));
+      setSelectedWorkflowID(saved.id ?? 0);
+      onStatus(t("status.workflowHistoryRetentionUpdated", { name: saved.name }));
+    } catch (error) {
+      onStatus(error instanceof Error ? error.message : t("status.workflowStatusUpdateFailed"), "error");
+    }
+  }
+
   async function renameSelectedWorkflow(name: string, workflowID = selectedWorkflow?.id ?? 0) {
     const trimmed = name.trim();
     const workflow = workflows.find((item) => item.id === workflowID) ?? selectedWorkflow;
@@ -546,6 +560,7 @@ export function useWorkflowFormWorkspace({
     refreshWorkflowRuns,
     setNewFormName,
     setNewWorkflowName,
+    setSelectedWorkflowHistoryRetention,
     setSelectedFormID,
     setSelectedWorkflowID,
     setSelectedWorkflowRunKey,

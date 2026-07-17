@@ -794,6 +794,7 @@ function WorkspaceApp() {
               onSelectRunKey={selectWorkflowRunFromWorkspace}
               onSelectTab={selectWorkflowTabFromWorkspace}
               onUpdateScript={workflowFormWorkspace.updateSelectedWorkflowScript}
+              onSetHistoryRetention={workflowFormWorkspace.setSelectedWorkflowHistoryRetention}
               onToggleEnabled={workflowFormWorkspace.toggleSelectedWorkflowEnabled}
               language={language}
               workflowTrigger={workflowTrigger}

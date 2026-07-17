@@ -26,6 +26,10 @@ type Definition struct {
 	// Runners maps instance IDs to remote runner names. Instances absent
 	// from the map execute on the server runner (in-process).
 	Runners map[string]string
+	// HistoryRetentionDays is nil to keep run history forever, 0 to keep
+	// none (runs are not persisted at all), and a positive count to keep
+	// that many days.
+	HistoryRetentionDays *int64
 }
 
 var ErrMissingTrigger = errors.New("workflow script must define function trigger(info)")
@@ -97,7 +101,7 @@ func (runner *Runner) RunAt(ctx context.Context, definition Definition, inputs m
 	}
 	instances, err := runner.Instances(ctx, definition)
 	if err != nil {
-		return runner.finish(ctx, run, err)
+		return runner.finish(ctx, definition, run, err)
 	}
 	runtime := newRuntime()
 	info := workflowInfo(definition, runID, inputs)
@@ -125,22 +129,22 @@ func (runner *Runner) RunAt(ctx context.Context, definition Definition, inputs m
 	}
 
 	if _, err := runtime.RunString(definition.Script); err != nil {
-		return runner.finish(ctx, run, err)
+		return runner.finish(ctx, definition, run, err)
 	}
 	fn, ok := goja.AssertFunction(runtime.Get("run"))
 	if !ok {
-		return runner.finish(ctx, run, errors.New("workflow script must define function run(info)"))
+		return runner.finish(ctx, definition, run, errors.New("workflow script must define function run(info)"))
 	}
 	output, err := fn(goja.Undefined(), runtime.ToValue(info))
 	if err != nil {
-		return runner.finish(ctx, run, err)
+		return runner.finish(ctx, definition, run, err)
 	}
 	outputs := exportedMap(output.Export())
 	if err := ensureSerializable(outputs); err != nil {
-		return runner.finish(ctx, run, fmt.Errorf("run() returned a value that cannot be serialized to JSON (return plain data, not the info object): %w", err))
+		return runner.finish(ctx, definition, run, fmt.Errorf("run() returned a value that cannot be serialized to JSON (return plain data, not the info object): %w", err))
 	}
 	run.Outputs = outputs
-	return runner.finish(ctx, run, nil)
+	return runner.finish(ctx, definition, run, nil)
 }
 
 // ensureSerializable rejects script values the history store cannot persist,
@@ -306,10 +310,13 @@ func (runner *Runner) runInstance(ctx context.Context, definition Definition, ru
 	return output, nil
 }
 
-func (runner *Runner) finish(ctx context.Context, run history.WorkflowRun, runErr error) (history.WorkflowRun, string, error) {
+func (runner *Runner) finish(ctx context.Context, definition Definition, run history.WorkflowRun, runErr error) (history.WorkflowRun, string, error) {
 	if runErr != nil {
 		run.Error = runErr.Error()
 		run.Outputs = map[string]any{"error": runErr.Error()}
+	}
+	if definition.HistoryRetentionDays != nil && *definition.HistoryRetentionDays == 0 {
+		return run, "", runErr
 	}
 	key, err := history.SaveWorkflowRun(ctx, runner.store, run)
 	if err != nil {

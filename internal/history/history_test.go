@@ -182,3 +182,85 @@ func TestHistoryTimestampsStayMillisecondIntsWithoutOverwriting(t *testing.T) {
 		t.Fatalf("expected second workflow timestamp to increment by 1 ms, got %d", secondWorkflow.Timestamp)
 	}
 }
+
+func TestDeletePrefixBeforeRemovesOldWorkflowRuns(t *testing.T) {
+	ctx := context.Background()
+	stores := map[string]Store{
+		"memory": NewMemoryStore(),
+	}
+	leveldbStore, err := OpenLevelDB(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := leveldbStore.Close(); err != nil {
+			t.Fatal(err)
+		}
+	})
+	stores["leveldb"] = leveldbStore
+
+	for name, store := range stores {
+		t.Run(name, func(t *testing.T) {
+			for _, timestamp := range []int64{1000, 2000, 3000} {
+				if _, err := SaveWorkflowRun(ctx, store, WorkflowRun{WorkflowID: 7, Timestamp: timestamp}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err := SaveWorkflowRun(ctx, store, WorkflowRun{WorkflowID: 8, Timestamp: 1000}); err != nil {
+				t.Fatal(err)
+			}
+
+			deleted, err := store.DeletePrefixBefore(ctx, WorkflowPrefix(7), WorkflowKey(7, 3000))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if deleted != 2 {
+				t.Fatalf("expected 2 deleted runs, got %d", deleted)
+			}
+			remaining, err := store.GetPrefix(ctx, WorkflowPrefix(7))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(remaining) != 1 || remaining[0].Key != WorkflowKey(7, 3000) {
+				t.Fatalf("expected only the cutoff run to remain, got %#v", remaining)
+			}
+			other, err := store.GetPrefix(ctx, WorkflowPrefix(8))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(other) != 1 {
+				t.Fatalf("expected workflow 8 history untouched, got %#v", other)
+			}
+
+			deleted, err = store.DeletePrefixBefore(ctx, WorkflowPrefix(7), WorkflowKey(7, 3000))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if deleted != 0 {
+				t.Fatalf("expected idempotent second delete, got %d", deleted)
+			}
+		})
+	}
+}
+
+func TestLevelDBStoreCompactsAfterDeletion(t *testing.T) {
+	ctx := context.Background()
+	store, err := OpenLevelDB(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if _, err := SaveWorkflowRun(ctx, store, WorkflowRun{WorkflowID: 1, Timestamp: 1000}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.DeletePrefixBefore(ctx, WorkflowPrefix(1), WorkflowKey(1, 2000)); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Compact(ctx); err != nil {
+		t.Fatal(err)
+	}
+}

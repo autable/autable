@@ -3995,3 +3995,83 @@ func writeTestJSON(t *testing.T, w http.ResponseWriter, value any) {
 		t.Fatal(err)
 	}
 }
+
+func TestCleanupWorkflowHistoryHonorsRetention(t *testing.T) {
+	ctx := context.Background()
+	server, system := newTestServer(t)
+
+	script := `function instances(info) { return { main: "echo" }; } function run(info) { return {}; }`
+	forever, err := system.SaveWorkflow(ctx, systemdb.WorkflowDefinition{DatabaseName: "db", Name: "forever", Script: script})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sevenDays := int64(7)
+	limited, err := system.SaveWorkflow(ctx, systemdb.WorkflowDefinition{DatabaseName: "db", Name: "limited", Script: script, HistoryRetentionDays: &sevenDays})
+	if err != nil {
+		t.Fatal(err)
+	}
+	noHistory := int64(0)
+	none, err := system.SaveWorkflow(ctx, systemdb.WorkflowDefinition{DatabaseName: "db", Name: "none", Script: script, HistoryRetentionDays: &noHistory})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Now().UTC().UnixMilli()
+	oldTimestamp := now - 30*24*time.Hour.Milliseconds()
+	for _, workflowDefinition := range []systemdb.WorkflowDefinition{forever, limited, none} {
+		for _, timestamp := range []int64{oldTimestamp, now} {
+			if _, err := history.SaveWorkflowRun(ctx, server.history, history.WorkflowRun{WorkflowID: workflowDefinition.ID, Timestamp: timestamp}); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
+	if err := server.CleanupWorkflowHistory(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	cases := []struct {
+		workflowID int64
+		expected   int
+	}{
+		{forever.ID, 2},
+		{limited.ID, 1},
+		{none.ID, 0},
+	}
+	for _, testCase := range cases {
+		entries, err := server.history.GetPrefix(ctx, history.WorkflowPrefix(testCase.workflowID))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(entries) != testCase.expected {
+			t.Fatalf("workflow %d: expected %d runs after cleanup, got %d", testCase.workflowID, testCase.expected, len(entries))
+		}
+	}
+}
+
+func TestSaveWorkflowRejectsNegativeRetention(t *testing.T) {
+	server, system := newTestServer(t)
+	cookie := testSessionCookie(t, system, "retention-user")
+	saveTestGrants(t, system,
+		permission.Grant{SubjectID: "retention-user", Scope: permission.ScopeWorkflowSet, Resource: "db", Level: permission.Write},
+	)
+
+	negative := int64(-1)
+	body, err := json.Marshal(systemdb.WorkflowDefinition{
+		DatabaseName:         "db",
+		Name:                 "bad-retention",
+		Script:               "function instances(info) { return { main: \"echo\" }; } function run(info) { return {}; }",
+		HistoryRetentionDays: &negative,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/api/workflows", bytes.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	request.AddCookie(cookie)
+	response := httptest.NewRecorder()
+	server.ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for negative retention, got %d: %s", response.Code, response.Body.String())
+	}
+}

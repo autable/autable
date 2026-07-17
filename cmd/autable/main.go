@@ -171,6 +171,7 @@ func run(ctx context.Context, configPath string) error {
 	}
 	server.StartWorkflowWorkers(ctx)
 	server.StartWorkflowScheduler(ctx, 15*time.Second)
+	server.StartHistoryCleanup(ctx, 24*time.Hour)
 	slog.Info("autable listening", "address", address)
 	return http.ListenAndServe(address, webui.Handler(server))
 }

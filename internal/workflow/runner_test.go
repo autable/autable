@@ -236,6 +236,35 @@ func TestRunnerPersistsFailedRuns(t *testing.T) {
 	}
 }
 
+func TestRunnerSkipsHistoryWhenRetentionIsZero(t *testing.T) {
+	ctx := context.Background()
+	store := history.NewMemoryStore()
+	runner := NewRunner(store, testEchoNode{})
+	noHistory := int64(0)
+
+	run, key, err := runner.Run(ctx, Definition{
+		ID:                   13,
+		Script:               `function instances(info) { return { main: "echo" }; } function run(info) { return info.instance("main").exec({ value: 1 }); }`,
+		HistoryRetentionDays: &noHistory,
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if key != "" {
+		t.Fatalf("expected no history key, got %q", key)
+	}
+	if run.Outputs["value"] != int64(1) && run.Outputs["value"] != float64(1) {
+		t.Fatalf("expected run outputs to be returned, got %#v", run.Outputs)
+	}
+	entries, err := store.GetPrefix(ctx, history.WorkflowPrefix(13))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("expected no persisted runs, got %d", len(entries))
+	}
+}
+
 func TestRunnerPersistsRunsWithUnserializableOutputs(t *testing.T) {
 	ctx := context.Background()
 	store := history.NewMemoryStore()

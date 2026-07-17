@@ -55,6 +55,7 @@ type WorkflowWorkspaceProps = {
   ) => void | Promise<void>;
   onSelectTab: (tab: WorkflowTab) => void;
   onSelectRunKey: (historyKey: string) => void;
+  onSetHistoryRetention: (days: number | null) => void;
   onToggleEnabled: (enabled: boolean) => void;
   onUpdateScript: (script: string) => void;
   selectedRun: WorkflowRunResponse | null;
@@ -88,6 +89,7 @@ export function WorkflowWorkspace({
   onSaveInstanceConfig,
   onSelectTab,
   onSelectRunKey,
+  onSetHistoryRetention,
   onToggleEnabled,
   onUpdateScript,
   selectedRun,
@@ -150,6 +152,11 @@ export function WorkflowWorkspace({
             />
           )}
           <NodeCatalogDialog language={language} workflowNodes={workflowNodes} />
+          <HistoryRetentionSelect
+            canWriteWorkflow={canWriteWorkflow}
+            onSetHistoryRetention={onSetHistoryRetention}
+            workflow={workflow}
+          />
           <Switch
             checked={workflow?.enabled ?? true}
             label={t("common.enabled")}
@@ -325,6 +332,41 @@ function WorkflowHistoryView({
         )}
       </div>
     </div>
+  );
+}
+
+const historyRetentionOptions = [1, 7, 30, 90, 365];
+
+function HistoryRetentionSelect({
+  canWriteWorkflow,
+  onSetHistoryRetention,
+  workflow
+}: {
+  canWriteWorkflow: boolean;
+  onSetHistoryRetention: (days: number | null) => void;
+  workflow?: WorkflowDefinition;
+}) {
+  const { t } = useTranslation();
+  const retention = workflow?.history_retention_days ?? null;
+  return (
+    <Select
+      aria-label={t("workflow.historyRetention")}
+      title={t("workflow.historyRetention")}
+      value={retention === null ? "forever" : String(retention)}
+      onChange={(_, data) => onSetHistoryRetention(data.value === "forever" ? null : Number(data.value))}
+      disabled={!workflow?.id || !canWriteWorkflow}
+    >
+      <option value="forever">{t("workflow.historyRetentionForever")}</option>
+      <option value="0">{t("workflow.historyRetentionNone")}</option>
+      {historyRetentionOptions.map((days) => (
+        <option key={days} value={String(days)}>
+          {t("workflow.historyRetentionDays", { days })}
+        </option>
+      ))}
+      {retention !== null && retention !== 0 && !historyRetentionOptions.includes(retention) && (
+        <option value={String(retention)}>{t("workflow.historyRetentionDays", { days: retention })}</option>
+      )}
+    </Select>
   );
 }
 

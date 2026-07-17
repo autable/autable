@@ -64,6 +64,20 @@ func (store *MemoryStore) GetPrefixLimit(ctx context.Context, prefix string, lim
 	return entries[len(entries)-limit:], nil
 }
 
+func (store *MemoryStore) DeletePrefixBefore(_ context.Context, prefix string, end string) (int, error) {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+
+	deleted := 0
+	for key := range store.data {
+		if strings.HasPrefix(key, prefix) && key < end {
+			delete(store.data, key)
+			deleted++
+		}
+	}
+	return deleted, nil
+}
+
 func (store *MemoryStore) GetPrefixKeysLimit(_ context.Context, prefix string, limit int) ([]string, error) {
 	store.mu.RLock()
 	defer store.mu.RUnlock()

@@ -24,18 +24,21 @@ type DB struct {
 }
 
 type WorkflowDefinition struct {
-	ID              int64             `json:"id"`
-	DatabaseName    string            `json:"database_name"`
-	Name            string            `json:"name"`
-	Script          string            `json:"script"`
-	Enabled         bool              `json:"enabled"`
-	CreatorID       string            `json:"creator_id,omitempty"`
-	Secrets         map[string]string `json:"secrets"`
-	Variables       map[string]string `json:"variables"`
-	Runners         map[string]string `json:"runners"`
-	PermissionLevel permission.Level  `json:"permission_level,omitempty" gorm:"-"`
-	CreatedAt       int64             `json:"created_at"`
-	UpdatedAt       int64             `json:"updated_at"`
+	ID           int64             `json:"id"`
+	DatabaseName string            `json:"database_name"`
+	Name         string            `json:"name"`
+	Script       string            `json:"script"`
+	Enabled      bool              `json:"enabled"`
+	CreatorID    string            `json:"creator_id,omitempty"`
+	Secrets      map[string]string `json:"secrets"`
+	Variables    map[string]string `json:"variables"`
+	Runners      map[string]string `json:"runners"`
+	// HistoryRetentionDays is nil to keep run history forever, 0 to keep
+	// none, and a positive count to keep that many days.
+	HistoryRetentionDays *int64           `json:"history_retention_days"`
+	PermissionLevel      permission.Level `json:"permission_level,omitempty" gorm:"-"`
+	CreatedAt            int64            `json:"created_at"`
+	UpdatedAt            int64            `json:"updated_at"`
 }
 
 type FormDefinition struct {
@@ -103,17 +106,18 @@ type databaseOwnerModel struct {
 }
 
 type workflowModel struct {
-	ID            int64  `gorm:"primaryKey;autoIncrement"`
-	DatabaseName  string `gorm:"uniqueIndex:idx_workflow_database_name;not null"`
-	Name          string `gorm:"uniqueIndex:idx_workflow_database_name;not null"`
-	Script        string `gorm:"not null"`
-	Enabled       bool   `gorm:"not null;default:true"`
-	CreatorID     string `gorm:"index;not null;default:''"`
-	SecretsJSON   string `gorm:"not null"`
-	VariablesJSON string `gorm:"not null"`
-	RunnersJSON   string `gorm:"not null;default:'{}'"`
-	CreatedAt     int64  `gorm:"autoCreateTime:milli"`
-	UpdatedAt     int64  `gorm:"autoUpdateTime:milli"`
+	ID                   int64  `gorm:"primaryKey;autoIncrement"`
+	DatabaseName         string `gorm:"uniqueIndex:idx_workflow_database_name;not null"`
+	Name                 string `gorm:"uniqueIndex:idx_workflow_database_name;not null"`
+	Script               string `gorm:"not null"`
+	Enabled              bool   `gorm:"not null;default:true"`
+	CreatorID            string `gorm:"index;not null;default:''"`
+	SecretsJSON          string `gorm:"not null"`
+	VariablesJSON        string `gorm:"not null"`
+	RunnersJSON          string `gorm:"not null;default:'{}'"`
+	HistoryRetentionDays *int64
+	CreatedAt            int64 `gorm:"autoCreateTime:milli"`
+	UpdatedAt            int64 `gorm:"autoUpdateTime:milli"`
 }
 
 type runnerTokenModel struct {
@@ -804,30 +808,32 @@ func workflowToModel(workflow WorkflowDefinition) (workflowModel, error) {
 		return workflowModel{}, err
 	}
 	return workflowModel{
-		ID:            workflow.ID,
-		DatabaseName:  workflow.DatabaseName,
-		Name:          workflow.Name,
-		Script:        workflow.Script,
-		Enabled:       workflow.Enabled,
-		CreatorID:     workflow.CreatorID,
-		SecretsJSON:   string(secrets),
-		VariablesJSON: string(variables),
-		RunnersJSON:   string(runners),
-		CreatedAt:     workflow.CreatedAt,
-		UpdatedAt:     workflow.UpdatedAt,
+		ID:                   workflow.ID,
+		DatabaseName:         workflow.DatabaseName,
+		Name:                 workflow.Name,
+		Script:               workflow.Script,
+		Enabled:              workflow.Enabled,
+		CreatorID:            workflow.CreatorID,
+		SecretsJSON:          string(secrets),
+		VariablesJSON:        string(variables),
+		RunnersJSON:          string(runners),
+		HistoryRetentionDays: workflow.HistoryRetentionDays,
+		CreatedAt:            workflow.CreatedAt,
+		UpdatedAt:            workflow.UpdatedAt,
 	}, nil
 }
 
 func modelToWorkflow(model workflowModel) (WorkflowDefinition, error) {
 	workflow := WorkflowDefinition{
-		ID:           model.ID,
-		DatabaseName: model.DatabaseName,
-		Name:         model.Name,
-		Script:       model.Script,
-		Enabled:      model.Enabled,
-		CreatorID:    model.CreatorID,
-		CreatedAt:    model.CreatedAt,
-		UpdatedAt:    model.UpdatedAt,
+		ID:                   model.ID,
+		DatabaseName:         model.DatabaseName,
+		Name:                 model.Name,
+		Script:               model.Script,
+		Enabled:              model.Enabled,
+		CreatorID:            model.CreatorID,
+		HistoryRetentionDays: model.HistoryRetentionDays,
+		CreatedAt:            model.CreatedAt,
+		UpdatedAt:            model.UpdatedAt,
 	}
 	if err := json.Unmarshal([]byte(model.SecretsJSON), &workflow.Secrets); err != nil {
 		return WorkflowDefinition{}, err

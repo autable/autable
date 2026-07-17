@@ -83,6 +83,7 @@ export type WorkflowDefinition = {
   secret_values?: Record<string, string>;
   variables: Record<string, string>;
   runners?: Record<string, string>;
+  history_retention_days?: number | null;
   permission_level?: 0 | 1 | 2;
   created_at?: number;
   updated_at?: number;

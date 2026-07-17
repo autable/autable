@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -1045,6 +1046,10 @@ func (server *Server) handleSaveWorkflow(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
+	if workflow.HistoryRetentionDays != nil && *workflow.HistoryRetentionDays < 0 {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("history_retention_days must be at least 0, got %d", *workflow.HistoryRetentionDays))
+		return
+	}
 	saved, err := server.saveWorkflowDefinition(r.Context(), actorID, workflow)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
@@ -1490,13 +1495,14 @@ func (server *Server) handleRunWorkflow(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	run, key, err := server.runner.Run(r.Context(), workflow.Definition{
-		ID:           workflowDefinition.ID,
-		DatabaseName: workflowDefinition.DatabaseName,
-		Script:       workflowDefinition.Script,
-		CreatorID:    systemdb.WorkflowSubjectID(workflowDefinition.ID),
-		Secrets:      workflowDefinition.Secrets,
-		Variables:    workflowDefinition.Variables,
-		Runners:      workflowDefinition.Runners,
+		ID:                   workflowDefinition.ID,
+		DatabaseName:         workflowDefinition.DatabaseName,
+		Script:               workflowDefinition.Script,
+		CreatorID:            systemdb.WorkflowSubjectID(workflowDefinition.ID),
+		Secrets:              workflowDefinition.Secrets,
+		Variables:            workflowDefinition.Variables,
+		Runners:              workflowDefinition.Runners,
+		HistoryRetentionDays: workflowDefinition.HistoryRetentionDays,
 	}, request.Inputs)
 	status := http.StatusCreated
 	if err != nil {
@@ -1654,6 +1660,68 @@ func (server *Server) StartWorkflowScheduler(ctx context.Context, interval time.
 	}()
 }
 
+// StartHistoryCleanup deletes expired workflow run history immediately and
+// then on the given interval, compacting the store after any deletion.
+func (server *Server) StartHistoryCleanup(ctx context.Context, interval time.Duration) {
+	if interval <= 0 {
+		return
+	}
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			if err := server.CleanupWorkflowHistory(ctx); err != nil && ctx.Err() == nil {
+				slog.Error("workflow history cleanup failed", "error", err)
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+			}
+		}
+	}()
+}
+
+// CleanupWorkflowHistory deletes run history older than each workflow's
+// retention window; workflows without a retention setting keep everything.
+func (server *Server) CleanupWorkflowHistory(ctx context.Context) error {
+	now := time.Now().UTC().UnixMilli()
+	deleted := 0
+	for _, database := range server.catalogSnapshot().Databases {
+		workflows, err := server.system.Workflows(ctx, database.Name)
+		if err != nil {
+			return err
+		}
+		for _, workflowDefinition := range workflows {
+			if workflowDefinition.HistoryRetentionDays == nil {
+				continue
+			}
+			prefix := history.WorkflowPrefix(workflowDefinition.ID)
+			cutoff := now - *workflowDefinition.HistoryRetentionDays*24*time.Hour.Milliseconds()
+			end := history.WorkflowKey(workflowDefinition.ID, cutoff)
+			if *workflowDefinition.HistoryRetentionDays == 0 {
+				// Zero keeps nothing: also drop runs recorded this instant.
+				end = prefix + "\xff"
+			}
+			count, err := server.history.DeletePrefixBefore(ctx, prefix, end)
+			if err != nil {
+				return err
+			}
+			deleted += count
+		}
+	}
+	if deleted == 0 {
+		return nil
+	}
+	if compacter, ok := server.history.(history.Compacter); ok {
+		if err := compacter.Compact(ctx); err != nil {
+			return err
+		}
+	}
+	slog.Info("workflow history cleanup finished", "deleted", deleted)
+	return nil
+}
+
 func (server *Server) dispatchScheduleTickAll(ctx context.Context, scheduledAt time.Time) {
 	for _, database := range server.catalogSnapshot().Databases {
 		server.dispatchScheduleTick(ctx, database.Name, scheduledAt)
@@ -1769,13 +1837,14 @@ func (server *Server) processWorkflowEvent(ctx context.Context, event workflowEv
 			continue
 		}
 		definition := workflow.Definition{
-			ID:           workflowDefinition.ID,
-			DatabaseName: workflowDefinition.DatabaseName,
-			Script:       workflowDefinition.Script,
-			CreatorID:    systemdb.WorkflowSubjectID(workflowDefinition.ID),
-			Secrets:      workflowDefinition.Secrets,
-			Variables:    workflowDefinition.Variables,
-			Runners:      workflowDefinition.Runners,
+			ID:                   workflowDefinition.ID,
+			DatabaseName:         workflowDefinition.DatabaseName,
+			Script:               workflowDefinition.Script,
+			CreatorID:            systemdb.WorkflowSubjectID(workflowDefinition.ID),
+			Secrets:              workflowDefinition.Secrets,
+			Variables:            workflowDefinition.Variables,
+			Runners:              workflowDefinition.Runners,
+			HistoryRetentionDays: workflowDefinition.HistoryRetentionDays,
 		}
 		declaration, err := server.runner.Trigger(ctx, definition)
 		if errors.Is(err, workflow.ErrMissingTrigger) {

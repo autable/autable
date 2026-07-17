@@ -867,6 +867,10 @@ func (failingHistoryStore) GetPrefixKeysLimit(context.Context, string, int) ([]s
 	return nil, nil
 }
 
+func (failingHistoryStore) DeletePrefixBefore(context.Context, string, string) (int, error) {
+	return 0, errors.New("history delete failed")
+}
+
 func testTableCatalog() metadata.Catalog {
 	return metadata.Catalog{Databases: []metadata.Database{{
 		Name: "db",

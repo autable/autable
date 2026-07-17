@@ -120,6 +120,41 @@ func (store *LevelDBStore) GetPrefixKeysLimit(ctx context.Context, prefix string
 	return keys, nil
 }
 
+func (store *LevelDBStore) DeletePrefixBefore(ctx context.Context, prefix string, end string) (int, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	iter := store.db.NewIterator(&util.Range{Start: []byte(prefix), Limit: []byte(end)}, nil)
+	defer iter.Release()
+
+	batch := new(leveldb.Batch)
+	deleted := 0
+	for iter.Next() {
+		if err := ctx.Err(); err != nil {
+			return 0, err
+		}
+		batch.Delete(append([]byte(nil), iter.Key()...))
+		deleted++
+	}
+	if err := iter.Error(); err != nil {
+		return 0, err
+	}
+	if deleted == 0 {
+		return 0, nil
+	}
+	if err := store.db.Write(batch, nil); err != nil {
+		return 0, err
+	}
+	return deleted, nil
+}
+
+func (store *LevelDBStore) Compact(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return store.db.CompactRange(util.Range{})
+}
+
 func (store *LevelDBStore) ForEachSnapshot(ctx context.Context, visit func(key []byte, value []byte) error) error {
 	if err := ctx.Err(); err != nil {
 		return err

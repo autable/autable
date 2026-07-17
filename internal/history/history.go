@@ -18,6 +18,14 @@ type Store interface {
 	GetPrefix(ctx context.Context, prefix string) ([]Entry, error)
 	GetPrefixLimit(ctx context.Context, prefix string, limit int) ([]Entry, error)
 	GetPrefixKeysLimit(ctx context.Context, prefix string, limit int) ([]string, error)
+	// DeletePrefixBefore deletes every key that starts with prefix and
+	// sorts lexicographically below end, returning how many were deleted.
+	DeletePrefixBefore(ctx context.Context, prefix string, end string) (int, error)
+}
+
+// Compacter is implemented by stores that can reclaim space after deletions.
+type Compacter interface {
+	Compact(ctx context.Context) error
 }
 
 type Entry struct {
