@@ -50,12 +50,12 @@ func fullRow(id float64, billNo string) []any {
 	return []any{id, billNo, "2026-07-16", "C", "SUP001", "MAT001", "steel", 12.0, 100.0, 113.0, 13.0, 1200.0, 1356.0}
 }
 
-func TestNodePagesThroughAllPurchaseOrders(t *testing.T) {
-	firstPage := make([][]any, 0, 2000)
+func TestNodeFetchesSinglePage(t *testing.T) {
+	fullPage := make([][]any, 0, 2000)
 	for i := range 2000 {
-		firstPage = append(firstPage, fullRow(float64(i), "CGDD0001"))
+		fullPage = append(fullPage, fullRow(float64(i), "CGDD0001"))
 	}
-	client := &fakeBillQueryClient{pages: [][][]any{firstPage, {fullRow(2000, "CGDD9999")}}}
+	client := &fakeBillQueryClient{pages: [][][]any{fullPage}}
 	var config kingdee.Config
 	node := testNode(client, &config)
 
@@ -63,29 +63,26 @@ func TestNodePagesThroughAllPurchaseOrders(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if output["count"] != 2001 {
+	if output["count"] != 2000 {
 		t.Fatalf("unexpected count: %#v", output["count"])
+	}
+	if output["has_more"] != true {
+		t.Fatalf("expected has_more for a full page, got %#v", output["has_more"])
 	}
 	records := output["records"].([]map[string]any)
 	if records[0]["bill_no"] != "CGDD0001" || records[0]["qty"] != 12.0 || records[0]["all_amount"] != 1356.0 {
 		t.Fatalf("unexpected first record: %#v", records[0])
 	}
-	if records[2000]["bill_no"] != "CGDD9999" {
-		t.Fatalf("unexpected last record: %#v", records[2000])
-	}
 
-	if len(client.requests) != 2 {
-		t.Fatalf("expected two pages, got %d requests", len(client.requests))
+	if len(client.requests) != 1 {
+		t.Fatalf("expected a single page request, got %d", len(client.requests))
 	}
-	first := client.requests[0]
-	if first["FormId"] != "PUR_PurchaseOrder" || first["FilterString"] != "" || first["StartRow"] != 0 {
-		t.Fatalf("unexpected first request: %#v", first)
+	request := client.requests[0]
+	if request["FormId"] != "PUR_PurchaseOrder" || request["FilterString"] != "" || request["StartRow"] != 0 {
+		t.Fatalf("unexpected request: %#v", request)
 	}
-	if !strings.HasPrefix(first["FieldKeys"].(string), "FID,FBillNo,FDate,") {
-		t.Fatalf("unexpected field keys: %#v", first["FieldKeys"])
-	}
-	if client.requests[1]["StartRow"] != 2000 {
-		t.Fatalf("unexpected second page start: %#v", client.requests[1])
+	if !strings.HasPrefix(request["FieldKeys"].(string), "FID,FBillNo,FDate,") {
+		t.Fatalf("unexpected field keys: %#v", request["FieldKeys"])
 	}
 
 	if config.ServerURL != "https://erp.example.com/K3Cloud" || config.OrgNum != 100 || config.AppSecret != "s3cret" {
@@ -93,6 +90,29 @@ func TestNodePagesThroughAllPurchaseOrders(t *testing.T) {
 	}
 	if config.SkipTLSVerify {
 		t.Fatal("expected TLS verification by default")
+	}
+}
+
+func TestNodePagesFromStartRow(t *testing.T) {
+	client := &fakeBillQueryClient{pages: [][][]any{{fullRow(2000, "CGDD9999")}}}
+	node := testNode(client, nil)
+
+	output, err := node.Run(context.Background(), map[string]any{"start_row": 2000}, testRuntimeInfo())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if output["count"] != 1 {
+		t.Fatalf("unexpected count: %#v", output["count"])
+	}
+	if output["has_more"] != false {
+		t.Fatalf("expected no more rows after a short page, got %#v", output["has_more"])
+	}
+	records := output["records"].([]map[string]any)
+	if records[0]["bill_no"] != "CGDD9999" {
+		t.Fatalf("unexpected record: %#v", records[0])
+	}
+	if client.requests[0]["StartRow"] != 2000 {
+		t.Fatalf("unexpected start row: %#v", client.requests[0])
 	}
 }
 
@@ -111,6 +131,9 @@ func TestNodeSupportsCustomFilterFieldsAndLimit(t *testing.T) {
 	records := output["records"].([]map[string]any)
 	if len(records) != 1 || records[0]["FBillNo"] != "CGDD0001" || records[0]["FQty"] != 5.0 {
 		t.Fatalf("unexpected records: %#v", records)
+	}
+	if output["has_more"] != false {
+		t.Fatalf("expected no more rows, got %#v", output["has_more"])
 	}
 	request := client.requests[0]
 	if request["FilterString"] != "FDate>='2026-01-01'" || request["FieldKeys"] != "FBillNo,FQty" || request["Limit"] != 500 {
@@ -144,6 +167,8 @@ func TestNodeValidatesConfigurationAndInputs(t *testing.T) {
 		{func(info *workflow.RuntimeInfo, _ map[string]any) { info.Variables["skip_tls_verify"] = "maybe" }, "skip_tls_verify"},
 		{func(_ *workflow.RuntimeInfo, input map[string]any) { input["limit"] = 5000 }, "between 1 and 2000"},
 		{func(_ *workflow.RuntimeInfo, input map[string]any) { input["limit"] = "many" }, "must be a number"},
+		{func(_ *workflow.RuntimeInfo, input map[string]any) { input["start_row"] = -1 }, "at least 0"},
+		{func(_ *workflow.RuntimeInfo, input map[string]any) { input["start_row"] = "first" }, "must be a number"},
 		{func(_ *workflow.RuntimeInfo, input map[string]any) { input["field_keys"] = []any{" "} }, "must not be empty"},
 	}
 	for _, testCase := range cases {

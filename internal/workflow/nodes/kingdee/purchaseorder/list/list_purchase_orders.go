@@ -58,16 +58,18 @@ func (node Node) Info() workflow.NodeInfo {
 	return workflow.NodeInfo{
 		Type:          "kingdee.purchaseorder.list",
 		DisplayName:   "Kingdee purchase orders",
-		Description:   "Lists purchase order lines from Kingdee K3Cloud through the bill query WebAPI, paging until all rows are fetched.",
+		Description:   "Lists one page of purchase order lines from Kingdee K3Cloud through the bill query WebAPI; the caller pages with start_row and limit.",
 		Documentation: Documentation(),
 		Inputs: []workflow.Port{
-			{Name: "filter_string", Type: "string", Description: "Optional Kingdee filter expression, e.g. FDocumentStatus='C'; empty fetches all rows."},
+			{Name: "filter_string", Type: "string", Description: "Optional Kingdee filter expression, e.g. FDocumentStatus='C'; empty matches all rows."},
 			{Name: "field_keys", Type: "string[]", Description: "Optional Kingdee field keys to fetch instead of the built-in purchase order columns."},
-			{Name: "limit", Type: "int", Description: "Optional page size per request, defaults to the Kingdee maximum of 2000."},
+			{Name: "start_row", Type: "int", Description: "Optional zero-based row offset to start the page at, defaults to 0."},
+			{Name: "limit", Type: "int", Description: "Optional page size, 1-2000; defaults to the Kingdee maximum of 2000."},
 		},
 		Outputs: []workflow.Port{
 			{Name: "records", Type: "object[]", Description: "Purchase order lines keyed by column name."},
-			{Name: "count", Type: "int"},
+			{Name: "count", Type: "int", Description: "Rows in this page."},
+			{Name: "has_more", Type: "bool", Description: "True when the page was full and more rows may remain."},
 		},
 		Variables: []workflow.Port{
 			{Name: "server_url", Type: "string", Description: "K3Cloud gateway URL, e.g. https://erp.example.com/K3Cloud."},
@@ -103,40 +105,42 @@ func (node Node) Run(ctx context.Context, input map[string]any, info workflow.Ru
 	if err != nil {
 		return nil, err
 	}
-
-	logger := slog.Default().With("node", info.NodeType, "run_id", info.RunID, "instance", info.InstanceID)
-	records := make([]map[string]any, 0)
-	for startRow := 0; ; startRow += limit {
-		pageStarted := time.Now()
-		rows, err := client.ExecuteBillQuery(ctx, map[string]any{
-			"FormId":       "PUR_PurchaseOrder",
-			"FieldKeys":    strings.Join(fields, ","),
-			"FilterString": filter,
-			"OrderString":  "FID ASC",
-			"TopRowCount":  0,
-			"StartRow":     startRow,
-			"Limit":        limit,
-			"SubSystemId":  "",
-		})
-		if err != nil {
-			return nil, fmt.Errorf("bill query at row %d: %w", startRow, err)
-		}
-		logger.Info("kingdee page fetched", "start_row", startRow, "rows", len(rows), "total", len(records)+len(rows), "elapsed", time.Since(pageStarted).Round(time.Millisecond))
-		for _, row := range rows {
-			if len(row) != len(columns) {
-				return nil, fmt.Errorf("kingdee returned %d values for %d fields", len(row), len(columns))
-			}
-			record := make(map[string]any, len(columns))
-			for i, column := range columns {
-				record[column] = row[i]
-			}
-			records = append(records, record)
-		}
-		if len(rows) < limit {
-			break
-		}
+	startRow, err := pageStartRow(input)
+	if err != nil {
+		return nil, err
 	}
-	return map[string]any{"records": records, "count": len(records)}, nil
+
+	started := time.Now()
+	rows, err := client.ExecuteBillQuery(ctx, map[string]any{
+		"FormId":       "PUR_PurchaseOrder",
+		"FieldKeys":    strings.Join(fields, ","),
+		"FilterString": filter,
+		"OrderString":  "FID ASC",
+		"TopRowCount":  0,
+		"StartRow":     startRow,
+		"Limit":        limit,
+		"SubSystemId":  "",
+	})
+	if err != nil {
+		return nil, fmt.Errorf("bill query at row %d: %w", startRow, err)
+	}
+	records := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		if len(row) != len(columns) {
+			return nil, fmt.Errorf("kingdee returned %d values for %d fields", len(row), len(columns))
+		}
+		record := make(map[string]any, len(columns))
+		for i, column := range columns {
+			record[column] = row[i]
+		}
+		records = append(records, record)
+	}
+	hasMore := len(rows) == limit
+	slog.Default().Info("kingdee page fetched",
+		"node", info.NodeType, "run_id", info.RunID, "instance", info.InstanceID,
+		"start_row", startRow, "rows", len(rows), "has_more", hasMore,
+		"elapsed", time.Since(started).Round(time.Millisecond))
+	return map[string]any{"records": records, "count": len(records), "has_more": hasMore}, nil
 }
 
 func clientConfig(info workflow.RuntimeInfo) (kingdee.Config, error) {
@@ -200,25 +204,48 @@ func queryFields(input map[string]any) (fields []string, columns []string, err e
 }
 
 func pageLimit(input map[string]any) (int, error) {
-	value, ok := input["limit"]
-	if !ok || value == nil {
-		return maxPageSize, nil
+	limit, ok, err := intInput(input, "limit")
+	if err != nil {
+		return 0, err
 	}
-	var limit int
-	switch typed := value.(type) {
-	case int:
-		limit = typed
-	case int64:
-		limit = int(typed)
-	case float64:
-		limit = int(typed)
-	default:
-		return 0, fmt.Errorf("kingdee limit must be a number, got %T", value)
+	if !ok {
+		return maxPageSize, nil
 	}
 	if limit <= 0 || limit > maxPageSize {
 		return 0, fmt.Errorf("kingdee limit must be between 1 and %d, got %d", maxPageSize, limit)
 	}
 	return limit, nil
+}
+
+func pageStartRow(input map[string]any) (int, error) {
+	startRow, ok, err := intInput(input, "start_row")
+	if err != nil {
+		return 0, err
+	}
+	if !ok {
+		return 0, nil
+	}
+	if startRow < 0 {
+		return 0, fmt.Errorf("kingdee start_row must be at least 0, got %d", startRow)
+	}
+	return startRow, nil
+}
+
+func intInput(input map[string]any, key string) (int, bool, error) {
+	value, ok := input[key]
+	if !ok || value == nil {
+		return 0, false, nil
+	}
+	switch typed := value.(type) {
+	case int:
+		return typed, true, nil
+	case int64:
+		return int(typed), true, nil
+	case float64:
+		return int(typed), true, nil
+	default:
+		return 0, false, fmt.Errorf("kingdee %s must be a number, got %T", key, value)
+	}
 }
 
 func stringInput(input map[string]any, key string) string {
