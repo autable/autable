@@ -4499,3 +4499,43 @@ func TestOIDCStartStoresSafeRedirect(t *testing.T) {
 		}
 	}
 }
+
+func TestWorkflowResponsesCarryHistoryRetention(t *testing.T) {
+	server, system := newTestServer(t)
+	cookie := testSessionCookie(t, system, "retention-roundtrip")
+	saveTestGrants(t, system,
+		permission.Grant{SubjectID: "retention-roundtrip", Scope: permission.ScopeWorkflowSet, Resource: "db", Level: permission.Write},
+	)
+
+	request := httptest.NewRequest(http.MethodPost, "/api/workflows", strings.NewReader(`{
+		"database_name":"db",
+		"name":"retained",
+		"script":"function instances(info) { return { main: \"echo\" }; } function run(info) { return {}; }",
+		"history_retention_days":7
+	}`))
+	request.Header.Set("Content-Type", "application/json")
+	request.AddCookie(cookie)
+	recorder := httptest.NewRecorder()
+	server.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+	var saved workflowDefinitionResponse
+	if err := json.NewDecoder(recorder.Body).Decode(&saved); err != nil {
+		t.Fatal(err)
+	}
+	if saved.HistoryRetentionDays == nil || *saved.HistoryRetentionDays != 7 {
+		t.Fatalf("expected retention 7 in the save response, got %#v", saved.HistoryRetentionDays)
+	}
+
+	list := httptest.NewRequest(http.MethodGet, "/api/databases/db/workflows", nil)
+	list.AddCookie(cookie)
+	listRecorder := httptest.NewRecorder()
+	server.ServeHTTP(listRecorder, list)
+	if listRecorder.Code != http.StatusOK {
+		t.Fatalf("expected list 200, got %d: %s", listRecorder.Code, listRecorder.Body.String())
+	}
+	if !strings.Contains(listRecorder.Body.String(), `"history_retention_days":7`) {
+		t.Fatalf("expected retention in workflow list, got %s", listRecorder.Body.String())
+	}
+}

@@ -193,12 +193,13 @@ type workflowDefinitionResponse struct {
 	Script          string            `json:"script"`
 	Enabled         bool              `json:"enabled"`
 	CreatorID       string            `json:"creator_id,omitempty"`
-	Secrets         map[string]int    `json:"secrets"`
-	Variables       map[string]string `json:"variables"`
-	Runners         map[string]string `json:"runners"`
-	PermissionLevel permission.Level  `json:"permission_level,omitempty"`
-	CreatedAt       int64             `json:"created_at"`
-	UpdatedAt       int64             `json:"updated_at"`
+	Secrets              map[string]int    `json:"secrets"`
+	Variables            map[string]string `json:"variables"`
+	Runners              map[string]string `json:"runners"`
+	HistoryRetentionDays *int64            `json:"history_retention_days"`
+	PermissionLevel      permission.Level  `json:"permission_level,omitempty"`
+	CreatedAt            int64             `json:"created_at"`
+	UpdatedAt            int64             `json:"updated_at"`
 }
 
 type roleDefinitionResponse struct {
@@ -3280,12 +3281,13 @@ func workflowResponseFromDefinition(workflow systemdb.WorkflowDefinition) workfl
 		Script:          workflow.Script,
 		Enabled:         workflow.Enabled,
 		CreatorID:       workflow.CreatorID,
-		Secrets:         secretLengths(workflow.Secrets),
-		Variables:       workflow.Variables,
-		Runners:         workflow.Runners,
-		PermissionLevel: workflow.PermissionLevel,
-		CreatedAt:       workflow.CreatedAt,
-		UpdatedAt:       workflow.UpdatedAt,
+		Secrets:              secretLengths(workflow.Secrets),
+		Variables:            workflow.Variables,
+		Runners:              workflow.Runners,
+		HistoryRetentionDays: workflow.HistoryRetentionDays,
+		PermissionLevel:      workflow.PermissionLevel,
+		CreatedAt:            workflow.CreatedAt,
+		UpdatedAt:            workflow.UpdatedAt,
 	}
 }
 

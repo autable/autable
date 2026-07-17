@@ -241,6 +241,16 @@ function WorkspaceApp() {
     if (selectedWorkflowTab !== "history" || !selectedWorkflow?.id) {
       return;
     }
+    // A deep link names a workflow; until that selection is applied the
+    // current selection is still the default first workflow, and fetching
+    // its runs would race the real target and show the wrong history.
+    if (
+      workspaceRoute?.view === "workflow" &&
+      workspaceRoute.workflowID &&
+      workspaceRoute.workflowID !== selectedWorkflow.id
+    ) {
+      return;
+    }
     void workflowFormWorkspace.refreshWorkflowRuns(workspaceRoute?.workflowRunKey ?? "", selectedWorkflow.id);
   }, [selectedWorkflow?.id, selectedWorkflowTab]);
 

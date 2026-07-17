@@ -220,8 +220,10 @@ export function useWorkflowFormWorkspace({
     setWorkflows(nextWorkflows);
     setForms(nextForms);
     setWorkflowNodes(nextWorkflowNodes);
-    setSelectedWorkflowID(nextWorkflows[0]?.id ?? 0);
-    setSelectedFormID(nextForms[0]?.id ?? 0);
+    setSelectedWorkflowID((current) =>
+      nextWorkflows.some((item) => item.id === current) ? current : nextWorkflows[0]?.id ?? 0
+    );
+    setSelectedFormID((current) => (nextForms.some((item) => item.id === current) ? current : nextForms[0]?.id ?? 0));
   }
 
   function clearResources() {
