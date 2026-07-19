@@ -53,9 +53,10 @@ type Server struct {
 	fileUploadLimit  int64
 	auth             config.AuthConfig
 	publicURL        string
-	workflowWorkers  map[string]*workflowEventWorker
-	workflowWorker   context.Context
-	workflowWorkerMu sync.Mutex
+	workflowWorkers    map[string]*workflowEventWorker
+	workflowRunWorkers map[int64]*workflowRunWorker
+	workflowWorker     context.Context
+	workflowWorkerMu   sync.Mutex
 	mux              *http.ServeMux
 }
 
@@ -249,6 +250,22 @@ type workflowEvent struct {
 type workflowEventWorker struct {
 	dbName string
 	events chan workflowEvent
+}
+
+// workflowRunJob is one triggered execution handed from the per-database
+// event matcher to the per-workflow run worker.
+type workflowRunJob struct {
+	definition  workflow.Definition
+	inputs      map[string]any
+	scheduledAt time.Time
+	isSchedule  bool
+}
+
+// workflowRunWorker serializes runs of a single workflow: one workflow never
+// runs concurrently with itself (upsert-style syncs would race), while
+// different workflows run in parallel.
+type workflowRunWorker struct {
+	jobs chan workflowRunJob
 }
 
 type roleGrantsRequest struct {
@@ -1788,9 +1805,57 @@ func (server *Server) StartWorkflowWorkers(ctx context.Context) {
 	}
 	server.workflowWorker = ctx
 	server.workflowWorkers = map[string]*workflowEventWorker{}
+	server.workflowRunWorkers = map[int64]*workflowRunWorker{}
 	for _, database := range server.catalogSnapshot().Databases {
 		server.startWorkflowWorkerLocked(database.Name)
 	}
+}
+
+func (server *Server) startWorkflowRunWorkerLocked(workflowID int64) *workflowRunWorker {
+	if worker, ok := server.workflowRunWorkers[workflowID]; ok {
+		return worker
+	}
+	worker := &workflowRunWorker{jobs: make(chan workflowRunJob, 256)}
+	server.workflowRunWorkers[workflowID] = worker
+	go func(ctx context.Context) {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case job := <-worker.jobs:
+				server.executeWorkflowRun(ctx, job)
+			}
+		}
+	}(server.workflowWorker)
+	return worker
+}
+
+// enqueueWorkflowRun hands the run to the workflow's own worker so a slow
+// workflow only delays itself. Without workers (tests, shutdown) the run
+// executes inline.
+func (server *Server) enqueueWorkflowRun(ctx context.Context, job workflowRunJob) {
+	server.workflowWorkerMu.Lock()
+	if server.workflowWorker == nil {
+		server.workflowWorkerMu.Unlock()
+		server.executeWorkflowRun(ctx, job)
+		return
+	}
+	worker := server.startWorkflowRunWorkerLocked(job.definition.ID)
+	workerCtx := server.workflowWorker
+	server.workflowWorkerMu.Unlock()
+	select {
+	case worker.jobs <- job:
+	case <-ctx.Done():
+	case <-workerCtx.Done():
+	}
+}
+
+func (server *Server) executeWorkflowRun(ctx context.Context, job workflowRunJob) {
+	if job.isSchedule {
+		_, _, _ = server.runner.RunAt(ctx, job.definition, job.inputs, job.scheduledAt)
+		return
+	}
+	_, _, _ = server.runner.Run(ctx, job.definition, job.inputs)
 }
 
 func (server *Server) startWorkflowWorkerLocked(dbName string) *workflowEventWorker {
@@ -2049,22 +2114,33 @@ func (server *Server) processWorkflowEvent(ctx context.Context, event workflowEv
 		if errors.Is(err, workflow.ErrMissingTrigger) {
 			continue
 		}
-		if err != nil || !server.workflowEventMayRun(ctx, workflowDefinition.ID, declaration, event) {
+		if err != nil {
+			slog.Debug("workflow trigger declaration failed", "workflow", workflowDefinition.ID, "error", err)
+			continue
+		}
+		if !server.workflowEventMayRun(ctx, workflowDefinition.ID, declaration, event) {
 			continue
 		}
 		triggerEvent, ok := server.workflowTriggerEventForSubject(ctx, definition.CreatorID, event)
 		if !ok {
+			slog.Debug("workflow trigger event withheld: subject cannot read the change",
+				"workflow", workflowDefinition.ID, "table", event.RowChange.Table, "subject", definition.CreatorID)
 			continue
 		}
 		inputs, matched, err := server.runner.TriggerRunInputs(ctx, definition, declaration, triggerEvent)
-		if err != nil || !matched {
+		if err != nil {
+			slog.Debug("workflow trigger inputs failed", "workflow", workflowDefinition.ID, "error", err)
 			continue
 		}
-		if event.Kind == workflowEventSchedule {
-			_, _, _ = server.runner.RunAt(ctx, definition, inputs, event.ScheduledAt)
+		if !matched {
 			continue
 		}
-		_, _, _ = server.runner.Run(ctx, definition, inputs)
+		server.enqueueWorkflowRun(ctx, workflowRunJob{
+			definition:  definition,
+			inputs:      inputs,
+			scheduledAt: event.ScheduledAt,
+			isSchedule:  event.Kind == workflowEventSchedule,
+		})
 	}
 }
 

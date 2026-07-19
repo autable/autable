@@ -5068,3 +5068,112 @@ func TestRowHistoryOpensToRowSetMembersWithFieldRedaction(t *testing.T) {
 		t.Fatalf("history diff leaked unreadable field: %#v", entries[0].Diff)
 	}
 }
+
+func TestRowChangeTriggersWorkflowGrantedThroughRole(t *testing.T) {
+	ctx := context.Background()
+	server, system := newTestServer(t)
+	saveTestDatabaseOwners(t, system, "db", "boss")
+	bossCookie := testSessionCookie(t, system, "boss")
+
+	workflowRequest := httptest.NewRequest(http.MethodPost, "/api/databases/db/workflows", bytes.NewBufferString(`{
+		"name":"logistics",
+		"script":"function instances(info) { return { row_change: \"table.record.changed\" }; }\nfunction trigger(info) { return { instance: \"row_change\", params: { table: \"contacts\", operations: [\"create\"], fields: [\"name\", \"email\"] } }; }\nfunction run(info) { return { name: info.inputs.values.name }; }"
+	}`))
+	workflowRequest.AddCookie(bossCookie)
+	workflowRecorder := httptest.NewRecorder()
+	server.ServeHTTP(workflowRecorder, workflowRequest)
+	if workflowRecorder.Code != http.StatusCreated {
+		t.Fatalf("expected workflow 201, got %d: %s", workflowRecorder.Code, workflowRecorder.Body.String())
+	}
+
+	// Grants live on a role; the workflow gets them via role membership,
+	// mirroring the permission panel setup: all fields read + all views read.
+	if _, err := system.SaveRole(ctx, systemdb.RoleDefinition{DatabaseName: "db", Name: "sync"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := system.ReplaceRoleGrants(ctx, "db", "sync", []permission.Grant{
+		{Scope: permission.ScopeFieldSet, Resource: "db.contacts", Level: permission.FieldRead},
+		{Scope: permission.ScopeViewSet, Resource: "db.contacts", Level: permission.Read},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := system.ReplaceRoleMembers(ctx, "db", "sync", []systemdb.RoleMember{{Type: "workflow", ID: "1"}}); err != nil {
+		t.Fatal(err)
+	}
+
+	createRow := httptest.NewRequest(http.MethodPost, "/api/tables/db/contacts/rows", bytes.NewBufferString(`{"values":{"name":"Ada","email":"ada@example.com"}}`))
+	createRow.AddCookie(bossCookie)
+	createRecorder := httptest.NewRecorder()
+	server.ServeHTTP(createRecorder, createRow)
+	if createRecorder.Code != http.StatusCreated {
+		t.Fatalf("expected row create 201, got %d: %s", createRecorder.Code, createRecorder.Body.String())
+	}
+
+	listRequest := httptest.NewRequest(http.MethodGet, "/api/workflows/1/runs", nil)
+	listRequest.AddCookie(bossCookie)
+	listRecorder := httptest.NewRecorder()
+	server.ServeHTTP(listRecorder, listRequest)
+	if listRecorder.Code != http.StatusOK {
+		t.Fatalf("expected runs 200, got %d: %s", listRecorder.Code, listRecorder.Body.String())
+	}
+	var runs []workflowRunResponse
+	if err := json.NewDecoder(listRecorder.Body).Decode(&runs); err != nil {
+		t.Fatal(err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("expected the role-granted workflow to trigger once, got %#v", runs)
+	}
+}
+
+func TestDifferentWorkflowsRunInParallel(t *testing.T) {
+	ctx := context.Background()
+	workerCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	server, system := newTestServer(t)
+	server.StartWorkflowWorkers(workerCtx)
+	saveTestDatabaseOwners(t, system, "db", "boss")
+	bossCookie := testSessionCookie(t, system, "boss")
+
+	// Workflow 1 busy-loops for three seconds; workflow 2 finishes
+	// instantly. Both trigger from the same row create — under the old
+	// single per-database worker the fast one had to wait behind the slow
+	// one.
+	slow := httptest.NewRequest(http.MethodPost, "/api/databases/db/workflows", bytes.NewBufferString(`{
+		"name":"slow",
+		"script":"function instances(info) { return { row_change: \"table.record.changed\" }; }\nfunction trigger(info) { return { instance: \"row_change\", params: { table: \"contacts\", operations: [\"create\"] } }; }\nfunction run(info) { var end = Date.now() + 3000; while (Date.now() < end) {} return { slow: true }; }"
+	}`))
+	slow.AddCookie(bossCookie)
+	slowRecorder := httptest.NewRecorder()
+	server.ServeHTTP(slowRecorder, slow)
+	if slowRecorder.Code != http.StatusCreated {
+		t.Fatalf("expected slow workflow 201, got %d: %s", slowRecorder.Code, slowRecorder.Body.String())
+	}
+	fast := httptest.NewRequest(http.MethodPost, "/api/databases/db/workflows", bytes.NewBufferString(`{
+		"name":"fast",
+		"script":"function instances(info) { return { row_change: \"table.record.changed\" }; }\nfunction trigger(info) { return { instance: \"row_change\", params: { table: \"contacts\", operations: [\"create\"] } }; }\nfunction run(info) { return { fast: true }; }"
+	}`))
+	fast.AddCookie(bossCookie)
+	fastRecorder := httptest.NewRecorder()
+	server.ServeHTTP(fastRecorder, fast)
+	if fastRecorder.Code != http.StatusCreated {
+		t.Fatalf("expected fast workflow 201, got %d: %s", fastRecorder.Code, fastRecorder.Body.String())
+	}
+	for _, workflowID := range []int64{1, 2} {
+		saveTestGrants(t, system, permission.Grant{SubjectID: systemdb.WorkflowSubjectID(workflowID), Scope: permission.ScopeFieldSet, Resource: "db.contacts", Level: permission.FieldRead})
+	}
+
+	createRow := httptest.NewRequest(http.MethodPost, "/api/tables/db/contacts/rows", bytes.NewBufferString(`{"values":{"name":"Ada"}}`))
+	createRow.AddCookie(bossCookie)
+	createRecorder := httptest.NewRecorder()
+	server.ServeHTTP(createRecorder, createRow)
+	if createRecorder.Code != http.StatusCreated {
+		t.Fatalf("expected row create 201, got %d: %s", createRecorder.Code, createRecorder.Body.String())
+	}
+
+	// The fast workflow must finish within the 2s polling window even
+	// though the slow one is still busy for 3s.
+	runs := waitWorkflowRunCount(t, server, system, 2, "boss", 1)
+	if len(runs) != 1 {
+		t.Fatalf("expected fast workflow to run in parallel, got %#v", runs)
+	}
+}
