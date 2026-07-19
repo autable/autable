@@ -525,7 +525,7 @@ export function useTableWorkspace({
 
   async function updateSelectedViewFromCanvas() {
     const selectedView = table.views.find((viewDef) => viewDef.name === selectedTableView);
-    if (!selectedView) {
+    if (!selectedView || selectedView.name === "all") {
       onStatus(t("status.allRecordsBaseView"));
       return;
     }

@@ -974,7 +974,7 @@ function ViewQueryPopover({
           disabled={!canEditView}
         >
           <option value="all">{t("common.allRecords")}</option>
-          {views.filter((item) => item.name !== selectedView?.name).map((item) => (
+          {views.filter((item) => item.name !== selectedView?.name && item.name !== "all").map((item) => (
             <option key={item.name} value={item.name}>
               {item.display_name || item.name}
             </option>

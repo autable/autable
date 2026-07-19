@@ -1537,6 +1537,18 @@ func (server *Server) handleUpdateTableMetadata(w http.ResponseWriter, r *http.R
 	if tableMeta.Fields != nil && !server.authorizeFieldMetadataPatch(w, actorID, isOwner, dbName, tableName, perms, existingTable, tableMeta.Fields) {
 		return
 	}
+	if tableMeta.Views != nil {
+		// Clients echo table metadata back including the injected built-in
+		// "all" view; it is not a stored view, so it is stripped before
+		// authorization and merge (mergeViews leaves omitted views alone).
+		views := make([]metadata.View, 0, len(tableMeta.Views))
+		for _, view := range tableMeta.Views {
+			if view.Name != metadata.AllViewName {
+				views = append(views, view)
+			}
+		}
+		tableMeta.Views = views
+	}
 	if tableMeta.Views != nil && !server.authorizeViewMetadataPatch(w, actorID, isOwner, dbName, tableName, perms, existingTable, tableMeta.Views) {
 		return
 	}
@@ -2651,7 +2663,10 @@ func visibleTableMetadata(perms permission.Set, actorID, dbName string, isOwner 
 	annotated.ViewPermissionLevel = int(dbLevel)
 	if dbLevel >= permission.Write {
 		annotated.Fields = annotateFieldPermissionLevels(perms, actorID, resource, dbLevel, annotated.Fields)
-		annotated.Views = annotateViewPermissionLevels(perms, actorID, resource, dbLevel, annotated.Views)
+		// The built-in unfiltered view is served as an ordinary view entry
+		// so clients need no special casing.
+		annotated.Views = annotateViewPermissionLevels(perms, actorID, resource, dbLevel,
+			append([]metadata.View{{Name: metadata.AllViewName}}, annotated.Views...))
 		return annotated
 	}
 	visible := annotated
@@ -2663,7 +2678,10 @@ func visibleTableMetadata(perms permission.Set, actorID, dbName string, isOwner 
 			visible.Fields = append(visible.Fields, field)
 		}
 	}
-	visible.Views = make([]metadata.View, 0, len(tableMeta.Views))
+	visible.Views = make([]metadata.View, 0, len(tableMeta.Views)+1)
+	if perms.CanReadView(actorID, resource, metadata.AllViewName) {
+		visible.Views = append(visible.Views, metadata.View{Name: metadata.AllViewName, PermissionLevel: int(permission.Read)})
+	}
 	for _, view := range tableMeta.Views {
 		viewLevel := maxPermissionLevel(viewSetLevel, perms.ViewLevel(actorID, resource, view.Name))
 		if viewLevel < permission.Read {

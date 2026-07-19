@@ -20,6 +20,7 @@ const catalogFixture = {
             { name: "status", type: "string", deleted: false }
           ],
           views: [
+            { name: "all", display_name: "", sorts: [] },
             { name: "active", display_name: "Active", sorts: [] },
             { name: "active-ops", display_name: "Active ops", base_view: "active", sorts: [] }
           ]
@@ -1001,6 +1002,42 @@ describe("App", () => {
 
     await waitFor(() => expect(submittedURL).toBe("/api/tables/workspace/contacts/rows"));
     expect(screen.getAllByText("Form created contacts record 9").length).toBeGreaterThan(0);
+  });
+
+  it("hides the built-in all view when the server omits it and falls back to the first view", async () => {
+    const pageBodies: Array<{ view?: string }> = [];
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url === "/api/metadata") {
+        return jsonResponse({
+          databases: [
+            {
+              name: "workspace",
+              permission_level: 0,
+              tables: [
+                {
+                  name: "contacts",
+                  display_name: "Contacts",
+                  fields: [{ name: "name", type: "string", deleted: false }],
+                  views: [{ name: "mine", display_name: "Mine", sorts: [] }]
+                }
+              ]
+            }
+          ]
+        });
+      }
+      if (url === "/api/tables/workspace/contacts/rows/page" && init?.method === "POST") {
+        pageBodies.push(JSON.parse(String(init.body)));
+        return jsonResponse({ rows: rowFixture, total: rowFixture.length });
+      }
+      return defaultFetch(input, init);
+    });
+
+    renderApp();
+    await waitForSignedIn();
+    expect(await screen.findByRole("button", { name: "Mine" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "All records" })).not.toBeInTheDocument();
+    await waitFor(() => expect(pageBodies.some((body) => body.view === "mine")).toBe(true));
   });
 
   it("searches records server-side from the table toolbar", async () => {

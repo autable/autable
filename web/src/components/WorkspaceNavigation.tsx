@@ -627,7 +627,8 @@ function TableNav(props: {
         onNavCategoryItemToggle={(_, data) => {
           const tableName = data.categoryValue ?? data.value;
           if (tableName) {
-            props.onSelectTableView(tableName, "all");
+            const item = props.database.tables.find((candidate) => candidate.name === tableName);
+            props.onSelectTableView(tableName, item?.views?.[0]?.name ?? "all");
           }
         }}
         onNavItemSelect={(_, data) => {
@@ -644,10 +645,9 @@ function TableNav(props: {
           <NavCategory key={item.name} value={item.name}>
             <NavCategoryItem icon={<DocumentTableRegular />}>{item.display_name || item.name}</NavCategoryItem>
             <NavSubItemGroup>
-              <NavSubItem value={`${item.name}:view:all`}>{t("common.allRecords")}</NavSubItem>
               {(item.views ?? []).map((viewDef) => (
                 <NavSubItem key={viewDef.name} value={`${item.name}:view:${viewDef.name}`}>
-                  {viewDef.display_name || viewDef.name}
+                  {viewDef.display_name || (viewDef.name === "all" ? t("common.allRecords") : viewDef.name)}
                 </NavSubItem>
               ))}
               {(item.view_permission_level ?? item.permission_level ?? 2) >= 2 && (

@@ -85,6 +85,22 @@ function WorkspaceApp() {
 
   const database = catalog.databases.find((item) => item.name === selectedDatabaseName) ?? emptyDatabase;
   const table = database.tables.find((item) => item.name === selectedTable) ?? database.tables[0] ?? emptyTable;
+
+  // Views (including the built-in "all") arrive permission-filtered from the
+  // server; if the current selection is not among them, fall back to the
+  // first authorized view instead of rendering a denied grid.
+  useEffect(() => {
+    if (!table.name || !database.name) {
+      return;
+    }
+    const viewNames = (table.views ?? []).map((viewDef) => viewDef.name);
+    if (viewNames.length === 0 || viewNames.includes(selectedTableView)) {
+      return;
+    }
+    setSelectedTableView(viewNames[0]);
+    navigateWorkspace(buildRouteForSelection(database.name, "table", table.name, viewNames[0]), "replace");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [database.name, table.name, table.views, selectedTableView]);
   const tableWorkspace = useTableWorkspace({
     currentUserID: currentUser?.id,
     databaseName: database.name,

@@ -412,10 +412,12 @@ function TablePermissionEditor({
   const canAddFields = grantLevel(grants, "field_add", resource, "") >= 2;
   const fieldSetLevel = grantLevel(grants, "field_set", resource, "");
   const viewSetLevel = grantLevel(grants, "view_set", resource, "");
-  const viewItems = [
-    { name: "all", label: t("permission.allRecordsView") },
-    ...table.views.map((view) => ({ name: view.name, label: view.display_name || view.name }))
-  ];
+  // The catalog already carries the built-in "all" view as an ordinary
+  // entry; only its display label is localized here.
+  const viewItems = table.views.map((view) => ({
+    name: view.name,
+    label: view.name === "all" ? t("permission.allRecordsView") : view.display_name || view.name
+  }));
 
   function changeFieldSet(level: number) {
     activeFields.forEach((field) => onGrantChange("field", resource, field.name, 0));
