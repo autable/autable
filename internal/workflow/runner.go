@@ -30,6 +30,20 @@ type Definition struct {
 	// none (runs are not persisted at all), and a positive count to keep
 	// that many days.
 	HistoryRetentionDays *int64
+	// TimeoutSeconds is nil to run with DefaultRunTimeout, or a positive
+	// number of seconds after which the run is aborted.
+	TimeoutSeconds *int64
+}
+
+// DefaultRunTimeout bounds workflow runs that do not configure their own
+// timeout.
+const DefaultRunTimeout = time.Hour
+
+func (definition Definition) runTimeout() time.Duration {
+	if definition.TimeoutSeconds != nil && *definition.TimeoutSeconds > 0 {
+		return time.Duration(*definition.TimeoutSeconds) * time.Second
+	}
+	return DefaultRunTimeout
 }
 
 var ErrMissingTrigger = errors.New("workflow script must define function trigger(info)")
@@ -99,11 +113,28 @@ func (runner *Runner) RunAt(ctx context.Context, definition Definition, inputs m
 		Inputs:     cloneAnyMap(inputs),
 		Steps:      []history.StepRecord{},
 	}
+	// The run history must be persisted even after the run context expires,
+	// so finish always writes with the uncancelled parent.
+	finishCtx := context.WithoutCancel(ctx)
+	timeout := definition.runTimeout()
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
 	instances, err := runner.Instances(ctx, definition)
 	if err != nil {
-		return runner.finish(ctx, definition, run, err)
+		return runner.finish(finishCtx, definition, run, err)
 	}
 	runtime := newRuntime()
+	// goja executes the script synchronously and never checks the context,
+	// so the deadline is enforced by interrupting the runtime.
+	watchDone := make(chan struct{})
+	defer close(watchDone)
+	go func() {
+		select {
+		case <-ctx.Done():
+			runtime.Interrupt(fmt.Sprintf("workflow run exceeded its %s timeout", timeout))
+		case <-watchDone:
+		}
+	}()
 	info := workflowInfo(definition, runID, inputs)
 	info["instance"] = func(call goja.FunctionCall) goja.Value {
 		instanceID := call.Argument(0).String()
@@ -129,22 +160,22 @@ func (runner *Runner) RunAt(ctx context.Context, definition Definition, inputs m
 	}
 
 	if _, err := runtime.RunString(definition.Script); err != nil {
-		return runner.finish(ctx, definition, run, err)
+		return runner.finish(finishCtx, definition, run, err)
 	}
 	fn, ok := goja.AssertFunction(runtime.Get("run"))
 	if !ok {
-		return runner.finish(ctx, definition, run, errors.New("workflow script must define function run(info)"))
+		return runner.finish(finishCtx, definition, run, errors.New("workflow script must define function run(info)"))
 	}
 	output, err := fn(goja.Undefined(), runtime.ToValue(info))
 	if err != nil {
-		return runner.finish(ctx, definition, run, err)
+		return runner.finish(finishCtx, definition, run, err)
 	}
 	outputs := exportedMap(output.Export())
 	if err := ensureSerializable(outputs); err != nil {
-		return runner.finish(ctx, definition, run, fmt.Errorf("run() returned a value that cannot be serialized to JSON (return plain data, not the info object): %w", err))
+		return runner.finish(finishCtx, definition, run, fmt.Errorf("run() returned a value that cannot be serialized to JSON (return plain data, not the info object): %w", err))
 	}
 	run.Outputs = outputs
-	return runner.finish(ctx, definition, run, nil)
+	return runner.finish(finishCtx, definition, run, nil)
 }
 
 // ensureSerializable rejects script values the history store cannot persist,

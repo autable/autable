@@ -56,6 +56,7 @@ type WorkflowWorkspaceProps = {
   onSelectTab: (tab: WorkflowTab) => void;
   onSelectRunKey: (historyKey: string) => void;
   onSetHistoryRetention: (days: number | null) => void;
+  onSetTimeoutSeconds: (seconds: number | null) => void;
   onToggleEnabled: (enabled: boolean) => void;
   onUpdateScript: (script: string) => void;
   selectedRun: WorkflowRunResponse | null;
@@ -90,6 +91,7 @@ export function WorkflowWorkspace({
   onSelectTab,
   onSelectRunKey,
   onSetHistoryRetention,
+  onSetTimeoutSeconds,
   onToggleEnabled,
   onUpdateScript,
   selectedRun,
@@ -155,6 +157,11 @@ export function WorkflowWorkspace({
           <HistoryRetentionSelect
             canWriteWorkflow={canWriteWorkflow}
             onSetHistoryRetention={onSetHistoryRetention}
+            workflow={workflow}
+          />
+          <TimeoutSelect
+            canWriteWorkflow={canWriteWorkflow}
+            onSetTimeoutSeconds={onSetTimeoutSeconds}
             workflow={workflow}
           />
           <Switch
@@ -365,6 +372,44 @@ function HistoryRetentionSelect({
       ))}
       {retention !== null && retention !== 0 && !historyRetentionOptions.includes(retention) && (
         <option value={String(retention)}>{t("workflow.historyRetentionDays", { days: retention })}</option>
+      )}
+    </Select>
+  );
+}
+
+const timeoutOptions = [60, 300, 1800, 21600, 86400];
+
+function TimeoutSelect({
+  canWriteWorkflow,
+  onSetTimeoutSeconds,
+  workflow
+}: {
+  canWriteWorkflow: boolean;
+  onSetTimeoutSeconds: (seconds: number | null) => void;
+  workflow?: WorkflowDefinition;
+}) {
+  const { t } = useTranslation();
+  const timeout = workflow?.timeout_seconds ?? null;
+  const label = (seconds: number) =>
+    seconds % 3600 === 0
+      ? t("workflow.timeoutHours", { hours: seconds / 3600 })
+      : t("workflow.timeoutMinutes", { minutes: Math.max(1, Math.round(seconds / 60)) });
+  return (
+    <Select
+      aria-label={t("workflow.timeout")}
+      title={t("workflow.timeout")}
+      value={timeout === null ? "default" : String(timeout)}
+      onChange={(_, data) => onSetTimeoutSeconds(data.value === "default" ? null : Number(data.value))}
+      disabled={!workflow?.id || !canWriteWorkflow}
+    >
+      <option value="default">{t("workflow.timeoutDefault")}</option>
+      {timeoutOptions.map((seconds) => (
+        <option key={seconds} value={String(seconds)}>
+          {label(seconds)}
+        </option>
+      ))}
+      {timeout !== null && !timeoutOptions.includes(timeout) && (
+        <option value={String(timeout)}>{t("workflow.timeoutSeconds", { seconds: timeout })}</option>
       )}
     </Select>
   );

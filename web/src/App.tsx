@@ -813,6 +813,7 @@ function WorkspaceApp() {
               onSelectTab={selectWorkflowTabFromWorkspace}
               onUpdateScript={workflowFormWorkspace.updateSelectedWorkflowScript}
               onSetHistoryRetention={workflowFormWorkspace.setSelectedWorkflowHistoryRetention}
+              onSetTimeoutSeconds={workflowFormWorkspace.setSelectedWorkflowTimeoutSeconds}
               onToggleEnabled={workflowFormWorkspace.toggleSelectedWorkflowEnabled}
               language={language}
               workflowTrigger={workflowTrigger}

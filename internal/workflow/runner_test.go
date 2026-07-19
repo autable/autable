@@ -694,3 +694,60 @@ func TestRunnerRecordsRemoteDispatchErrors(t *testing.T) {
 		t.Fatalf("expected failed run to be persisted, got %d", len(entries))
 	}
 }
+
+func TestRunnerAbortsRunsAtConfiguredTimeout(t *testing.T) {
+	ctx := context.Background()
+	store := history.NewMemoryStore()
+	runner := NewRunner(store, testEchoNode{})
+
+	timeout := int64(1)
+	started := time.Now()
+	run, _, err := runner.Run(ctx, Definition{
+		ID:             11,
+		TimeoutSeconds: &timeout,
+		Script:         `function instances(info) { return { main: "echo" }; } function run(info) { while (true) {} }`,
+	}, nil)
+	if err == nil {
+		t.Fatal("expected timeout error")
+	}
+	if elapsed := time.Since(started); elapsed > 10*time.Second {
+		t.Fatalf("timeout did not interrupt the script in time, took %s", elapsed)
+	}
+	if !strings.Contains(err.Error(), "timeout") {
+		t.Fatalf("expected timeout in error, got %v", err)
+	}
+	if !strings.Contains(run.Error, "timeout") {
+		t.Fatalf("expected timeout in run error, got %#v", run)
+	}
+	entries, err := store.GetPrefix(ctx, history.WorkflowPrefix(11))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected timed-out run to be persisted, got %d", len(entries))
+	}
+}
+
+func TestRunnerPersistsRunsAfterExpiredParentContext(t *testing.T) {
+	store := history.NewMemoryStore()
+	runner := NewRunner(store, testEchoNode{})
+
+	parent, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	timeout := int64(1)
+	_, _, err := runner.Run(parent, Definition{
+		ID:             12,
+		TimeoutSeconds: &timeout,
+		Script:         `function instances(info) { return { main: "echo" }; } function run(info) { while (true) {} }`,
+	}, nil)
+	if err == nil {
+		t.Fatal("expected timeout error")
+	}
+	entries, err := store.GetPrefix(context.Background(), history.WorkflowPrefix(12))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected run to be persisted despite expired parent context, got %d", len(entries))
+	}
+}

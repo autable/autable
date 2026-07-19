@@ -84,6 +84,7 @@ export type WorkflowDefinition = {
   variables: Record<string, string>;
   runners?: Record<string, string>;
   history_retention_days?: number | null;
+  timeout_seconds?: number | null;
   permission_level?: 0 | 1 | 2;
   created_at?: number;
   updated_at?: number;
@@ -722,6 +723,7 @@ export async function saveWorkflow(
     variables: workflow.variables,
     runners: workflow.runners ?? {},
     history_retention_days: workflow.history_retention_days ?? null,
+    timeout_seconds: workflow.timeout_seconds ?? null,
     permission_level: workflow.permission_level,
     created_at: workflow.created_at,
     updated_at: workflow.updated_at

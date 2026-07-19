@@ -205,6 +205,7 @@ type workflowDefinitionResponse struct {
 	Variables            map[string]string `json:"variables"`
 	Runners              map[string]string `json:"runners"`
 	HistoryRetentionDays *int64            `json:"history_retention_days"`
+	TimeoutSeconds       *int64            `json:"timeout_seconds"`
 	PermissionLevel      permission.Level  `json:"permission_level,omitempty"`
 	CreatedAt            int64             `json:"created_at"`
 	UpdatedAt            int64             `json:"updated_at"`
@@ -1158,6 +1159,10 @@ func (server *Server) handleSaveWorkflow(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusBadRequest, fmt.Errorf("history_retention_days must be at least 0, got %d", *workflow.HistoryRetentionDays))
 		return
 	}
+	if workflow.TimeoutSeconds != nil && *workflow.TimeoutSeconds <= 0 {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("timeout_seconds must be greater than 0, got %d", *workflow.TimeoutSeconds))
+		return
+	}
 	saved, err := server.saveWorkflowDefinition(r.Context(), actorID, workflow)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
@@ -1288,6 +1293,10 @@ func (server *Server) handlePostDatabaseResource(w http.ResponseWriter, r *http.
 		}
 		if workflow.HistoryRetentionDays != nil && *workflow.HistoryRetentionDays < 0 {
 			writeError(w, http.StatusBadRequest, fmt.Errorf("history_retention_days must be at least 0, got %d", *workflow.HistoryRetentionDays))
+			return
+		}
+		if workflow.TimeoutSeconds != nil && *workflow.TimeoutSeconds <= 0 {
+			writeError(w, http.StatusBadRequest, fmt.Errorf("timeout_seconds must be greater than 0, got %d", *workflow.TimeoutSeconds))
 			return
 		}
 		saved, err := server.saveWorkflowDefinition(r.Context(), actorID, workflow)
@@ -1610,6 +1619,7 @@ func (server *Server) handleRunWorkflow(w http.ResponseWriter, r *http.Request) 
 		Variables:            workflowDefinition.Variables,
 		Runners:              workflowDefinition.Runners,
 		HistoryRetentionDays: workflowDefinition.HistoryRetentionDays,
+		TimeoutSeconds:       workflowDefinition.TimeoutSeconds,
 	}, request.Inputs)
 	status := http.StatusCreated
 	if err != nil {
@@ -1952,6 +1962,7 @@ func (server *Server) processWorkflowEvent(ctx context.Context, event workflowEv
 			Variables:            workflowDefinition.Variables,
 			Runners:              workflowDefinition.Runners,
 			HistoryRetentionDays: workflowDefinition.HistoryRetentionDays,
+			TimeoutSeconds:       workflowDefinition.TimeoutSeconds,
 		}
 		declaration, err := server.runner.Trigger(ctx, definition)
 		if errors.Is(err, workflow.ErrMissingTrigger) {
@@ -2355,6 +2366,7 @@ func (server *Server) handleWorkflowWebhook(w http.ResponseWriter, r *http.Reque
 		Variables:            workflowDefinition.Variables,
 		Runners:              workflowDefinition.Runners,
 		HistoryRetentionDays: workflowDefinition.HistoryRetentionDays,
+		TimeoutSeconds:       workflowDefinition.TimeoutSeconds,
 	}
 	declaration, err := server.runner.Trigger(r.Context(), definition)
 	if err != nil {
@@ -3258,6 +3270,7 @@ func workflowResponseFromDefinition(workflow systemdb.WorkflowDefinition) workfl
 		Variables:            workflow.Variables,
 		Runners:              workflow.Runners,
 		HistoryRetentionDays: workflow.HistoryRetentionDays,
+		TimeoutSeconds:       workflow.TimeoutSeconds,
 		PermissionLevel:      workflow.PermissionLevel,
 		CreatedAt:            workflow.CreatedAt,
 		UpdatedAt:            workflow.UpdatedAt,

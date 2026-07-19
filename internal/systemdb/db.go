@@ -37,8 +37,11 @@ type WorkflowDefinition struct {
 	Runners      map[string]string `json:"runners"`
 	// HistoryRetentionDays is nil to keep run history forever, 0 to keep
 	// none, and a positive count to keep that many days.
-	HistoryRetentionDays *int64           `json:"history_retention_days"`
-	PermissionLevel      permission.Level `json:"permission_level,omitempty" gorm:"-"`
+	HistoryRetentionDays *int64 `json:"history_retention_days"`
+	// TimeoutSeconds is nil to run with the default one-hour limit, or a
+	// positive number of seconds after which a run is aborted.
+	TimeoutSeconds  *int64           `json:"timeout_seconds"`
+	PermissionLevel permission.Level `json:"permission_level,omitempty" gorm:"-"`
 	CreatedAt            int64            `json:"created_at"`
 	UpdatedAt            int64            `json:"updated_at"`
 }
@@ -118,6 +121,7 @@ type workflowModel struct {
 	VariablesJSON        string `gorm:"not null"`
 	RunnersJSON          string `gorm:"not null;default:'{}'"`
 	HistoryRetentionDays *int64
+	TimeoutSeconds       *int64
 	CreatedAt            int64 `gorm:"autoCreateTime:milli"`
 	UpdatedAt            int64 `gorm:"autoUpdateTime:milli"`
 }
@@ -835,6 +839,7 @@ func workflowToModel(workflow WorkflowDefinition) (workflowModel, error) {
 		VariablesJSON:        string(variables),
 		RunnersJSON:          string(runners),
 		HistoryRetentionDays: workflow.HistoryRetentionDays,
+		TimeoutSeconds:       workflow.TimeoutSeconds,
 		CreatedAt:            workflow.CreatedAt,
 		UpdatedAt:            workflow.UpdatedAt,
 	}, nil
@@ -849,6 +854,7 @@ func modelToWorkflow(model workflowModel) (WorkflowDefinition, error) {
 		Enabled:              model.Enabled,
 		CreatorID:            model.CreatorID,
 		HistoryRetentionDays: model.HistoryRetentionDays,
+		TimeoutSeconds:       model.TimeoutSeconds,
 		CreatedAt:            model.CreatedAt,
 		UpdatedAt:            model.UpdatedAt,
 	}

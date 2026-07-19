@@ -342,6 +342,20 @@ export function useWorkflowFormWorkspace({
     }
   }
 
+  async function setSelectedWorkflowTimeoutSeconds(seconds: number | null) {
+    if (!selectedWorkflow) {
+      return;
+    }
+    try {
+      const saved = await saveWorkflow(databaseName, { ...selectedWorkflow, timeout_seconds: seconds });
+      setWorkflows((current) => replaceResource(current, saved));
+      setSelectedWorkflowID(saved.id ?? 0);
+      onStatus(t("status.workflowTimeoutUpdated", { name: saved.name }));
+    } catch (error) {
+      onStatus(error instanceof Error ? error.message : t("status.workflowStatusUpdateFailed"), "error");
+    }
+  }
+
   async function renameSelectedWorkflow(name: string, workflowID = selectedWorkflow?.id ?? 0) {
     const trimmed = name.trim();
     const workflow = workflows.find((item) => item.id === workflowID) ?? selectedWorkflow;
@@ -563,6 +577,7 @@ export function useWorkflowFormWorkspace({
     setNewFormName,
     setNewWorkflowName,
     setSelectedWorkflowHistoryRetention,
+    setSelectedWorkflowTimeoutSeconds,
     setSelectedFormID,
     setSelectedWorkflowID,
     setSelectedWorkflowRunKey,
