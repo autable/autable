@@ -443,11 +443,8 @@ function TablePermissionEditor({
 
   return (
     <div className="permission-table-detail">
-      <Text size={200} className="permission-section-label">
-        {t("permission.dataSection")}
-      </Text>
       <div className="permission-block">
-        <span className="permission-scope-label">{t("permission.records")}</span>
+        <Text weight="semibold">{t("permission.dataSection")}</Text>
         <div className="permission-row">
           <span>{t("permission.records")}</span>
           <div className="field-bits" role="group" aria-label={t("permission.records")}>
@@ -471,9 +468,12 @@ function TablePermissionEditor({
             </ToggleButton>
           </div>
         </div>
-      </div>
-      <div className="permission-block">
-        <span className="permission-scope-label">{t("permission.fieldValues")}</span>
+        <ReadToggleRow
+          label={t("permission.files")}
+          checked={canViewFiles}
+          onChange={(next) => onGrantChange("file", resource, "", next ? 1 : 0)}
+        />
+        <div className="permission-subheader">{t("permission.fieldValues")}</div>
         <FieldBitsSelect label={t("permission.allFields")} value={fieldSetLevel} onChange={changeFieldSet} />
         {activeFields.map((field) => (
           <FieldBitsSelect
@@ -483,10 +483,12 @@ function TablePermissionEditor({
             onChange={(level) => changeField(field.name, level)}
           />
         ))}
-      </div>
-      <div className="permission-block">
-        <span className="permission-scope-label">{t("permission.views")}</span>
-        <ReadToggleRow label={t("permission.allViews")} checked={viewSetLevel >= 1} onChange={(next) => changeViewSet(next ? 1 : 0)} />
+        <div className="permission-subheader">{t("permission.views")}</div>
+        <ReadToggleRow
+          label={t("permission.allViews")}
+          checked={viewSetLevel >= 1}
+          onChange={(next) => changeViewSet(next ? 1 : 0)}
+        />
         {viewItems.map((view) => (
           <ReadToggleRow
             key={view.name}
@@ -497,18 +499,7 @@ function TablePermissionEditor({
         ))}
       </div>
       <div className="permission-block">
-        <span className="permission-scope-label">{t("permission.files")}</span>
-        <ReadToggleRow
-          label={t("permission.fileView")}
-          checked={canViewFiles}
-          onChange={(next) => onGrantChange("file", resource, "", next ? 1 : 0)}
-        />
-      </div>
-      <Text size={200} className="permission-section-label">
-        {t("permission.schemaSection")}
-      </Text>
-      <div className="permission-block">
-        <span className="permission-scope-label">{t("permission.fieldAdd")}</span>
+        <Text weight="semibold">{t("permission.schemaSection")}</Text>
         <div className="permission-row">
           <span>{t("permission.fieldAdd")}</span>
           <ToggleButton
@@ -521,29 +512,27 @@ function TablePermissionEditor({
             {t("permission.allowed")}
           </ToggleButton>
         </div>
-      </div>
-      <div className="permission-block">
-        <span className="permission-scope-label">{t("permission.fieldDefine")}</span>
-        {definableFields.length === 0 ? (
-          <Text size={200}>{t("permission.noPartialItems")}</Text>
-        ) : (
-          definableFields.map((field) => {
-            const level = grantLevel(grants, "field_modify", resource, field.name);
-            return (
-              <div key={field.name} className="permission-row">
-                <span>{field.name}</span>
-                <ToggleButton
-                  size="small"
-                  checked={level >= 2}
-                  appearance={level >= 2 ? "primary" : "secondary"}
-                  aria-label={`${field.name} ${t("permission.fieldDefine")}`}
-                  onClick={() => onGrantChange("field_modify", resource, field.name, level >= 2 ? 0 : 2)}
-                >
-                  {t("permission.allowed")}
-                </ToggleButton>
-              </div>
-            );
-          })
+        {definableFields.length > 0 && (
+          <>
+            <div className="permission-subheader">{t("permission.fieldDefine")}</div>
+            {definableFields.map((field) => {
+              const level = grantLevel(grants, "field_modify", resource, field.name);
+              return (
+                <div key={field.name} className="permission-row">
+                  <span>{field.name}</span>
+                  <ToggleButton
+                    size="small"
+                    checked={level >= 2}
+                    appearance={level >= 2 ? "primary" : "secondary"}
+                    aria-label={`${field.name} ${t("permission.fieldDefine")}`}
+                    onClick={() => onGrantChange("field_modify", resource, field.name, level >= 2 ? 0 : 2)}
+                  >
+                    {t("permission.allowed")}
+                  </ToggleButton>
+                </div>
+              );
+            })}
+          </>
         )}
       </div>
     </div>

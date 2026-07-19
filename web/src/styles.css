@@ -1597,15 +1597,19 @@ select {
 .permission-block {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 10px 12px;
+  gap: 8px;
+  padding: 12px 16px;
   border: 1px solid var(--colorNeutralStroke2);
   border-radius: var(--borderRadiusMedium);
   background: var(--colorNeutralBackground1);
 }
 
-.permission-section-label {
+.permission-subheader {
+  margin-top: 6px;
+  padding-top: 10px;
+  border-top: 1px solid var(--colorNeutralStroke2);
   color: var(--colorNeutralForeground3);
+  font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.04em;
 }
