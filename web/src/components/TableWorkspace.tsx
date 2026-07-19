@@ -83,6 +83,7 @@ type TableWorkspaceProps = {
   onUpdateSelectedRow: () => void;
   onUpdateSelectedView: () => void;
   onUpdateFieldFormula: (fieldName: string, formula: string) => void;
+  onUpdateFieldOptions: (fieldName: string, optionsText: string) => void;
   newFieldFormula: string;
   newFieldName: string;
   newFieldOptions: string;
@@ -138,6 +139,7 @@ export function TableWorkspace({
   onUpdateSelectedRow,
   onUpdateSelectedView,
   onUpdateFieldFormula,
+  onUpdateFieldOptions,
   newFieldFormula,
   newFieldName,
   newFieldOptions,
@@ -180,6 +182,7 @@ export function TableWorkspace({
   const [recordMenu, setRecordMenu] = useState<{ x: number; y: number; recordID: number } | null>(null);
   const [fieldCreator, setFieldCreator] = useState<{ x: number; y: number } | null>(null);
   const [formulaEditor, setFormulaEditor] = useState<{ x: number; y: number; fieldName: string; formula: string } | null>(null);
+  const [optionsEditor, setOptionsEditor] = useState<{ x: number; y: number; fieldName: string; options: string } | null>(null);
   const selectedView = useMemo(
     () => (table.views ?? []).find((viewDef) => viewDef.name === selectedTableView),
     [selectedTableView, table.views]
@@ -211,6 +214,15 @@ export function TableWorkspace({
           }
         : undefined,
     [formulaEditor]
+  );
+  const optionsEditorTarget = useMemo(
+    () =>
+      optionsEditor
+        ? {
+            getBoundingClientRect: () => new DOMRect(optionsEditor.x, optionsEditor.y, 0, 0)
+          }
+        : undefined,
+    [optionsEditor]
   );
   const activeFieldNameKey = useMemo(() => activeFields.map((field) => field.name).join("\u0000"), [activeFields]);
   const fieldVisibilityStorageKey = useMemo(
@@ -276,6 +288,14 @@ export function TableWorkspace({
                   y: point.y,
                   fieldName: targetField.name,
                   formula: targetField.formula ?? ""
+                })
+              }
+              onEditOptions={(targetField, point) =>
+                setOptionsEditor({
+                  x: point.x,
+                  y: point.y,
+                  fieldName: targetField.name,
+                  options: (targetField.options ?? []).join(", ")
                 })
               }
               onSort={(fieldName, direction) =>
@@ -668,6 +688,47 @@ export function TableWorkspace({
             </div>
           </PopoverSurface>
         </Popover>
+        <Popover
+          open={Boolean(optionsEditor)}
+          onOpenChange={(_, data) => {
+            if (!data.open) {
+              setOptionsEditor(null);
+            }
+          }}
+          positioning={optionsEditorTarget ? { target: optionsEditorTarget } : undefined}
+          withArrow
+        >
+          <PopoverSurface className="field-editor-popover" aria-label={t("table.editOptions")}>
+            <div className="field-editor">
+              <Text weight="semibold">{optionsEditor?.fieldName}</Text>
+              <FluentField label={t("table.fieldOptions")}>
+                <Input
+                  aria-label={t("table.fieldOptions")}
+                  value={optionsEditor?.options ?? ""}
+                  onChange={(_, data) =>
+                    setOptionsEditor((current) => (current ? { ...current, options: data.value } : current))
+                  }
+                  placeholder={t("table.fieldOptionsPlaceholder")}
+                />
+              </FluentField>
+              <div className="field-editor-actions">
+                <Button onClick={() => setOptionsEditor(null)}>{t("common.cancel")}</Button>
+                <Button
+                  appearance="primary"
+                  icon={<SaveRegular />}
+                  onClick={() => {
+                    if (optionsEditor) {
+                      void onUpdateFieldOptions(optionsEditor.fieldName, optionsEditor.options);
+                    }
+                    setOptionsEditor(null);
+                  }}
+                >
+                  {t("common.save")}
+                </Button>
+              </div>
+            </div>
+          </PopoverSurface>
+        </Popover>
         {recordPanelOpen && (
           <RecordDrawer
             fields={activeFields}
@@ -855,6 +916,7 @@ function FieldHeader({
   field,
   onDeleteField,
   onEditFormula,
+  onEditOptions,
   onSort,
   sortDirection
 }: {
@@ -863,6 +925,7 @@ function FieldHeader({
   field: Field;
   onDeleteField: (fieldName: string) => void;
   onEditFormula: (field: Field, point: { x: number; y: number }) => void;
+  onEditOptions: (field: Field, point: { x: number; y: number }) => void;
   onSort: (fieldName: string, direction?: TableViewSort["direction"]) => void;
   sortDirection?: TableViewSort["direction"];
 }) {
@@ -914,6 +977,18 @@ function FieldHeader({
                 }}
               >
                 {t("table.editFormula")}
+              </MenuItem>
+            )}
+            {field.type === "string" && (
+              <MenuItem
+                icon={<EditRegular />}
+                disabled={!canWriteFields}
+                onClick={(event) => {
+                  const rect = event.currentTarget.getBoundingClientRect();
+                  onEditOptions(field, { x: rect.left, y: rect.bottom });
+                }}
+              >
+                {t("table.editOptions")}
               </MenuItem>
             )}
             <MenuItem icon={<DeleteRegular />} disabled={!canDeleteField} onClick={() => onDeleteField(field.name)}>

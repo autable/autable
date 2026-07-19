@@ -526,6 +526,25 @@ export function useTableWorkspace({
     await persistTableMetadata(nextTable, t("status.updatedFormula", { name: fieldName }));
   }
 
+  async function updateFieldOptionsFromCanvas(fieldName: string, optionsText: string) {
+    const field = table.fields.find((item) => item.name === fieldName);
+    if (!field || field.type !== "string") {
+      onStatus(t("status.fieldNotString", { name: fieldName }));
+      return;
+    }
+    const parsed = optionsText
+      .split(/[,，\n]/)
+      .map((option) => option.trim())
+      .filter((option) => option.length > 0);
+    const nextTable = {
+      ...table,
+      fields: table.fields.map((item) =>
+        item.name === fieldName ? { ...item, options: parsed.length > 0 ? parsed : undefined } : item
+      )
+    };
+    await persistTableMetadata(nextTable, t("status.updatedFieldOptions", { name: fieldName }));
+  }
+
   function viewSortsFromDraft(): TableViewSort[] {
     return newViewSortField ? [{ field: newViewSortField, direction: newViewSortDirection }] : [];
   }
@@ -695,6 +714,7 @@ export function useTableWorkspace({
     selectGridCell,
     updateSelectedViewFromCanvas,
     updateFieldFormulaFromCanvas,
+    updateFieldOptionsFromCanvas,
     updateSelectedRowDraft,
     updateSelectedRowFromEditor
   };

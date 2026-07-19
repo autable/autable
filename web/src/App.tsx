@@ -794,6 +794,7 @@ function WorkspaceApp() {
               onSelectRecordID={tableWorkspace.setSelectedRecordID}
               onSelectedRowValueChange={tableWorkspace.updateSelectedRowDraft}
               onUpdateFieldFormula={tableWorkspace.updateFieldFormulaFromCanvas}
+              onUpdateFieldOptions={tableWorkspace.updateFieldOptionsFromCanvas}
               onUpdateSelectedRow={tableWorkspace.updateSelectedRowFromEditor}
               onUpdateSelectedView={tableWorkspace.updateSelectedViewFromCanvas}
               rowHistory={tableWorkspace.rowHistory}
