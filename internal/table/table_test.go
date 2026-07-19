@@ -1089,3 +1089,169 @@ func TestRowWritesRejectFileCellsWithoutBinder(t *testing.T) {
 		t.Fatal("expected file cell write without a binder to fail")
 	}
 }
+
+func TestRowsPageWithOptionsReturnsRowsAndTotal(t *testing.T) {
+	ctx := context.Background()
+	catalog := metadata.Catalog{Databases: []metadata.Database{{
+		Name: "db",
+		Tables: []metadata.Table{{
+			Name: "contacts",
+			Fields: []metadata.Field{
+				{Name: "name", Type: "string"},
+				{Name: "priority", Type: "int"},
+			},
+		}},
+	}}}
+	service, catalog, _ := newSQLiteService(t, history.NewMemoryStore(), catalog)
+	for i := 1; i <= 5; i++ {
+		if _, err := service.CreateRow(ctx, catalog, permission.Set{}, "owner", true, "db", "contacts", map[string]any{
+			"name":     fmt.Sprintf("Person %d", i),
+			"priority": int64(i),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	rows, total, err := service.RowsPageWithOptions(ctx, catalog, permission.Set{}, "owner", true, "db", "contacts", table.RowListOptions{
+		Limit:  2,
+		Offset: 2,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 5 {
+		t.Fatalf("expected total 5, got %d", total)
+	}
+	if len(rows) != 2 || rows[0].Values["name"] != "Person 3" || rows[1].Values["name"] != "Person 4" {
+		t.Fatalf("unexpected page: %#v", rows)
+	}
+
+	if _, _, err := service.RowsPageWithOptions(ctx, catalog, permission.Set{}, "owner", true, "db", "contacts", table.RowListOptions{
+		Offset: 2,
+	}); err == nil {
+		t.Fatal("expected offset without limit to fail")
+	}
+	if _, _, err := service.RowsPageWithOptions(ctx, catalog, permission.Set{}, "owner", true, "db", "contacts", table.RowListOptions{
+		Limit:  2,
+		Offset: -1,
+	}); err == nil {
+		t.Fatal("expected negative offset to fail")
+	}
+}
+
+func TestRowsPageWithOptionsSearchMatchesTextNumberAndFormulaFields(t *testing.T) {
+	ctx := context.Background()
+	catalog := metadata.Catalog{Databases: []metadata.Database{{
+		Name: "db",
+		Tables: []metadata.Table{
+			{
+				Name:   "companies",
+				Fields: []metadata.Field{{Name: "title", Type: "string"}},
+			},
+			{
+				Name: "contacts",
+				Fields: []metadata.Field{
+					{Name: "name", Type: "string"},
+					{Name: "priority", Type: "int"},
+					{Name: "score", Type: "float"},
+					{Name: "label", Type: "formula", ValueType: "string", Formula: `'tag-' + fields["name"]`},
+					{Name: "company", Type: "relation", RelationTable: "companies"},
+				},
+			},
+		},
+	}}}
+	service, catalog, _ := newSQLiteService(t, history.NewMemoryStore(), catalog)
+	seed := []map[string]any{
+		{"name": "Ada Lovelace", "priority": int64(17), "score": 2.5, "company": int64(4711)},
+		{"name": "Grace Hopper", "priority": int64(3), "score": 17.25, "company": int64(17)},
+		{"name": "Linus", "priority": int64(9), "score": 1.0, "company": int64(2)},
+	}
+	for _, values := range seed {
+		if _, err := service.CreateRow(ctx, catalog, permission.Set{}, "owner", true, "db", "contacts", values); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	page := func(search string) ([]table.Row, int64) {
+		t.Helper()
+		rows, total, err := service.RowsPageWithOptions(ctx, catalog, permission.Set{}, "owner", true, "db", "contacts", table.RowListOptions{
+			Limit:  10,
+			Search: search,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return rows, total
+	}
+
+	rows, total := page("ada")
+	if total != 1 || len(rows) != 1 || rows[0].Values["name"] != "Ada Lovelace" {
+		t.Fatalf("case-insensitive string search failed: total=%d rows=%#v", total, rows)
+	}
+	rows, total = page("17")
+	if total != 2 || len(rows) != 2 {
+		t.Fatalf("expected int and float matches for 17, got total=%d rows=%#v", total, rows)
+	}
+	if _, total = page("tag-lin"); total != 1 {
+		t.Fatalf("formula field search failed, total=%d", total)
+	}
+	// 4711 appears only in the relation column, which stores an internal
+	// record id and must not participate in search.
+	if _, total = page("4711"); total != 0 {
+		t.Fatalf("relation field leaked into search, total=%d", total)
+	}
+	if _, total = page("no-such-value"); total != 0 {
+		t.Fatalf("expected empty result, total=%d", total)
+	}
+}
+
+func TestRowsPageWithOptionsSearchSkipsUnreadableFields(t *testing.T) {
+	ctx := context.Background()
+	catalog := metadata.Catalog{Databases: []metadata.Database{{
+		Name: "db",
+		Tables: []metadata.Table{{
+			Name: "contacts",
+			Fields: []metadata.Field{
+				{Name: "name", Type: "string"},
+				{Name: "secret", Type: "string"},
+			},
+		}},
+	}}}
+	service, catalog, _ := newSQLiteService(t, history.NewMemoryStore(), catalog)
+	if _, err := service.CreateRow(ctx, catalog, permission.Set{}, "owner", true, "db", "contacts", map[string]any{
+		"name":   "Ada",
+		"secret": "hidden-handle",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	readerPerms := permission.New(
+		permission.Grant{SubjectID: "reader", Scope: permission.ScopeField, Resource: "db.contacts", Field: "name", Level: permission.Read},
+	)
+
+	// A term that only matches the unreadable field returns nothing instead
+	// of erroring or leaking the match.
+	rows, total, err := service.RowsPageWithOptions(ctx, catalog, readerPerms, "reader", false, "db", "contacts", table.RowListOptions{
+		Limit:  10,
+		Search: "hidden-handle",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 0 || len(rows) != 0 {
+		t.Fatalf("unreadable field leaked into search: total=%d rows=%#v", total, rows)
+	}
+
+	rows, total, err = service.RowsPageWithOptions(ctx, catalog, readerPerms, "reader", false, "db", "contacts", table.RowListOptions{
+		Limit:  10,
+		Search: "ada",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 1 || len(rows) != 1 || rows[0].Values["name"] != "Ada" {
+		t.Fatalf("readable field search failed: total=%d rows=%#v", total, rows)
+	}
+	if _, ok := rows[0].Values["secret"]; ok {
+		t.Fatalf("row leaked unreadable value: %#v", rows[0].Values)
+	}
+}

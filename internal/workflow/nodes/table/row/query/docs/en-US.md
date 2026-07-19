@@ -12,6 +12,8 @@ This node uses the same query shape as the public `POST /api/tables/{database}/{
 - `query` (`object`): Optional query object. Use a full `ViewQuery`, or the shorthand `{ field, op/operator, value }`.
 - `sorts` (`object[]`): Optional sort definitions, for example `{ field: "name", direction: "asc" }`.
 - `limit` (`int`): Optional maximum number of rows.
+- `offset` (`int`): Optional number of rows to skip, for pagination. Requires a positive `limit`.
+- `search` (`string`): Optional free-text term matched as "contains" against every readable text/number/formula field (relation and file fields excluded), AND-combined with `query`.
 
 ### Outputs
 

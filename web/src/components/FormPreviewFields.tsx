@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Button,
   Caption1,
@@ -15,11 +15,13 @@ import {
 import { Flash24Regular, FlashOff24Regular, ScanQrCode24Regular } from "@fluentui/react-icons";
 import type { Column } from "react-data-grid";
 import { useTranslation } from "react-i18next";
-import { listRows, uploadFile, type RowRecord, type TableMetadata } from "../api";
+import { listRowsPage, uploadFile, type RowRecord, type TableMetadata } from "../api";
 import type { FormElement } from "../formRuntime";
 import { useBarcodeScanner, type BarcodeScanResult } from "../hooks/useBarcodeScanner";
 import { rowRecordToValues, type TableGridRow } from "../tableGrid";
 import { RecordDataGrid } from "./RecordDataGrid";
+
+const RELATION_PAGE_SIZE = 200;
 
 type FormPreviewFieldsProps = {
   databaseName: string;
@@ -482,19 +484,28 @@ function RelationInput({
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [rows, setRows] = useState<RowRecord[]>([]);
+  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
+  const [search, setSearch] = useState("");
+  const loadingMoreRef = useRef(false);
+  const loadGenerationRef = useRef(0);
   const displayFieldNames = useMemo(() => relationDisplayFieldNames(relationTable, element.fields), [element.fields, relationTable]);
-  const filteredRows = useMemo(() => filterRelationRows(rows, searchQuery, displayFieldNames), [displayFieldNames, rows, searchQuery]);
-  const gridRows = useMemo(() => filteredRows.map(rowRecordToValues), [filteredRows]);
+  const gridRows = useMemo(() => rows.map(rowRecordToValues), [rows]);
   const gridColumns = useMemo(
     () => buildRelationGridColumns(displayFieldNames, value, onChange, setOpen, t),
     [displayFieldNames, onChange, t, value]
   );
 
   useEffect(() => {
+    const timer = setTimeout(() => setSearch(searchQuery.trim()), 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
+  useEffect(() => {
     let cancelled = false;
+    loadGenerationRef.current += 1;
     if (!open || !databaseName || !element.table) {
       return () => {
         cancelled = true;
@@ -502,6 +513,7 @@ function RelationInput({
     }
     if (!relationTable) {
       setRows([]);
+      setTotal(0);
       setError(t("form.relationMetadataMissing", { table: element.table }));
       return () => {
         cancelled = true;
@@ -509,15 +521,22 @@ function RelationInput({
     }
     setLoading(true);
     setError("");
-    void listRows(databaseName, element.table, element.view)
-      .then((nextRows) => {
+    void listRowsPage(databaseName, element.table, {
+      view: element.view,
+      search,
+      limit: RELATION_PAGE_SIZE,
+      offset: 0
+    })
+      .then((page) => {
         if (!cancelled) {
-          setRows(nextRows);
+          setRows(page.rows);
+          setTotal(page.total);
         }
       })
       .catch((nextError) => {
         if (!cancelled) {
           setRows([]);
+          setTotal(0);
           setError(nextError instanceof Error ? nextError.message : t("form.relationLoadFailed"));
         }
       })
@@ -529,13 +548,46 @@ function RelationInput({
     return () => {
       cancelled = true;
     };
-  }, [databaseName, element.table, element.view, open, relationTable, t]);
+  }, [databaseName, element.table, element.view, open, relationTable, search, t]);
 
   useEffect(() => {
     if (!open) {
       setSearchQuery("");
+      setSearch("");
     }
   }, [open]);
+
+  async function loadMoreRelationRows() {
+    if (loadingMoreRef.current || !open || !databaseName || !element.table || !relationTable) {
+      return;
+    }
+    if (rows.length >= total) {
+      return;
+    }
+    loadingMoreRef.current = true;
+    const generation = loadGenerationRef.current;
+    try {
+      const page = await listRowsPage(databaseName, element.table, {
+        view: element.view,
+        search,
+        limit: RELATION_PAGE_SIZE,
+        offset: rows.length
+      });
+      if (generation !== loadGenerationRef.current) {
+        return;
+      }
+      setRows((current) => {
+        const seen = new Set(current.map((row) => row.record_id));
+        const appended = page.rows.filter((row) => !seen.has(row.record_id));
+        return appended.length > 0 ? [...current, ...appended] : current;
+      });
+      setTotal(page.rows.length === 0 ? rows.length : page.total);
+    } catch {
+      // Keep what is loaded; the next scroll retries.
+    } finally {
+      loadingMoreRef.current = false;
+    }
+  }
 
   const selectedRow = useMemo(() => rows.find((row) => String(row.record_id) === value), [rows, value]);
   const selectedLabel = selectedRow ? relationRowLabel(selectedRow, displayFieldNames) : value ? t("form.selectedRecord", { id: value }) : "";
@@ -560,10 +612,7 @@ function RelationInput({
             <DialogTitle>{t("form.relationDialogTitle", { table: element.table })}</DialogTitle>
             <DialogContent className="relation-picker-content">
               {element.view && <Text size={200}>{t("form.relationView", { view: element.view })}</Text>}
-              {loading && <Text>{t("form.loadingRelationRecords")}</Text>}
-              {error && <Text className="form-error">{error}</Text>}
-              {!loading && !error && rows.length === 0 && <Text>{t("form.noRelationRecords")}</Text>}
-              {rows.length > 0 && (
+              {relationTable && (
                 <Input
                   aria-label={t("form.relationSearch")}
                   className="relation-picker-search"
@@ -573,8 +622,12 @@ function RelationInput({
                   onChange={(_, data) => setSearchQuery(data.value)}
                 />
               )}
-              {!loading && !error && rows.length > 0 && filteredRows.length === 0 && <Text>{t("form.noRelationSearchResults")}</Text>}
-              {filteredRows.length > 0 && (
+              {loading && <Text>{t("form.loadingRelationRecords")}</Text>}
+              {error && <Text className="form-error">{error}</Text>}
+              {!loading && !error && rows.length === 0 && (
+                <Text>{search ? t("form.noRelationSearchResults") : t("form.noRelationRecords")}</Text>
+              )}
+              {rows.length > 0 && (
                 <div className="grid-host relation-picker-grid">
                   <RecordDataGrid
                     aria-label={t("form.relationRecords")}
@@ -584,6 +637,12 @@ function RelationInput({
                     onCellClick={({ row }) => {
                       onChange(String(row.ct_record_id));
                       setOpen(false);
+                    }}
+                    onScroll={(event) => {
+                      const element = event.currentTarget;
+                      if (element.scrollTop + element.clientHeight >= element.scrollHeight - 200) {
+                        void loadMoreRelationRows();
+                      }
                     }}
                   />
                 </div>
@@ -596,18 +655,6 @@ function RelationInput({
         </DialogSurface>
       </Dialog>
     </div>
-  );
-}
-
-function filterRelationRows(rows: RowRecord[], searchQuery: string, fieldNames: string[]): RowRecord[] {
-  const query = searchQuery.trim().toLocaleLowerCase();
-  if (!query) {
-    return rows;
-  }
-  return rows.filter((row) =>
-    [row.record_id, ...fieldNames, ...fieldNames.map((fieldName) => row.values[fieldName])].some((value) =>
-      String(value ?? "").toLocaleLowerCase().includes(query)
-    )
   );
 }
 

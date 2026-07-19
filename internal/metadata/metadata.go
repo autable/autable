@@ -75,10 +75,11 @@ type ViewSort struct {
 }
 
 type ResolvedView struct {
-	Name  string     `json:"name"`
-	Query *ViewQuery `json:"query,omitempty"`
-	Sorts []ViewSort `json:"sorts"`
-	Limit int        `json:"limit,omitempty"`
+	Name   string     `json:"name"`
+	Query  *ViewQuery `json:"query,omitempty"`
+	Sorts  []ViewSort `json:"sorts"`
+	Limit  int        `json:"limit,omitempty"`
+	Offset int        `json:"offset,omitempty"`
 }
 
 func Load(path string) (Catalog, error) {

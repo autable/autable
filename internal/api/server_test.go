@@ -4646,3 +4646,75 @@ func TestDatabaseScopedWorkflowSaveCarriesHistoryRetention(t *testing.T) {
 		t.Fatalf("expected persisted retention 30, got %#v", stored.HistoryRetentionDays)
 	}
 }
+
+func TestQueryRowsPageAPIReturnsRowsAndTotal(t *testing.T) {
+	server, system := newTestServer(t)
+	saveTestDatabaseOwners(t, system, "db", "u1")
+	for _, body := range []string{
+		`{"values":{"name":"Ada","email":"ada@example.com","status":"active"}}`,
+		`{"values":{"name":"Grace","email":"grace@example.com","status":"active"}}`,
+		`{"values":{"name":"Linus","email":"linus@example.com","status":"archived"}}`,
+	} {
+		create := httptest.NewRequest(http.MethodPost, "/api/tables/db/contacts/rows", bytes.NewBufferString(body))
+		create.AddCookie(testSessionCookie(t, system, "u1"))
+		createRecorder := httptest.NewRecorder()
+		server.ServeHTTP(createRecorder, create)
+		if createRecorder.Code != http.StatusCreated {
+			t.Fatalf("expected create 201, got %d: %s", createRecorder.Code, createRecorder.Body.String())
+		}
+	}
+
+	page := func(body string) rowPageResponse {
+		t.Helper()
+		request := httptest.NewRequest(http.MethodPost, "/api/tables/db/contacts/rows/page", bytes.NewBufferString(body))
+		request.AddCookie(testSessionCookie(t, system, "u1"))
+		recorder := httptest.NewRecorder()
+		server.ServeHTTP(recorder, request)
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("expected page 200, got %d: %s", recorder.Code, recorder.Body.String())
+		}
+		var response rowPageResponse
+		if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
+			t.Fatal(err)
+		}
+		return response
+	}
+
+	first := page(`{"limit":2}`)
+	if first.Total != 3 || len(first.Rows) != 2 || first.Rows[0].Values["name"] != "Ada" {
+		t.Fatalf("unexpected first page: %#v", first)
+	}
+	second := page(`{"limit":2,"offset":2}`)
+	if second.Total != 3 || len(second.Rows) != 1 || second.Rows[0].Values["name"] != "Linus" {
+		t.Fatalf("unexpected second page: %#v", second)
+	}
+	searched := page(`{"limit":10,"search":"grace"}`)
+	if searched.Total != 1 || len(searched.Rows) != 1 || searched.Rows[0].Values["name"] != "Grace" {
+		t.Fatalf("unexpected search page: %#v", searched)
+	}
+
+	invalid := httptest.NewRequest(http.MethodPost, "/api/tables/db/contacts/rows/page", bytes.NewBufferString(`{"offset":2}`))
+	invalid.AddCookie(testSessionCookie(t, system, "u1"))
+	invalidRecorder := httptest.NewRecorder()
+	server.ServeHTTP(invalidRecorder, invalid)
+	if invalidRecorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected offset-without-limit 400, got %d: %s", invalidRecorder.Code, invalidRecorder.Body.String())
+	}
+
+	// The legacy query endpoint keeps its bare-array response even with the
+	// new paging fields present.
+	query := httptest.NewRequest(http.MethodPost, "/api/tables/db/contacts/rows/query", bytes.NewBufferString(`{"limit":2,"offset":1,"search":"a"}`))
+	query.AddCookie(testSessionCookie(t, system, "u1"))
+	queryRecorder := httptest.NewRecorder()
+	server.ServeHTTP(queryRecorder, query)
+	if queryRecorder.Code != http.StatusOK {
+		t.Fatalf("expected query 200, got %d: %s", queryRecorder.Code, queryRecorder.Body.String())
+	}
+	var rows []rowResponse
+	if err := json.NewDecoder(queryRecorder.Body).Decode(&rows); err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("unexpected query rows: %#v", rows)
+	}
+}

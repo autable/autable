@@ -231,6 +231,11 @@ func (repository *Repository) Rows(ctx context.Context, dbName string, tableMeta
 		}
 		if views[0].Limit > 0 {
 			query = query.Limit(views[0].Limit)
+			// GORM emits OFFSET without LIMIT when only Offset is set, which
+			// SQLite rejects — so the offset is tied to a positive limit.
+			if views[0].Offset > 0 {
+				query = query.Offset(views[0].Offset)
+			}
 		}
 	}
 	var records []map[string]any
@@ -247,6 +252,31 @@ func (repository *Repository) Rows(ctx context.Context, dbName string, tableMeta
 		rows = append(rows, mapToRow(tableMeta, record))
 	}
 	return rows, nil
+}
+
+func (repository *Repository) CountRows(ctx context.Context, dbName string, tableMeta metadata.Table, views ...metadata.ResolvedView) (int64, error) {
+	db, err := repository.database(dbName)
+	if err != nil {
+		return 0, err
+	}
+	if err := repository.EnsureTable(ctx, dbName, tableMeta); err != nil {
+		return 0, err
+	}
+	query := db.WithContext(ctx).Table(physicalTableName(tableMeta.Name))
+	if len(views) > 0 && views[0].Query != nil {
+		whereSQL, args, err := compileViewQuery(tableMeta, *views[0].Query)
+		if err != nil {
+			return 0, err
+		}
+		if whereSQL != "" {
+			query = query.Where(whereSQL, args...)
+		}
+	}
+	var count int64
+	if err := query.Count(&count).Error; err != nil {
+		return 0, err
+	}
+	return count, nil
 }
 
 func compileViewQuery(tableMeta metadata.Table, query metadata.ViewQuery) (string, []any, error) {

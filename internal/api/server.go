@@ -112,15 +112,22 @@ type upsertRowRequest struct {
 }
 
 type listRowsRequest struct {
-	View  string              `json:"view,omitempty"`
-	Query *metadata.ViewQuery `json:"query,omitempty"`
-	Sorts []metadata.ViewSort `json:"sorts,omitempty"`
-	Limit int                 `json:"limit,omitempty"`
+	View   string              `json:"view,omitempty"`
+	Query  *metadata.ViewQuery `json:"query,omitempty"`
+	Sorts  []metadata.ViewSort `json:"sorts,omitempty"`
+	Limit  int                 `json:"limit,omitempty"`
+	Offset int                 `json:"offset,omitempty"`
+	Search string              `json:"search,omitempty"`
 }
 
 type rowResponse struct {
 	RecordID int64          `json:"record_id"`
 	Values   map[string]any `json:"values"`
+}
+
+type rowPageResponse struct {
+	Rows  []rowResponse `json:"rows"`
+	Total int64         `json:"total"`
 }
 
 type rowMutationResponse struct {
@@ -397,6 +404,7 @@ func (server *Server) routes() {
 	server.mux.HandleFunc("POST /api/tables/{database}/{table}/rows", server.tableRoute(server.handleCreateRow))
 	server.mux.HandleFunc("POST /api/tables/{database}/{table}/rows/upsert", server.tableRoute(server.handleUpsertRow))
 	server.mux.HandleFunc("POST /api/tables/{database}/{table}/rows/query", server.tableRoute(server.handleQueryRows))
+	server.mux.HandleFunc("POST /api/tables/{database}/{table}/rows/page", server.tableRoute(server.handleQueryRowsPage))
 	server.mux.HandleFunc("POST /api/tables/{database}/{table}/fields", server.tableRoute(server.handleCreateFields))
 	server.mux.HandleFunc("PATCH /api/tables/{database}/{table}/rows/{recordID}", server.handleUpdateRow)
 	server.mux.HandleFunc("DELETE /api/tables/{database}/{table}/rows/{recordID}", server.handleDeleteRow)
@@ -830,12 +838,39 @@ func (server *Server) handleQueryRows(w http.ResponseWriter, r *http.Request, db
 		Query:    request.Query,
 		Sorts:    request.Sorts,
 		Limit:    request.Limit,
+		Offset:   request.Offset,
+		Search:   request.Search,
 	})
 	if err != nil {
 		writeTableMutationError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, rowResponses(rows))
+}
+
+func (server *Server) handleQueryRowsPage(w http.ResponseWriter, r *http.Request, dbName, tableName string) {
+	actorID, ok := server.requireUserID(w, r)
+	if !ok {
+		return
+	}
+	var request listRowsRequest
+	if err := readJSON(r, &request); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	rows, total, err := server.listTableRowsPageAs(r.Context(), actorID, dbName, tableName, table.RowListOptions{
+		ViewName: request.View,
+		Query:    request.Query,
+		Sorts:    request.Sorts,
+		Limit:    request.Limit,
+		Offset:   request.Offset,
+		Search:   request.Search,
+	})
+	if err != nil {
+		writeTableMutationError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, rowPageResponse{Rows: rowResponses(rows), Total: total})
 }
 
 func (server *Server) handleCreateFields(w http.ResponseWriter, r *http.Request, dbName, tableName string) {
@@ -891,6 +926,14 @@ func (server *Server) listTableRowsAs(ctx context.Context, actorID string, dbNam
 		return nil, err
 	}
 	return server.tables.RowsWithOptions(ctx, server.catalogSnapshot(), perms, actorID, isOwner, dbName, tableName, options)
+}
+
+func (server *Server) listTableRowsPageAs(ctx context.Context, actorID string, dbName string, tableName string, options table.RowListOptions) ([]table.Row, int64, error) {
+	perms, isOwner, err := server.tablePermissions(ctx, actorID, dbName)
+	if err != nil {
+		return nil, 0, err
+	}
+	return server.tables.RowsPageWithOptions(ctx, server.catalogSnapshot(), perms, actorID, isOwner, dbName, tableName, options)
 }
 
 func (server *Server) upsertTableRowAs(ctx context.Context, actorID string, dbName string, tableName string, matchField string, values map[string]any) (table.Row, string, error) {

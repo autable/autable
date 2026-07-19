@@ -769,6 +769,8 @@ function WorkspaceApp() {
               onNewViewSortFieldChange={tableWorkspace.setNewViewSortField}
               onTemporarySortChange={tableWorkspace.setTemporarySort}
               onMoveFieldPosition={tableWorkspace.moveFieldPosition}
+              onLoadMoreRows={tableWorkspace.loadMoreRows}
+              onSearchTextChange={tableWorkspace.setSearchText}
               onRowsChange={tableWorkspace.editGridRows}
               onSelectGridCell={tableWorkspace.selectGridCell}
               onSelectRecordID={tableWorkspace.setSelectedRecordID}
@@ -780,6 +782,8 @@ function WorkspaceApp() {
               relationDetail={tableWorkspace.relationDetail}
               onCloseRelationDetail={() => tableWorkspace.setRelationDetail(null)}
               rows={tableWorkspace.rows}
+              searchText={tableWorkspace.searchText}
+              totalRows={tableWorkspace.total}
               selectedRecordID={tableWorkspace.selectedRecordID}
               selectedRowDraft={tableWorkspace.selectedRowDraft}
               selectedTableView={selectedTableView}

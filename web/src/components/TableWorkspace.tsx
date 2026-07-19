@@ -73,6 +73,8 @@ type TableWorkspaceProps = {
   onNewViewSortFieldChange: (value: string) => void;
   onTemporarySortChange: (value?: TableViewSort) => void;
   onMoveFieldPosition: (sourceFieldName: string, targetFieldName: string) => void | Promise<void>;
+  onLoadMoreRows: () => void;
+  onSearchTextChange: (value: string) => void;
   onSelectGridCell: (args: CellSelectArgs<TableGridRow>) => void;
   onSelectRecordID: (recordID: number) => void;
   onSelectedRowValueChange: (fieldName: string, value: string) => void;
@@ -92,12 +94,14 @@ type TableWorkspaceProps = {
   relationDetail: { field: Field; table: TableMetadata; row: TableGridRow } | null;
   onCloseRelationDetail: () => void;
   rows: TableGridRow[];
+  searchText: string;
   selectedRecordID: number;
   selectedRowDraft: Record<string, string>;
   selectedTableView: string;
   table: TableMetadata;
   tables: TableMetadata[];
   temporarySort?: TableViewSort;
+  totalRows: number;
 };
 
 export function TableWorkspace({
@@ -122,6 +126,8 @@ export function TableWorkspace({
   onNewViewSortFieldChange,
   onTemporarySortChange,
   onMoveFieldPosition,
+  onLoadMoreRows,
+  onSearchTextChange,
   onSelectGridCell,
   onSelectRecordID,
   onSelectedRowValueChange,
@@ -141,12 +147,14 @@ export function TableWorkspace({
   relationDetail,
   onCloseRelationDetail,
   rows,
+  searchText,
   selectedRecordID,
   selectedRowDraft,
   selectedTableView,
   table,
   tables,
-  temporarySort
+  temporarySort,
+  totalRows
 }: TableWorkspaceProps) {
   const { t } = useTranslation();
   const activeFields = table.fields.filter((field) => !field.deleted);
@@ -351,10 +359,19 @@ export function TableWorkspace({
         <div>
           <Text weight="semibold">{table.display_name || table.name}</Text>
           <Text size={200}>
-            {t("table.recordCount", { shown: displayedRows.length, total: rows.length })}
+            {t("table.recordCount", { shown: displayedRows.length, total: totalRows })}
           </Text>
         </div>
         <Toolbar aria-label={t("table.tableActions")} className="table-actions">
+          <Input
+            type="search"
+            size="small"
+            className="table-search"
+            aria-label={t("table.searchRecords")}
+            placeholder={t("table.searchPlaceholder")}
+            value={searchText}
+            onChange={(_, data) => onSearchTextChange(data.value)}
+          />
           <Popover open={filterOpen} onOpenChange={(_, data) => setFilterOpen(data.open)} positioning="below-start" withArrow>
             <PopoverTrigger disableButtonEnhancement>
               <ToolbarButton icon={<FilterRegular />} disabled={!canWriteSelectedView}>
@@ -423,6 +440,12 @@ export function TableWorkspace({
             if (Number.isFinite(recordID)) {
               onSelectRecordID(recordID);
               setRecordMenu({ x: event.clientX, y: event.clientY, recordID });
+            }
+          }}
+          onScroll={(event) => {
+            const element = event.currentTarget;
+            if (element.scrollTop + element.clientHeight >= element.scrollHeight - 200) {
+              onLoadMoreRows();
             }
           }}
         />

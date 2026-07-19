@@ -12,6 +12,8 @@
 - `query` (`object`): 可选查询对象。可以传完整 `ViewQuery`，也可以传简写 `{ field, op/operator, value }`。
 - `sorts` (`object[]`): 可选排序定义，例如 `{ field: "name", direction: "asc" }`。
 - `limit` (`int`): 可选最大返回记录数。
+- `offset` (`int`): 可选跳过的记录数，用于分页。必须和正的 `limit` 一起使用。
+- `search` (`string`): 可选全文搜索词，在所有可读的文本/数字/公式字段上做包含匹配（关联和文件字段除外），与 `query` 是 AND 关系。
 
 ### 输出
 

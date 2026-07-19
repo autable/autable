@@ -372,6 +372,8 @@
     "saveRow": "Save Row",
     "saveView": "Save View",
     "showField": "Show {{name}}",
+    "searchPlaceholder": "Search",
+    "searchRecords": "Search records",
     "sortAscending": "Sort {{name}} ascending",
     "sortDescending": "Sort {{name}} descending",
     "sortDirection": "Sort direction",

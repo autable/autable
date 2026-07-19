@@ -1,5 +1,5 @@
 import type { Notify } from "../notifications";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { CellSelectArgs, RowsChangeData } from "react-data-grid";
 import { useTranslation } from "react-i18next";
 import {
@@ -9,6 +9,7 @@ import {
   fileDownloadURL,
   listRowHistory,
   listRows,
+  listRowsPage,
   loadMetadata,
   moveTableFieldPosition,
   updateRow,
@@ -25,6 +26,8 @@ import {
 } from "../api";
 import { rowDraftFromRecord } from "../appState";
 import { buildTableColumns, rowRecordToValues, type TableGridRow } from "../tableGrid";
+
+export const ROW_PAGE_SIZE = 200;
 
 type UseTableWorkspaceOptions = {
   currentUserID?: string;
@@ -47,6 +50,13 @@ export function useTableWorkspace({
 }: UseTableWorkspaceOptions) {
   const { t } = useTranslation();
   const [rows, setRows] = useState<TableGridRow[]>([]);
+  const [total, setTotal] = useState(0);
+  const [searchText, setSearchText] = useState("");
+  const [search, setSearch] = useState("");
+  const loadingMoreRef = useRef(false);
+  // Bumped whenever the base query (table/view/sort/search) reloads so
+  // in-flight load-more responses for the previous query get discarded.
+  const loadGenerationRef = useRef(0);
   const [rowsViewName, setRowsViewName] = useState("all");
   const [selectedRecordID, setSelectedRecordID] = useState(0);
   const [rowHistory, setRowHistory] = useState<RowChange[]>([]);
@@ -214,26 +224,74 @@ export function useTableWorkspace({
   }, [displayedRecordIDs, selectedRecordID]);
 
   useEffect(() => {
+    const timer = setTimeout(() => setSearch(searchText.trim()), 300);
+    return () => clearTimeout(timer);
+  }, [searchText]);
+
+  useEffect(() => {
     let cancelled = false;
+    loadGenerationRef.current += 1;
     if (!currentUserID || !databaseName || !table.name) {
       resetRows(selectedTableView);
       return () => {
         cancelled = true;
       };
     }
-    void listRows(databaseName, table.name, selectedTableView, temporarySort)
-      .then((nextRows) => {
+    void listRowsPage(databaseName, table.name, {
+      view: selectedTableView,
+      sorts: temporarySort ? [temporarySort] : undefined,
+      search,
+      limit: ROW_PAGE_SIZE,
+      offset: 0
+    })
+      .then((page) => {
         if (cancelled) {
           return;
         }
-        setRows(nextRows.map(rowRecordToValues));
+        setRows(page.rows.map(rowRecordToValues));
+        setTotal(page.total);
         setRowsViewName(selectedTableView);
       })
       .catch(() => undefined);
     return () => {
       cancelled = true;
     };
-  }, [currentUserID, databaseName, table.name, selectedTableView, temporarySort]);
+  }, [currentUserID, databaseName, table.name, selectedTableView, temporarySort, search]);
+
+  async function loadMoreRows() {
+    if (loadingMoreRef.current || !currentUserID || !databaseName || !table.name) {
+      return;
+    }
+    if (rows.length >= total) {
+      return;
+    }
+    loadingMoreRef.current = true;
+    const generation = loadGenerationRef.current;
+    try {
+      const page = await listRowsPage(databaseName, table.name, {
+        view: selectedTableView,
+        sorts: temporarySort ? [temporarySort] : undefined,
+        search,
+        limit: ROW_PAGE_SIZE,
+        offset: rows.length
+      });
+      if (generation !== loadGenerationRef.current) {
+        return;
+      }
+      setRows((current) => {
+        const seen = new Set(current.map((row) => Number(row.ct_record_id)));
+        const appended = page.rows.map(rowRecordToValues).filter((row) => !seen.has(Number(row.ct_record_id)));
+        return appended.length > 0 ? [...current, ...appended] : current;
+      });
+      // An empty page means concurrent deletes shrank the table below our
+      // offset — stop asking for more.
+      setTotal(page.rows.length === 0 ? rows.length : page.total);
+    } catch {
+      // Keep what is loaded; the next scroll retries.
+    } finally {
+      loadingMoreRef.current = false;
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -269,6 +327,9 @@ export function useTableWorkspace({
 
   function resetRows(nextViewName = "all") {
     setRows([]);
+    setTotal(0);
+    setSearchText("");
+    setSearch("");
     setRowsViewName(nextViewName);
     setRowHistory([]);
     setSelectedRecordID(0);
@@ -279,6 +340,7 @@ export function useTableWorkspace({
       return;
     }
     setRows((current) => [...current, row as TableGridRow]);
+    setTotal((current) => current + 1);
     setRowsViewName("local");
     setSelectedRecordID(Number(row.ct_record_id));
     setRowHistory([]);
@@ -370,9 +432,17 @@ export function useTableWorkspace({
       if (temporarySort && !nextTemporarySort) {
         setTemporarySort(undefined);
       }
-      const nextRows = await listRows(databaseName, nextTable.name, nextViewName, nextTemporarySort);
+      loadGenerationRef.current += 1;
+      const page = await listRowsPage(databaseName, nextTable.name, {
+        view: nextViewName,
+        sorts: nextTemporarySort ? [nextTemporarySort] : undefined,
+        search,
+        limit: ROW_PAGE_SIZE,
+        offset: 0
+      });
       onCatalogChanged(nextCatalog, nextTable.name, nextViewName);
-      setRows(nextRows.map(rowRecordToValues));
+      setRows(page.rows.map(rowRecordToValues));
+      setTotal(page.total);
       setRowsViewName(nextViewName);
       setRowHistory([]);
       onStatus(successMessage);
@@ -487,11 +557,12 @@ export function useTableWorkspace({
     const writableFields = activeFields.filter((field) => field.type !== "formula");
     const values = Object.fromEntries(writableFields.map((field) => [field.name, field.name === "status" ? "Review" : ""]));
     if (writableFields.some((field) => field.name === "name")) {
-      values.name = `New record ${rows.length + 1}`;
+      values.name = `New record ${total + 1}`;
     }
     try {
       const saved = await createRow(databaseName, table.name, values);
       setRows((current) => [...current, rowRecordToValues(saved)]);
+      setTotal((current) => current + 1);
       setRowsViewName("local");
       setSelectedRecordID(saved.record_id);
       setRowHistory([]);
@@ -536,6 +607,7 @@ export function useTableWorkspace({
     try {
       const deleted = await deleteRow(databaseName, table.name, recordID);
       setRows((current) => current.filter((item) => Number(item.ct_record_id) !== deleted.record_id));
+      setTotal((current) => Math.max(0, current - 1));
       setRowsViewName("local");
       setSelectedRecordID(0);
       setRowHistory([]);
@@ -576,6 +648,8 @@ export function useTableWorkspace({
     rowHistory,
     relationDetail,
     rows,
+    total,
+    searchText,
     selectedRecordID,
     selectedRowDraft,
     temporarySort,
@@ -586,8 +660,10 @@ export function useTableWorkspace({
     deleteSelectedRow,
     editGridRows,
     moveFieldPosition,
+    loadMoreRows,
     loadSelectedRowHistory,
     resetRows,
+    setSearchText,
     setNewFieldName,
     setNewFieldFormula,
     setNewFieldType,

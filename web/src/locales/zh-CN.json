@@ -372,6 +372,8 @@
     "saveRow": "保存记录",
     "saveView": "保存视图",
     "showField": "显示 {{name}}",
+    "searchPlaceholder": "搜索",
+    "searchRecords": "搜索记录",
     "sortAscending": "按 {{name}} 升序排序",
     "sortDescending": "按 {{name}} 降序排序",
     "sortDirection": "排序方向",

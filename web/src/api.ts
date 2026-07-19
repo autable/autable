@@ -207,6 +207,13 @@ export type RowListOptions = {
   query?: TableViewQuery | { field: string; op?: string; operator?: string; value?: unknown };
   sorts?: TableViewSort[];
   limit?: number;
+  offset?: number;
+  search?: string;
+};
+
+export type RowPage = {
+  rows: RowRecord[];
+  total: number;
 };
 
 export type RowMutation = RowRecord & {
@@ -472,6 +479,26 @@ export async function listRows(
     throw new Error(error.error ?? `row list failed: ${response.status}`);
   }
   return response.json() as Promise<RowRecord[]>;
+}
+
+export async function listRowsPage(dbName: string, tableName: string, options: RowListOptions): Promise<RowPage> {
+  const response = await fetch(`/api/tables/${dbName}/${tableName}/rows/page`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      view: options.view && options.view !== "all" ? options.view : undefined,
+      query: normalizeRowListQuery(options.query),
+      sorts: options.sorts?.length ? options.sorts : undefined,
+      limit: options.limit,
+      offset: options.offset || undefined,
+      search: options.search || undefined
+    })
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: response.statusText }));
+    throw new Error(error.error ?? `row page failed: ${response.status}`);
+  }
+  return response.json() as Promise<RowPage>;
 }
 
 function normalizeRowListQuery(query: RowListOptions["query"]): TableViewQuery | undefined {

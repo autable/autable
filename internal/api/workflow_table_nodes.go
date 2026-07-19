@@ -130,6 +130,16 @@ func workflowRowListOptionsInput(input map[string]any) (table.RowListOptions, er
 		}
 		options.Limit = limit
 	}
+	if rawOffset, ok := input["offset"]; ok && rawOffset != nil {
+		offset, err := workflowIntInput(rawOffset)
+		if err != nil {
+			return table.RowListOptions{}, fmt.Errorf("offset: %w", err)
+		}
+		options.Offset = offset
+	}
+	if search, ok := input["search"].(string); ok {
+		options.Search = search
+	}
 	return options, nil
 }
 

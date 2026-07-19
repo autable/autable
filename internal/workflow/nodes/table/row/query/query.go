@@ -28,6 +28,8 @@ func (node Node) Info() workflow.NodeInfo {
 			{Name: "query", Type: "object"},
 			{Name: "sorts", Type: "object[]"},
 			{Name: "limit", Type: "int"},
+			{Name: "offset", Type: "int"},
+			{Name: "search", Type: "string"},
 		},
 		Outputs:   []workflow.Port{{Name: "rows", Type: "RowRecord[]"}},
 		Stateless: true,

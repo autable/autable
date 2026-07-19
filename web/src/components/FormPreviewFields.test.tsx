@@ -2,8 +2,8 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event";
 import { FluentProvider, webLightTheme } from "@fluentui/react-components";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { listRows } from "../api";
-import type { TableMetadata } from "../api";
+import { listRowsPage } from "../api";
+import type { RowListOptions, TableMetadata } from "../api";
 import i18n from "../i18n";
 import type { BarcodeScanResult } from "../hooks/useBarcodeScanner";
 import { FormPreviewFields } from "./FormPreviewFields";
@@ -30,12 +30,13 @@ vi.mock("../hooks/useBarcodeScanner", () => ({
 }));
 
 vi.mock("../api", () => ({
-  listRows: vi.fn()
+  listRowsPage: vi.fn(),
+  uploadFile: vi.fn()
 }));
 
 beforeEach(async () => {
   latestScannerOptions = undefined;
-  vi.mocked(listRows).mockReset();
+  vi.mocked(listRowsPage).mockReset();
   await i18n.changeLanguage("en-US");
 });
 
@@ -139,7 +140,7 @@ describe("FormPreviewFields", () => {
       ],
       views: []
     };
-    vi.mocked(listRows).mockResolvedValue([
+    const relationRows = [
       {
         record_id: 1,
         values: {
@@ -156,7 +157,16 @@ describe("FormPreviewFields", () => {
           internal_note: "private"
         }
       }
-    ]);
+    ];
+    vi.mocked(listRowsPage).mockImplementation(async (_dbName: string, _tableName: string, options: RowListOptions) => {
+      const term = (options.search ?? "").toLowerCase();
+      const rows = term
+        ? relationRows.filter((row) => Object.values(row.values).some((value) => String(value).toLowerCase().includes(term)))
+        : relationRows;
+      const offset = options.offset ?? 0;
+      const limit = options.limit ?? rows.length;
+      return { rows: rows.slice(offset, offset + limit), total: rows.length };
+    });
 
     const { rerender } = render(
       <FluentProvider theme={webLightTheme}>
@@ -188,9 +198,17 @@ describe("FormPreviewFields", () => {
     const relationSearch = await screen.findByRole("searchbox", { name: "Search relation records" });
 
     fireEvent.change(relationSearch, { target: { value: "Acme" } });
+    await waitFor(() =>
+      expect(vi.mocked(listRowsPage)).toHaveBeenCalledWith(
+        "workspace",
+        "purchase_requests",
+        expect.objectContaining({ search: "Acme", view: "without_logistics", offset: 0 })
+      )
+    );
     expect(await screen.findByText("PR-001")).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText("PR-002")).not.toBeInTheDocument());
 
-    fireEvent.change(relationSearch, { target: { value: "hidden" } });
+    fireEvent.change(relationSearch, { target: { value: "no-such-record" } });
     expect(await screen.findByText("No matching records")).toBeInTheDocument();
     expect(screen.queryByText("PR-001")).not.toBeInTheDocument();
 

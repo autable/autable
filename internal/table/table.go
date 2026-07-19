@@ -36,6 +36,8 @@ type RowListOptions struct {
 	Query    *metadata.ViewQuery
 	Sorts    []metadata.ViewSort
 	Limit    int
+	Offset   int
+	Search   string
 }
 
 type RowRepository interface {
@@ -46,6 +48,7 @@ type RowRepository interface {
 	Row(ctx context.Context, dbName string, tableMeta metadata.Table, recordID int64) (Row, error)
 	RestoreRow(ctx context.Context, dbName string, tableMeta metadata.Table, row Row) error
 	Rows(ctx context.Context, dbName string, tableMeta metadata.Table, views ...metadata.ResolvedView) ([]Row, error)
+	CountRows(ctx context.Context, dbName string, tableMeta metadata.Table, views ...metadata.ResolvedView) (int64, error)
 }
 
 // FileBinder permanently binds an uploaded file to the record whose file
@@ -259,9 +262,50 @@ func (service *Service) Rows(ctx context.Context, catalog metadata.Catalog, perm
 }
 
 func (service *Service) RowsWithOptions(ctx context.Context, catalog metadata.Catalog, perms permission.Set, actorID string, isDatabaseOwner bool, dbName, tableName string, options RowListOptions) ([]Row, error) {
+	tableMeta, resolved, empty, err := resolveRowListOptions(catalog, perms, actorID, isDatabaseOwner, dbName, tableName, options)
+	if err != nil {
+		return nil, err
+	}
+	if empty {
+		return []Row{}, nil
+	}
+	rows, err := service.rows.Rows(ctx, dbName, tableMeta, resolved)
+	if err != nil {
+		return nil, err
+	}
+	return filterReadableRowValues(perms, actorID, isDatabaseOwner, dbName+"."+tableName, rows), nil
+}
+
+// RowsPageWithOptions returns one page of rows plus the total number of rows
+// matching the same filters (view query, runtime query, and search) without
+// limit/offset applied.
+func (service *Service) RowsPageWithOptions(ctx context.Context, catalog metadata.Catalog, perms permission.Set, actorID string, isDatabaseOwner bool, dbName, tableName string, options RowListOptions) ([]Row, int64, error) {
+	tableMeta, resolved, empty, err := resolveRowListOptions(catalog, perms, actorID, isDatabaseOwner, dbName, tableName, options)
+	if err != nil {
+		return nil, 0, err
+	}
+	if empty {
+		return []Row{}, 0, nil
+	}
+	countView := metadata.ResolvedView{Name: resolved.Name, Query: resolved.Query}
+	total, err := service.rows.CountRows(ctx, dbName, tableMeta, countView)
+	if err != nil {
+		return nil, 0, err
+	}
+	rows, err := service.rows.Rows(ctx, dbName, tableMeta, resolved)
+	if err != nil {
+		return nil, 0, err
+	}
+	return filterReadableRowValues(perms, actorID, isDatabaseOwner, dbName+"."+tableName, rows), total, nil
+}
+
+// resolveRowListOptions runs the shared view/query/sort/limit resolution and
+// permission checks. The returned bool signals a guaranteed-empty result (a
+// non-empty search with no searchable readable fields).
+func resolveRowListOptions(catalog metadata.Catalog, perms permission.Set, actorID string, isDatabaseOwner bool, dbName, tableName string, options RowListOptions) (metadata.Table, metadata.ResolvedView, bool, error) {
 	tableMeta, ok := catalog.Table(dbName, tableName)
 	if !ok {
-		return nil, fmt.Errorf("table %s.%s not found", dbName, tableName)
+		return metadata.Table{}, metadata.ResolvedView{}, false, fmt.Errorf("table %s.%s not found", dbName, tableName)
 	}
 	resource := dbName + "." + tableName
 
@@ -270,18 +314,18 @@ func (service *Service) RowsWithOptions(ctx context.Context, catalog metadata.Ca
 		var err error
 		resolved, err = tableMeta.ResolveView(options.ViewName)
 		if err != nil {
-			return nil, err
+			return metadata.Table{}, metadata.ResolvedView{}, false, err
 		}
 		if !perms.CanReadView(actorID, resource, options.ViewName) && !isDatabaseOwner {
-			return nil, fmt.Errorf("%w: view %s", ErrPermissionDenied, options.ViewName)
+			return metadata.Table{}, metadata.ResolvedView{}, false, fmt.Errorf("%w: view %s", ErrPermissionDenied, options.ViewName)
 		}
 		if !isDatabaseOwner && !viewFieldsReadable(perms, actorID, resource, resolved.Query, resolved.Sorts) {
-			return nil, fmt.Errorf("%w: view %s", ErrPermissionDenied, options.ViewName)
+			return metadata.Table{}, metadata.ResolvedView{}, false, fmt.Errorf("%w: view %s", ErrPermissionDenied, options.ViewName)
 		}
 	}
 	if options.Query != nil {
 		if !isDatabaseOwner && !viewFieldsReadable(perms, actorID, resource, options.Query, nil) {
-			return nil, fmt.Errorf("%w: query", ErrPermissionDenied)
+			return metadata.Table{}, metadata.ResolvedView{}, false, fmt.Errorf("%w: query", ErrPermissionDenied)
 		}
 		resolved.Query = combineRuntimeQueries(resolved.Query, options.Query)
 	}
@@ -289,26 +333,65 @@ func (service *Service) RowsWithOptions(ctx context.Context, catalog metadata.Ca
 		for _, sortDef := range options.Sorts {
 			field, ok := tableMeta.Field(sortDef.Field)
 			if !ok || field.Deleted {
-				return nil, fmt.Errorf("unknown temporary sort field %q", sortDef.Field)
+				return metadata.Table{}, metadata.ResolvedView{}, false, fmt.Errorf("unknown temporary sort field %q", sortDef.Field)
 			}
 			if sortDef.Direction != "asc" && sortDef.Direction != "desc" {
-				return nil, fmt.Errorf("unsupported temporary sort direction %q", sortDef.Direction)
+				return metadata.Table{}, metadata.ResolvedView{}, false, fmt.Errorf("unsupported temporary sort direction %q", sortDef.Direction)
 			}
 		}
 		if !isDatabaseOwner && !viewFieldsReadable(perms, actorID, resource, nil, options.Sorts) {
-			return nil, fmt.Errorf("%w: sort", ErrPermissionDenied)
+			return metadata.Table{}, metadata.ResolvedView{}, false, fmt.Errorf("%w: sort", ErrPermissionDenied)
 		}
 		resolved.Sorts = options.Sorts
 	}
 	if options.Limit < 0 {
-		return nil, fmt.Errorf("limit must be greater than or equal to 0")
+		return metadata.Table{}, metadata.ResolvedView{}, false, fmt.Errorf("limit must be greater than or equal to 0")
+	}
+	if options.Offset < 0 {
+		return metadata.Table{}, metadata.ResolvedView{}, false, fmt.Errorf("offset must be greater than or equal to 0")
+	}
+	if options.Offset > 0 && options.Limit <= 0 {
+		return metadata.Table{}, metadata.ResolvedView{}, false, fmt.Errorf("offset requires a positive limit")
 	}
 	resolved.Limit = options.Limit
-	rows, err := service.rows.Rows(ctx, dbName, tableMeta, resolved)
-	if err != nil {
-		return nil, err
+	resolved.Offset = options.Offset
+	if term := strings.TrimSpace(options.Search); term != "" {
+		searchQuery, ok := searchViewQuery(tableMeta, perms, actorID, resource, isDatabaseOwner, term)
+		if !ok {
+			return tableMeta, resolved, true, nil
+		}
+		resolved.Query = combineRuntimeQueries(resolved.Query, searchQuery)
 	}
+	return tableMeta, resolved, false, nil
+}
 
+// searchViewQuery expands a free-text search term into an OR group of
+// contains-rules over the fields the actor can read. Relation and file
+// fields are excluded: they store internal integer ids, so a match there
+// would be invisible to the user looking at the rendered labels.
+func searchViewQuery(tableMeta metadata.Table, perms permission.Set, actorID, resource string, isDatabaseOwner bool, term string) (*metadata.ViewQuery, bool) {
+	rules := []metadata.ViewQueryRule{}
+	for _, field := range tableMeta.ActiveFields() {
+		if field.Type == "relation" || field.Type == "file" {
+			continue
+		}
+		switch field.StorageType() {
+		case "int", "float", "string":
+		default:
+			continue
+		}
+		if !isDatabaseOwner && !perms.CanReadField(actorID, resource, field.Name) {
+			continue
+		}
+		rules = append(rules, metadata.ViewQueryRule{Field: field.Name, Operator: "contains", Value: term})
+	}
+	if len(rules) == 0 {
+		return nil, false
+	}
+	return &metadata.ViewQuery{Combinator: "or", Rules: rules}, true
+}
+
+func filterReadableRowValues(perms permission.Set, actorID string, isDatabaseOwner bool, resource string, rows []Row) []Row {
 	filtered := make([]Row, 0, len(rows))
 	for _, row := range rows {
 		values := map[string]any{}
@@ -319,7 +402,7 @@ func (service *Service) RowsWithOptions(ctx context.Context, catalog metadata.Ca
 		}
 		filtered = append(filtered, Row{RecordID: row.RecordID, Values: values})
 	}
-	return filtered, nil
+	return filtered
 }
 
 func combineRuntimeQueries(left *metadata.ViewQuery, right *metadata.ViewQuery) *metadata.ViewQuery {

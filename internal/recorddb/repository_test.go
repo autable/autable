@@ -590,3 +590,75 @@ func contactsTable() metadata.Table {
 		},
 	}
 }
+
+func TestRepositoryRowsAppliesOffsetWithLimit(t *testing.T) {
+	ctx := context.Background()
+	tableMeta := contactsTable()
+	repository := openTestRepository(t, ctx, tableMeta)
+	for _, name := range []string{"Ada", "Grace", "Linus", "Margaret", "Radia"} {
+		if _, err := repository.CreateRow(ctx, "workspace", tableMeta, map[string]any{"name": name}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	rows, err := repository.Rows(ctx, "workspace", tableMeta, metadata.ResolvedView{Limit: 2, Offset: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 2 || rows[0].Values["name"] != "Linus" || rows[1].Values["name"] != "Margaret" {
+		t.Fatalf("unexpected offset page: %#v", rows)
+	}
+
+	beyond, err := repository.Rows(ctx, "workspace", tableMeta, metadata.ResolvedView{Limit: 2, Offset: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(beyond) != 0 {
+		t.Fatalf("expected empty page beyond total, got %#v", beyond)
+	}
+}
+
+func TestRepositoryCountRowsHonorsQueryAndIgnoresPaging(t *testing.T) {
+	ctx := context.Background()
+	tableMeta := metadata.Table{
+		Name: "contacts",
+		Fields: []metadata.Field{
+			{Name: "name", Type: "string"},
+			{Name: "status", Type: "string"},
+		},
+	}
+	repository := openTestRepository(t, ctx, tableMeta)
+	for _, values := range []map[string]any{
+		{"name": "Ada", "status": "active"},
+		{"name": "Grace", "status": "active"},
+		{"name": "Linus", "status": "archived"},
+	} {
+		if _, err := repository.CreateRow(ctx, "workspace", tableMeta, values); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	total, err := repository.CountRows(ctx, "workspace", tableMeta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 3 {
+		t.Fatalf("expected total 3, got %d", total)
+	}
+
+	active, err := repository.CountRows(ctx, "workspace", tableMeta, metadata.ResolvedView{
+		Query: &metadata.ViewQuery{
+			Combinator: "and",
+			Rules:      []metadata.ViewQueryRule{{Field: "status", Operator: "=", Value: "active"}},
+		},
+		Sorts:  []metadata.ViewSort{{Field: "name", Direction: "desc"}},
+		Limit:  1,
+		Offset: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if active != 2 {
+		t.Fatalf("expected filtered total 2 regardless of limit/offset, got %d", active)
+	}
+}

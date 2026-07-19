@@ -149,6 +149,30 @@ async function defaultFetch(input: RequestInfo | URL, init?: RequestInit): Promi
   if (url === "/api/tables/workspace/contacts/rows" && init?.method === "POST") {
     return jsonResponse({ record_id: 4, values: JSON.parse(String(init.body)).values }, 201);
   }
+  if (url === "/api/tables/workspace/contacts/rows/page" && init?.method === "POST") {
+    const body = JSON.parse(String(init.body ?? "{}")) as {
+      search?: string;
+      offset?: number;
+      limit?: number;
+      sorts?: Array<{ field: string; direction: string }>;
+    };
+    let rows = [...rowFixture];
+    if (body.search) {
+      const term = body.search.toLowerCase();
+      rows = rows.filter((row) => Object.values(row.values).some((value) => String(value).toLowerCase().includes(term)));
+    }
+    const sort = body.sorts?.[0];
+    if (sort) {
+      rows.sort((a, b) => {
+        const left = String((a.values as Record<string, unknown>)[sort.field] ?? "");
+        const right = String((b.values as Record<string, unknown>)[sort.field] ?? "");
+        return sort.direction === "desc" ? right.localeCompare(left) : left.localeCompare(right);
+      });
+    }
+    const offset = body.offset ?? 0;
+    const limit = body.limit ?? rows.length;
+    return jsonResponse({ rows: rows.slice(offset, offset + limit), total: rows.length });
+  }
   if (url.startsWith("/api/tables/workspace/contacts/rows")) {
     return jsonResponse(rowFixture);
   }
@@ -298,9 +322,11 @@ describe("App", () => {
   });
 
   it("requests temporary table sorting from the rows API", async () => {
-    const requests: string[] = [];
+    const pageBodies: Array<{ sorts?: Array<{ field: string; direction: string }> }> = [];
     vi.mocked(fetch).mockImplementation(async (input, init) => {
-      requests.push(String(input));
+      if (String(input) === "/api/tables/workspace/contacts/rows/page" && init?.method === "POST") {
+        pageBodies.push(JSON.parse(String(init.body)));
+      }
       return defaultFetch(input, init);
     });
 
@@ -310,20 +336,13 @@ describe("App", () => {
     const sortButton = await findEnabledButton("Toggle name sort");
 
     await user.click(sortButton);
-    await waitFor(() =>
-      expect(requests).toContain("/api/tables/workspace/contacts/rows?sort_field=name&sort_direction=desc")
-    );
+    await waitFor(() => expect(pageBodies.at(-1)?.sorts).toEqual([{ field: "name", direction: "desc" }]));
 
     await user.click(sortButton);
-    await waitFor(() =>
-      expect(requests).toContain("/api/tables/workspace/contacts/rows?sort_field=name&sort_direction=asc")
-    );
+    await waitFor(() => expect(pageBodies.at(-1)?.sorts).toEqual([{ field: "name", direction: "asc" }]));
 
     await user.click(sortButton);
-    await waitFor(() => {
-      const rowRequests = requests.filter((url) => url.startsWith("/api/tables/workspace/contacts/rows"));
-      expect(rowRequests.at(-1)).toBe("/api/tables/workspace/contacts/rows");
-    });
+    await waitFor(() => expect(pageBodies.at(-1)?.sorts).toBeUndefined());
   });
 
   it("stores hidden table fields locally", async () => {
@@ -434,11 +453,11 @@ describe("App", () => {
       if (url === "/api/auth/config") {
         return jsonResponse({ password_enabled: true, oidc_enabled: false, oidc_providers: [] });
       }
-      if (url === "/api/tables/workspace/contacts/rows") {
-        return new Response(
-          JSON.stringify([{ record_id: 42, values: { name: "Backend Row", email: "backend@example.com" } }]),
-          { status: 200 }
-        );
+      if (url === "/api/tables/workspace/contacts/rows/page") {
+        return jsonResponse({
+          rows: [{ record_id: 42, values: { name: "Backend Row", email: "backend@example.com" } }],
+          total: 1
+        });
       }
       return defaultFetch(input, init);
     });
@@ -635,11 +654,11 @@ describe("App", () => {
       if (url === "/api/auth/config") {
         return jsonResponse({ password_enabled: true, oidc_enabled: false, oidc_providers: [] });
       }
-      if (url === "/api/tables/workspace/contacts/rows") {
-        return new Response(
-          JSON.stringify([{ record_id: 42, values: { name: "Backend Row", email: "backend@example.com" } }]),
-          { status: 200 }
-        );
+      if (url === "/api/tables/workspace/contacts/rows/page") {
+        return jsonResponse({
+          rows: [{ record_id: 42, values: { name: "Backend Row", email: "backend@example.com" } }],
+          total: 1
+        });
       }
       if (url === "/api/tables/workspace/contacts/rows/42/history") {
         return new Response(
@@ -983,4 +1002,55 @@ describe("App", () => {
     await waitFor(() => expect(submittedURL).toBe("/api/tables/workspace/contacts/rows"));
     expect(screen.getAllByText("Form created contacts record 9").length).toBeGreaterThan(0);
   });
+
+  it("searches records server-side from the table toolbar", async () => {
+    const pageBodies: Array<{ search?: string }> = [];
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      if (String(input) === "/api/tables/workspace/contacts/rows/page" && init?.method === "POST") {
+        pageBodies.push(JSON.parse(String(init.body)));
+      }
+      return defaultFetch(input, init);
+    });
+
+    renderApp();
+    await waitForDefaultTableReady();
+
+    await userEvent.type(screen.getByRole("searchbox", { name: "Search records" }), "grace");
+    await waitFor(() => expect(pageBodies.at(-1)?.search).toBe("grace"));
+    await waitFor(() => expect(screen.getAllByText("1 of 1 records").length).toBeGreaterThan(0));
+
+    await userEvent.clear(screen.getByRole("searchbox", { name: "Search records" }));
+    await waitFor(() => expect(screen.getAllByText("3 of 3 records").length).toBeGreaterThan(0));
+  }, 15_000);
+
+  it("loads the next page when the grid scrolls near the bottom", async () => {
+    const manyRows = Array.from({ length: 250 }, (_, index) => ({
+      record_id: index + 1,
+      values: { name: `Person ${index + 1}`, email: `person${index + 1}@example.com`, status: "Active" }
+    }));
+    const pageBodies: Array<{ offset?: number; limit?: number }> = [];
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url === "/api/tables/workspace/contacts/rows/page" && init?.method === "POST") {
+        const body = JSON.parse(String(init.body)) as { offset?: number; limit?: number };
+        pageBodies.push(body);
+        const offset = body.offset ?? 0;
+        const limit = body.limit ?? manyRows.length;
+        return jsonResponse({ rows: manyRows.slice(offset, offset + limit), total: manyRows.length });
+      }
+      return defaultFetch(input, init);
+    });
+
+    renderApp();
+    await waitForDefaultTableReady("200 of 250 records");
+
+    const grid = screen.getByRole("grid", { name: "Table records" });
+    Object.defineProperty(grid, "scrollHeight", { value: 8000, configurable: true });
+    Object.defineProperty(grid, "clientHeight", { value: 600, configurable: true });
+    grid.scrollTop = 7500;
+    fireEvent.scroll(grid);
+
+    await waitFor(() => expect(pageBodies.some((body) => body.offset === 200)).toBe(true));
+    await waitFor(() => expect(screen.getAllByText("250 of 250 records").length).toBeGreaterThan(0));
+  }, 15_000);
 });
