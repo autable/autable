@@ -20,7 +20,7 @@ const catalogFixture = {
             { name: "status", type: "string", deleted: false }
           ],
           views: [
-            { name: "all", display_name: "", sorts: [] },
+            { name: "all", display_name: "" },
             { name: "active", display_name: "Active", sorts: [] },
             { name: "active-ops", display_name: "Active ops", base_view: "active", sorts: [] }
           ]

@@ -2666,7 +2666,7 @@ func visibleTableMetadata(perms permission.Set, actorID, dbName string, isOwner 
 		// The built-in unfiltered view is served as an ordinary view entry
 		// so clients need no special casing.
 		annotated.Views = annotateViewPermissionLevels(perms, actorID, resource, dbLevel,
-			append([]metadata.View{{Name: metadata.AllViewName}}, annotated.Views...))
+			append([]metadata.View{{Name: metadata.AllViewName, Sorts: []metadata.ViewSort{}}}, annotated.Views...))
 		return annotated
 	}
 	visible := annotated
@@ -2680,7 +2680,7 @@ func visibleTableMetadata(perms permission.Set, actorID, dbName string, isOwner 
 	}
 	visible.Views = make([]metadata.View, 0, len(tableMeta.Views)+1)
 	if perms.CanReadView(actorID, resource, metadata.AllViewName) {
-		visible.Views = append(visible.Views, metadata.View{Name: metadata.AllViewName, PermissionLevel: int(permission.Read)})
+		visible.Views = append(visible.Views, metadata.View{Name: metadata.AllViewName, Sorts: []metadata.ViewSort{}, PermissionLevel: int(permission.Read)})
 	}
 	for _, view := range tableMeta.Views {
 		viewLevel := maxPermissionLevel(viewSetLevel, perms.ViewLevel(actorID, resource, view.Name))

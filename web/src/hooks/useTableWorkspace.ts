@@ -204,8 +204,8 @@ export function useTableWorkspace({
     const viewDef = table.views.find((item) => item.name === selectedTableView);
     setNewViewBase(viewDef?.base_view ?? "all");
     setNewViewQuery(normalizeViewQuery(viewDef?.query));
-    setNewViewSortField(viewDef?.sorts[0]?.field ?? "");
-    setNewViewSortDirection(viewDef?.sorts[0]?.direction ?? "asc");
+    setNewViewSortField(viewDef?.sorts?.[0]?.field ?? "");
+    setNewViewSortDirection(viewDef?.sorts?.[0]?.direction ?? "asc");
   }, [selectedTableView, table.views]);
 
   useEffect(() => {
