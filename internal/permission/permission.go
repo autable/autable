@@ -162,12 +162,11 @@ func (set Set) CanModifyField(subjectID, resource, field string) bool {
 	return false
 }
 
+// CanReadView is the only view capability: view definitions themselves are
+// managed exclusively by the database owner, so view grants carry no write
+// level.
 func (set Set) CanReadView(subjectID, resource, view string) bool {
 	return set.ViewLevel(subjectID, resource, view) >= Read
-}
-
-func (set Set) CanWriteView(subjectID, resource, view string) bool {
-	return set.ViewLevel(subjectID, resource, view) >= Write
 }
 
 func (set Set) CanCreateRecord(subjectID, resource string) bool {

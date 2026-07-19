@@ -57,6 +57,11 @@ var migrations = []func(orm *gorm.DB) error{
 				"WHERE existing.`subject_id` = source.`subject_id` AND existing.`scope` = 'field_add' " +
 				"AND existing.`resource` = source.`resource` AND existing.`field` = '')").Error
 	},
+	// 4 → 5: view grants became read-only (view definitions are managed by
+	// the database owner); legacy write levels collapse to read.
+	func(orm *gorm.DB) error {
+		return orm.Exec("UPDATE `permission_grant_models` SET `level` = 1 WHERE `scope` IN ('view', 'view_set') AND `level` > 1").Error
+	},
 }
 
 func currentSchemaVersion() int64 {

@@ -42,17 +42,17 @@ func TestFieldGrantsDoNotOverrideFieldSet(t *testing.T) {
 func TestViewLevelPermission(t *testing.T) {
 	perms := New(
 		Grant{SubjectID: "u1", Scope: ScopeViewSet, Resource: "db.contacts", Level: Read},
-		Grant{SubjectID: "u1", Scope: ScopeView, Resource: "db.contacts", Field: "kanban", Level: Write},
+		Grant{SubjectID: "u1", Scope: ScopeView, Resource: "db.contacts", Field: "kanban", Level: Read},
 	)
 
 	if !perms.CanReadView("u1", "db.contacts", "list") {
 		t.Fatal("expected view set read permission")
 	}
-	if perms.CanWriteView("u1", "db.contacts", "list") {
-		t.Fatal("did not expect view set read permission to allow writes")
+	if !perms.CanReadView("u1", "db.contacts", "kanban") {
+		t.Fatal("expected specific view read permission")
 	}
-	if !perms.CanWriteView("u1", "db.contacts", "kanban") {
-		t.Fatal("expected specific view write permission")
+	if perms.CanReadView("u2", "db.contacts", "list") {
+		t.Fatal("did not expect ungranted subject to read views")
 	}
 }
 

@@ -267,8 +267,8 @@ func TestMigrateRewritesLegacyFieldGrantLevels(t *testing.T) {
 	if levels["field|name"] != permission.FieldRead {
 		t.Fatalf("expected field read level unchanged, got %#v", levels)
 	}
-	if levels["view|active"] != permission.Write {
-		t.Fatalf("expected view level untouched, got %#v", levels)
+	if levels["view|active"] != permission.Read {
+		t.Fatalf("expected view level collapsed to read, got %#v", levels)
 	}
 	if levels["field_add|"] != permission.Write {
 		t.Fatalf("expected seeded field_add grant for full field_set holders, got %#v", levels)

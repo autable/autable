@@ -2998,6 +2998,12 @@ func (server *Server) validateGrantResource(ctx context.Context, dbName string, 
 		if grant.Level < permission.None || grant.Level > permission.FieldAll {
 			return fmt.Errorf("field grant level must be a bitmask between 0 and %d, got %d", permission.FieldAll, grant.Level)
 		}
+	case permission.ScopeView, permission.ScopeViewSet:
+		// Views are the row-level boundary and only the owner defines
+		// them; a view grant can only confer read.
+		if grant.Level < permission.None || grant.Level > permission.Read {
+			return fmt.Errorf("view grants are read-only, got level %d", grant.Level)
+		}
 	default:
 		if grant.Level < permission.None || grant.Level > permission.Write {
 			return fmt.Errorf("grant level must be between 0 and %d, got %d", permission.Write, grant.Level)

@@ -1556,6 +1556,66 @@ select {
   margin-inline-start: -1px;
 }
 
+.permission-matrix {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.permission-tables-layout {
+  display: grid;
+  grid-template-columns: 200px minmax(0, 1fr);
+  gap: 16px;
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+
+.permission-table-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 0;
+  overflow: auto;
+  padding-inline-end: 8px;
+  border-inline-end: 1px solid var(--colorNeutralStroke2);
+}
+
+.permission-table-list .fui-Button {
+  justify-content: flex-start;
+}
+
+.permission-table-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 0;
+  overflow: auto;
+  max-width: 560px;
+}
+
+.permission-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--colorNeutralStroke2);
+  border-radius: var(--borderRadiusMedium);
+  background: var(--colorNeutralBackground1);
+}
+
+.permission-section-label {
+  color: var(--colorNeutralForeground3);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.field-bits {
+  display: flex;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+
 .permission-partial-popover {
   display: flex;
   flex-direction: column;

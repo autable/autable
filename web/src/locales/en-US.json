@@ -165,6 +165,10 @@
     "addWorkflowMember": "Add workflow",
     "allItems": "All",
     "empty": "Create a role to configure table, field, workflow, and form permissions.",
+    "dataSection": "Data",
+    "fieldDefine": "Field definitions",
+    "fieldValues": "Field values",
+    "allowed": "Allowed",
     "fieldAdd": "Add fields",
     "fieldSet": "{{table}} fields",
     "fields": "Fields",
@@ -174,7 +178,6 @@
     "formSet": "All forms",
     "forms": "Forms",
     "bits": {
-      "define": "Define",
       "create": "Create",
       "read": "Read",
       "update": "Update"
@@ -184,6 +187,8 @@
       "read": "Read",
       "write": "Write"
     },
+    "allFields": "All fields",
+    "allViews": "All views",
     "allRecordsView": "all (every row)",
     "members": "Members",
     "noMembers": "No members",
@@ -204,7 +209,7 @@
     "roleAccessMatrix": "{{database}} role access matrix",
     "roleMemberDisplayName": "Role member display name",
     "scope": "scope",
-    "schema": "Schema",
+    "schemaSection": "Schema",
     "searchMember": "Search member",
     "tables": "Tables",
     "view": "{{view}} view",

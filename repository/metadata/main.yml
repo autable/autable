@@ -2,4 +2,18 @@ databases:
     - name: t55
       tables: []
     - name: "555"
-      tables: []
+      tables:
+        - name: "1234"
+          display_name: "1234"
+          fields:
+            - name: "134"
+              type: string
+              deleted: false
+            - name: "555"
+              type: string
+              deleted: false
+          views:
+            - name: "1234"
+              display_name: "1234"
+              base_view: ""
+              sorts: []

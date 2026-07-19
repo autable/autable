@@ -165,6 +165,10 @@
     "addWorkflowMember": "添加工作流",
     "allItems": "全部",
     "empty": "创建角色后即可配置表、字段、工作流和表单权限。",
+    "dataSection": "数据",
+    "fieldDefine": "字段定义",
+    "fieldValues": "字段值",
+    "allowed": "允许",
     "fieldAdd": "建字段",
     "fieldSet": "{{table}} 字段",
     "fields": "字段",
@@ -174,7 +178,6 @@
     "formSet": "全部表单",
     "forms": "表单",
     "bits": {
-      "define": "定义",
       "create": "增",
       "read": "读",
       "update": "改"
@@ -184,6 +187,8 @@
       "read": "只读",
       "write": "读写"
     },
+    "allFields": "全部字段",
+    "allViews": "全部视图",
     "allRecordsView": "all（全部记录）",
     "members": "成员",
     "noMembers": "暂无成员",
@@ -204,7 +209,7 @@
     "roleAccessMatrix": "{{database}} 角色权限矩阵",
     "roleMemberDisplayName": "角色成员显示名",
     "scope": "范围",
-    "schema": "表结构",
+    "schemaSection": "结构",
     "searchMember": "搜索成员",
     "tables": "表",
     "view": "{{view}} 视图",
