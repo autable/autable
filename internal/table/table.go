@@ -587,11 +587,19 @@ func (service *Service) EnsureTable(ctx context.Context, catalog metadata.Catalo
 
 func viewFieldsReadable(perms permission.Set, actorID, resource string, query *metadata.ViewQuery, sorts []metadata.ViewSort) bool {
 	for _, field := range viewQueryFields(query) {
+		// System columns (ct_record_id) travel with every row response, so
+		// referencing them in queries/sorts needs no field grant.
+		if strings.HasPrefix(field, "ct_") {
+			continue
+		}
 		if !perms.CanReadField(actorID, resource, field) {
 			return false
 		}
 	}
 	for _, sortDef := range sorts {
+		if strings.HasPrefix(sortDef.Field, "ct_") {
+			continue
+		}
 		if !perms.CanReadField(actorID, resource, sortDef.Field) {
 			return false
 		}

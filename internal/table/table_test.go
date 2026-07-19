@@ -1374,3 +1374,40 @@ func TestFieldPermissionBitsSeparateCreateAndUpdate(t *testing.T) {
 		t.Fatalf("expected create with update-only field to be denied, got %v", err)
 	}
 }
+
+func TestQueryByRecordIDNeedsNoSystemFieldGrant(t *testing.T) {
+	ctx := context.Background()
+	catalog := metadata.Catalog{Databases: []metadata.Database{{
+		Name: "db",
+		Tables: []metadata.Table{{
+			Name:   "contacts",
+			Fields: []metadata.Field{{Name: "name", Type: "string"}},
+		}},
+	}}}
+	service, catalog, _ := newSQLiteService(t, history.NewMemoryStore(), catalog)
+	created, err := service.CreateRow(ctx, catalog, permission.Set{}, "owner", true, "db", "contacts", map[string]any{"name": "Ada"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Per-field grants only, no field_set: system columns must still be
+	// usable in queries and sorts.
+	perms := permission.New(
+		permission.Grant{SubjectID: "reader", Scope: permission.ScopeField, Resource: "db.contacts", Field: "name", Level: permission.FieldRead},
+		permission.Grant{SubjectID: "reader", Scope: permission.ScopeView, Resource: "db.contacts", Field: "all", Level: permission.Read},
+	)
+	rows, err := service.RowsWithOptions(ctx, catalog, perms, "reader", false, "db", "contacts", table.RowListOptions{
+		Query: &metadata.ViewQuery{
+			Combinator: "and",
+			Rules:      []metadata.ViewQueryRule{{Field: "ct_record_id", Operator: "=", Value: created.RecordID}},
+		},
+		Sorts: []metadata.ViewSort{{Field: "ct_record_id", Direction: "desc"}},
+		Limit: 1,
+	})
+	if err != nil {
+		t.Fatalf("expected system column query to pass, got %v", err)
+	}
+	if len(rows) != 1 || rows[0].Values["name"] != "Ada" {
+		t.Fatalf("unexpected rows: %#v", rows)
+	}
+}
