@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -155,6 +156,9 @@ func (service *Service) CreateRow(ctx context.Context, catalog metadata.Catalog,
 	if err := validateWritableFields(tableMeta, perms, actorID, isDatabaseOwner, resource, values, permission.FieldCreate); err != nil {
 		return Row{}, err
 	}
+	if err := validateEnumValues(tableMeta, values); err != nil {
+		return Row{}, err
+	}
 	storedValues, err := normalizeInputValues(tableMeta, values)
 	if err != nil {
 		return Row{}, err
@@ -204,6 +208,9 @@ func (service *Service) UpdateRow(ctx context.Context, catalog metadata.Catalog,
 	}
 	resource := dbName + "." + tableName
 	if err := validateWritableFields(tableMeta, perms, actorID, isDatabaseOwner, resource, values, permission.FieldUpdate); err != nil {
+		return Row{}, err
+	}
+	if err := validateEnumValues(tableMeta, values); err != nil {
 		return Row{}, err
 	}
 	if inRowSet, err := service.RowInActorRowSet(ctx, catalog, perms, actorID, isDatabaseOwner, dbName, tableName, recordID); err != nil {
@@ -675,6 +682,26 @@ func calculateFormulaValues(tableMeta metadata.Table, recordID int64, values map
 		nextValues[field.Name] = value
 	}
 	return nextValues, nil
+}
+
+// validateEnumValues rejects writes that put a value outside a string
+// field's declared options. Empty and null stay allowed; fields without
+// options are free text.
+func validateEnumValues(tableMeta metadata.Table, values map[string]any) error {
+	for fieldName, value := range values {
+		field, ok := tableMeta.Field(fieldName)
+		if !ok || field.Type != "string" || len(field.Options) == 0 || value == nil {
+			continue
+		}
+		text := fmt.Sprint(value)
+		if text == "" {
+			continue
+		}
+		if !slices.Contains(field.Options, text) {
+			return fmt.Errorf("field %q value %q is not one of the allowed options", fieldName, text)
+		}
+	}
+	return nil
 }
 
 func normalizeInputValues(tableMeta metadata.Table, values map[string]any) (map[string]any, error) {

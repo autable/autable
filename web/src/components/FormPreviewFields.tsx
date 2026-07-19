@@ -67,6 +67,7 @@ export function FormPreviewFields({
             <FormTextInput
               key={element.field}
               element={element}
+              enumOptions={enumFieldOptions(tables, formTable, element.field)}
               onAction={onAction}
               onFormValueChange={onFormValueChange}
               value={formValues[element.field] ?? ""}
@@ -148,11 +149,13 @@ export function FormPreviewFields({
 
 function FormTextInput({
   element,
+  enumOptions,
   onAction,
   onFormValueChange,
   value
 }: {
   element: Extract<FormElement, { kind: "input" }>;
+  enumOptions?: string[];
   onAction: (actionID: string, valueOverrides?: Record<string, string>) => void | Promise<void>;
   onFormValueChange: (name: string, value: string) => void;
   value: string;
@@ -164,12 +167,43 @@ function FormTextInput({
     }
   };
 
+  // Enum fields on the target table render as a dropdown so users pick a
+  // legal value instead of typing one.
+  if (enumOptions?.length) {
+    return (
+      <label className="field-stack">
+        <span>{element.label}</span>
+        <Select value={value} onChange={(_, data) => handleTextChange(data.value)}>
+          <option value="" />
+          {enumOptions.map((option) => (
+            <option key={option} value={option}>
+              {option}
+            </option>
+          ))}
+        </Select>
+      </label>
+    );
+  }
+
   return (
     <label className="field-stack">
       <span>{element.label}</span>
       <Input type={element.inputType} value={value} onChange={(_, data) => handleTextChange(data.value)} />
     </label>
   );
+}
+
+function enumFieldOptions(tables: TableMetadata[], formTable: string | undefined, fieldName: string): string[] | undefined {
+  if (!formTable) {
+    return undefined;
+  }
+  const field = tables
+    .find((table) => table.name === formTable)
+    ?.fields.find((candidate) => !candidate.deleted && candidate.name === fieldName);
+  if (!field || field.type !== "string" || !field.options?.length) {
+    return undefined;
+  }
+  return field.options;
 }
 
 function ScannerInput({

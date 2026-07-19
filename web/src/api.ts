@@ -3,6 +3,9 @@ export type Field = {
   type: string;
   value_type?: string;
   formula?: string;
+  // For string fields: restricts values to this list (enum). Empty stays
+  // allowed; absent means free text.
+  options?: string[];
   relation_table?: string;
   deleted: boolean;
   // Bitmask: 1 = read, 2 = update existing rows, 4 = fill on create.

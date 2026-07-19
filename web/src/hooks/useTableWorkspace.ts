@@ -63,6 +63,7 @@ export function useTableWorkspace({
   const [rowHistory, setRowHistory] = useState<RowChange[]>([]);
   const [selectedRowDraft, setSelectedRowDraft] = useState<Record<string, string>>({});
   const [newFieldName, setNewFieldName] = useState("");
+  const [newFieldOptions, setNewFieldOptions] = useState("");
   const [newFieldType, setNewFieldType] = useState("string");
   const [newFormulaValueType, setNewFormulaValueType] = useState("string");
   const [newFieldFormula, setNewFieldFormula] = useState("");
@@ -471,6 +472,10 @@ export function useTableWorkspace({
       onStatus(t("status.relationTargetRequired"));
       return;
     }
+    const parsedOptions = newFieldOptions
+      .split(/[,，\n]/)
+      .map((option) => option.trim())
+      .filter((option) => option.length > 0);
     const nextTable = {
       ...table,
       fields: [
@@ -480,6 +485,7 @@ export function useTableWorkspace({
           type: newFieldType,
           value_type: newFieldType === "formula" ? newFormulaValueType : undefined,
           formula: newFieldType === "formula" ? formula : undefined,
+          options: newFieldType === "string" && parsedOptions.length > 0 ? parsedOptions : undefined,
           relation_table: newFieldType === "relation" ? newRelationTable : undefined,
           deleted: false
         }
@@ -488,6 +494,7 @@ export function useTableWorkspace({
     await persistTableMetadata(nextTable, t("status.createdField", { name }));
     setNewFieldName("");
     setNewFieldType("string");
+    setNewFieldOptions("");
     setNewFormulaValueType("string");
     setNewFieldFormula("");
     setNewRelationTable("");
@@ -645,6 +652,7 @@ export function useTableWorkspace({
     displayedRows,
     newFieldName,
     newFieldFormula,
+    newFieldOptions,
     newFieldType,
     newRelationTable,
     newFormulaValueType,
@@ -673,6 +681,7 @@ export function useTableWorkspace({
     setSearchText,
     setNewFieldName,
     setNewFieldFormula,
+    setNewFieldOptions,
     setNewFieldType,
     setNewRelationTable,
     setNewFormulaValueType,

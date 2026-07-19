@@ -65,6 +65,7 @@ type TableWorkspaceProps = {
   onLoadHistory: () => void;
   onNewFieldFormulaChange: (value: string) => void;
   onNewFieldNameChange: (value: string) => void;
+  onNewFieldOptionsChange: (value: string) => void;
   onNewFieldTypeChange: (value: string) => void;
   onNewFormulaValueTypeChange: (value: string) => void;
   onNewRelationTableChange: (value: string) => void;
@@ -84,6 +85,7 @@ type TableWorkspaceProps = {
   onUpdateFieldFormula: (fieldName: string, formula: string) => void;
   newFieldFormula: string;
   newFieldName: string;
+  newFieldOptions: string;
   newFieldType: string;
   newFormulaValueType: string;
   newRelationTable: string;
@@ -118,6 +120,7 @@ export function TableWorkspace({
   onLoadHistory,
   onNewFieldFormulaChange,
   onNewFieldNameChange,
+  onNewFieldOptionsChange,
   onNewFieldTypeChange,
   onNewFormulaValueTypeChange,
   onNewRelationTableChange,
@@ -137,6 +140,7 @@ export function TableWorkspace({
   onUpdateFieldFormula,
   newFieldFormula,
   newFieldName,
+  newFieldOptions,
   newFieldType,
   newFormulaValueType,
   newRelationTable,
@@ -557,6 +561,16 @@ export function TableWorkspace({
                   <option value="file">file</option>
                 </Select>
               </FluentField>
+              {newFieldType === "string" && (
+                <FluentField label={t("table.fieldOptions")}>
+                  <Input
+                    aria-label={t("table.fieldOptions")}
+                    value={newFieldOptions}
+                    onChange={(_, data) => onNewFieldOptionsChange(data.value)}
+                    placeholder={t("table.fieldOptionsPlaceholder")}
+                  />
+                </FluentField>
+              )}
               {newFieldType === "relation" && (
                 <FluentField label={t("table.targetTable")}>
                   <Select
@@ -1099,12 +1113,28 @@ function RecordDrawer({
         <div className="record-detail-list">
           {fields.map((field) => (
             <FluentField key={field.name} label={field.name}>
-              <Input
-                aria-label={t("table.valueLabel", { name: field.name })}
-                value={values[field.name] ?? ""}
-                onChange={(_, data) => onChange(field.name, data.value)}
-                disabled={!selectedRecordID || !canWriteField(field)}
-              />
+              {field.type === "string" && field.options?.length ? (
+                <Select
+                  aria-label={t("table.valueLabel", { name: field.name })}
+                  value={values[field.name] ?? ""}
+                  onChange={(_, data) => onChange(field.name, data.value)}
+                  disabled={!selectedRecordID || !canWriteField(field)}
+                >
+                  <option value="" />
+                  {field.options.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </Select>
+              ) : (
+                <Input
+                  aria-label={t("table.valueLabel", { name: field.name })}
+                  value={values[field.name] ?? ""}
+                  onChange={(_, data) => onChange(field.name, data.value)}
+                  disabled={!selectedRecordID || !canWriteField(field)}
+                />
+              )}
             </FluentField>
           ))}
           <Button appearance="primary" icon={<SaveRegular />} onClick={onSave} disabled={!selectedRecordID || !hasWritableFields}>

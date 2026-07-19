@@ -342,6 +342,8 @@
     "dragField": "拖拽 {{name}}",
     "fieldActions": "字段操作 {{name}}",
     "fieldFormula": "字段公式",
+    "fieldOptions": "枚举选项",
+    "fieldOptionsPlaceholder": "逗号分隔，留空为自由输入",
     "fieldName": "字段名称",
     "fieldSettings": "字段",
     "fieldSettingsRow": "字段 {{name}}",

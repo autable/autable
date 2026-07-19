@@ -36,13 +36,17 @@ type Table struct {
 }
 
 type Field struct {
-	Name            string `yaml:"name" json:"name"`
-	Type            string `yaml:"type" json:"type"`
-	ValueType       string `yaml:"value_type,omitempty" json:"value_type,omitempty"`
-	Formula         string `yaml:"formula,omitempty" json:"formula,omitempty"`
-	RelationTable   string `yaml:"relation_table,omitempty" json:"relation_table,omitempty"`
-	Deleted         bool   `yaml:"deleted" json:"deleted"`
-	PermissionLevel int    `yaml:"-" json:"permission_level,omitempty"`
+	Name      string `yaml:"name" json:"name"`
+	Type      string `yaml:"type" json:"type"`
+	ValueType string `yaml:"value_type,omitempty" json:"value_type,omitempty"`
+	Formula   string `yaml:"formula,omitempty" json:"formula,omitempty"`
+	// Options turns a string field into an enum: writes must use one of
+	// the listed values (empty stays allowed). No options = free text.
+	// Storage is unchanged, so this needs no migration.
+	Options         []string `yaml:"options,omitempty" json:"options,omitempty"`
+	RelationTable   string   `yaml:"relation_table,omitempty" json:"relation_table,omitempty"`
+	Deleted         bool     `yaml:"deleted" json:"deleted"`
+	PermissionLevel int      `yaml:"-" json:"permission_level,omitempty"`
 }
 
 type View struct {
@@ -414,6 +418,21 @@ func (table Table) validate(dbName string, tableIndex int) error {
 		}
 		if field.Type == "formula" && !isStoredFieldType(field.ValueType) {
 			return fmt.Errorf("database %q table %q formula field %q value_type is required", dbName, table.Name, field.Name)
+		}
+		if len(field.Options) > 0 {
+			if field.Type != "string" {
+				return fmt.Errorf("database %q table %q field %q options are only allowed on string fields", dbName, table.Name, field.Name)
+			}
+			seenOptions := map[string]struct{}{}
+			for _, option := range field.Options {
+				if strings.TrimSpace(option) == "" {
+					return fmt.Errorf("database %q table %q field %q contains an empty option", dbName, table.Name, field.Name)
+				}
+				if _, ok := seenOptions[option]; ok {
+					return fmt.Errorf("database %q table %q field %q option %q is duplicated", dbName, table.Name, field.Name, option)
+				}
+				seenOptions[option] = struct{}{}
+			}
 		}
 		if field.Type != "formula" && strings.TrimSpace(field.Formula) != "" {
 			return fmt.Errorf("database %q table %q field %q formula is only allowed on formula fields", dbName, table.Name, field.Name)

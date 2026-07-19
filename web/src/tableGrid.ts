@@ -1,7 +1,30 @@
-import { createElement } from "react";
-import { renderTextEditor, type Column } from "react-data-grid";
+import { createElement, type ChangeEvent } from "react";
+import { renderTextEditor, type Column, type RenderEditCellProps } from "react-data-grid";
 import type { Field, RowRecord } from "./api";
 import { fieldEditable } from "./fieldPermissions";
+
+// Enum string fields edit through a select instead of free text; the empty
+// option clears the cell (empty values stay allowed server-side).
+function renderEnumEditor(options: string[]) {
+  return function EnumEditor({ row, column, onRowChange }: RenderEditCellProps<TableGridRow>) {
+    return createElement(
+      "select",
+      {
+        autoFocus: true,
+        className: "rdg-text-editor enum-cell-editor",
+        "aria-label": column.name,
+        value: String(row[column.key] ?? ""),
+        onChange: (event: ChangeEvent<HTMLSelectElement>) => {
+          onRowChange({ ...row, [column.key]: event.target.value }, true);
+        }
+      },
+      [
+        createElement("option", { key: "", value: "" }, ""),
+        ...options.map((option) => createElement("option", { key: option, value: option }, option))
+      ]
+    );
+  };
+}
 
 export type TableGridRow = Record<string, unknown> & { ct_record_id: number };
 
@@ -26,7 +49,7 @@ export function buildTableColumns(
     name: field.name,
     minWidth: Math.max(128, field.name.length * 14),
     resizable: true,
-    renderEditCell: renderTextEditor,
+    renderEditCell: field.type === "string" && field.options?.length ? renderEnumEditor(field.options) : renderTextEditor,
     editable: (row) =>
       Number.isFinite(row.ct_record_id) &&
       field.type !== "formula" &&

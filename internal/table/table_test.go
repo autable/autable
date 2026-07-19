@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"autable/internal/history"
@@ -1409,5 +1410,49 @@ func TestQueryByRecordIDNeedsNoSystemFieldGrant(t *testing.T) {
 	}
 	if len(rows) != 1 || rows[0].Values["name"] != "Ada" {
 		t.Fatalf("unexpected rows: %#v", rows)
+	}
+}
+
+func TestEnumStringFieldRejectsValuesOutsideOptions(t *testing.T) {
+	ctx := context.Background()
+	catalog := metadata.Catalog{Databases: []metadata.Database{{
+		Name: "db",
+		Tables: []metadata.Table{{
+			Name: "contacts",
+			Fields: []metadata.Field{
+				{Name: "name", Type: "string"},
+				{Name: "status", Type: "string", Options: []string{"todo", "doing", "done"}},
+			},
+		}},
+	}}}
+	service, catalog, _ := newSQLiteService(t, history.NewMemoryStore(), catalog)
+
+	created, err := service.CreateRow(ctx, catalog, permission.Set{}, "owner", true, "db", "contacts", map[string]any{
+		"name":   "Ada",
+		"status": "todo",
+	})
+	if err != nil {
+		t.Fatalf("expected legal enum value to pass: %v", err)
+	}
+	if _, err := service.CreateRow(ctx, catalog, permission.Set{}, "owner", true, "db", "contacts", map[string]any{
+		"name":   "Grace",
+		"status": "banana",
+	}); err == nil || !strings.Contains(err.Error(), "allowed options") {
+		t.Fatalf("expected illegal enum value to be rejected, got %v", err)
+	}
+	if _, err := service.UpdateRow(ctx, catalog, permission.Set{}, "owner", true, "db", "contacts", created.RecordID, map[string]any{
+		"status": "banana",
+	}); err == nil || !strings.Contains(err.Error(), "allowed options") {
+		t.Fatalf("expected illegal enum update to be rejected, got %v", err)
+	}
+	if _, err := service.UpdateRow(ctx, catalog, permission.Set{}, "owner", true, "db", "contacts", created.RecordID, map[string]any{
+		"status": "",
+	}); err != nil {
+		t.Fatalf("expected empty enum value to stay allowed: %v", err)
+	}
+	if _, err := service.UpdateRow(ctx, catalog, permission.Set{}, "owner", true, "db", "contacts", created.RecordID, map[string]any{
+		"status": "done",
+	}); err != nil {
+		t.Fatalf("expected legal enum update to pass: %v", err)
 	}
 }

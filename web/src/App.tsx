@@ -762,6 +762,7 @@ function WorkspaceApp() {
               displayedRows={tableWorkspace.displayedRows}
               newFieldFormula={tableWorkspace.newFieldFormula}
               newFieldName={tableWorkspace.newFieldName}
+              newFieldOptions={tableWorkspace.newFieldOptions}
               newFieldType={tableWorkspace.newFieldType}
               newFormulaValueType={tableWorkspace.newFormulaValueType}
               newRelationTable={tableWorkspace.newRelationTable}
@@ -776,6 +777,7 @@ function WorkspaceApp() {
               onLoadHistory={tableWorkspace.loadSelectedRowHistory}
               onNewFieldFormulaChange={tableWorkspace.setNewFieldFormula}
               onNewFieldNameChange={tableWorkspace.setNewFieldName}
+              onNewFieldOptionsChange={tableWorkspace.setNewFieldOptions}
               onNewFieldTypeChange={tableWorkspace.setNewFieldType}
               onNewFormulaValueTypeChange={tableWorkspace.setNewFormulaValueType}
               onNewRelationTableChange={tableWorkspace.setNewRelationTable}

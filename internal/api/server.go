@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"path"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -1607,7 +1608,8 @@ func fieldDefinitionChanged(existing, incoming metadata.Field) bool {
 	return existing.Type != incoming.Type ||
 		existing.ValueType != incoming.ValueType ||
 		existing.Formula != incoming.Formula ||
-		existing.RelationTable != incoming.RelationTable
+		existing.RelationTable != incoming.RelationTable ||
+		!slices.Equal(existing.Options, incoming.Options)
 }
 
 // authorizeViewMetadataPatch: view definitions are the row-level permission

@@ -342,6 +342,8 @@
     "dragField": "Drag {{name}}",
     "fieldActions": "Field actions {{name}}",
     "fieldFormula": "Field formula",
+    "fieldOptions": "Options",
+    "fieldOptionsPlaceholder": "Comma separated, empty for free text",
     "fieldName": "Field name",
     "fieldSettings": "Fields",
     "fieldSettingsRow": "Field {{name}}",
