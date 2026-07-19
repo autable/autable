@@ -219,7 +219,7 @@ func TestPermissionGrantPersistence(t *testing.T) {
 		Scope:     permission.ScopeField,
 		Resource:  "db.contacts",
 		Field:     "email",
-		Level:     permission.Write,
+		Level:     permission.FieldAll,
 	}
 	if err := db.SaveGrant(ctx, grant); err != nil {
 		t.Fatal(err)
@@ -229,10 +229,10 @@ func TestPermissionGrantPersistence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !perms.CanWriteField("u1", "db.contacts", "email") {
+	if !perms.CanUpdateField("u1", "db.contacts", "email") {
 		t.Fatal("expected persisted grant to allow field write")
 	}
-	if perms.CanWriteField("u1", "db.contacts", "name") {
+	if perms.CanUpdateField("u1", "db.contacts", "name") {
 		t.Fatal("did not expect grant to apply to another field")
 	}
 }
@@ -383,7 +383,7 @@ func TestRoleDefinitionStoresReplaceableGrants(t *testing.T) {
 	}
 
 	role, err = db.ReplaceRoleGrants(ctx, "workspace", "editor", []permission.Grant{
-		{Scope: permission.ScopeFieldSet, Resource: "workspace.contacts", Level: permission.Write},
+		{Scope: permission.ScopeFieldSet, Resource: "workspace.contacts", Level: permission.FieldAll},
 		{Scope: permission.ScopeField, Resource: "workspace.contacts", Field: "email", Level: permission.Read},
 		{Scope: permission.ScopeField, Resource: "workspace.contacts", Field: "secret", Level: permission.None},
 		{Scope: permission.ScopeWorkflow, Resource: "9", Level: permission.None},
@@ -398,13 +398,13 @@ func TestRoleDefinitionStoresReplaceableGrants(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !perms.CanWriteField(role.SubjectID, "workspace.contacts", "name") {
+	if !perms.CanUpdateField(role.SubjectID, "workspace.contacts", "name") {
 		t.Fatal("expected field set write grant")
 	}
 	if !perms.CanReadField(role.SubjectID, "workspace.contacts", "email") {
 		t.Fatal("expected field read grant")
 	}
-	if !perms.CanWriteField(role.SubjectID, "workspace.contacts", "secret") {
+	if !perms.CanUpdateField(role.SubjectID, "workspace.contacts", "secret") {
 		t.Fatal("expected field set write grant to apply to secret")
 	}
 	role, err = db.ReplaceRoleMembers(ctx, "workspace", "editor", []RoleMember{
@@ -423,13 +423,13 @@ func TestRoleDefinitionStoresReplaceableGrants(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !effectivePerms.CanWriteField("u1", "workspace.contacts", "name") {
+	if !effectivePerms.CanUpdateField("u1", "workspace.contacts", "name") {
 		t.Fatal("expected role member to inherit field set write grant")
 	}
 	if !effectivePerms.CanReadField("u1", "workspace.contacts", "email") {
 		t.Fatal("expected role member to inherit field read grant")
 	}
-	if !effectivePerms.CanWriteField("u1", "workspace.contacts", "secret") {
+	if !effectivePerms.CanUpdateField("u1", "workspace.contacts", "secret") {
 		t.Fatal("expected role member to inherit field set write grant")
 	}
 	role, err = db.ReplaceRoleMembers(ctx, "workspace", "editor", []RoleMember{{Type: "workflow", ID: "7"}})

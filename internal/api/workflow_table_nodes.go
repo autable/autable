@@ -277,22 +277,30 @@ func (server *Server) upsertTableRow(ctx context.Context, catalog metadata.Catal
 	if err != nil {
 		return table.Row{}, "", err
 	}
-	rows, err := server.tables.Rows(ctx, catalog, perms, actorID, isDatabaseOwner, dbName, tableName, "")
+	// The match runs inside the actor's row set (the view boundary): rows
+	// the actor cannot see behave as absent, so upsert can neither update
+	// nor probe them.
+	rows, err := server.tables.RowsWithOptions(ctx, catalog, perms, actorID, isDatabaseOwner, dbName, tableName, table.RowListOptions{
+		Query: &metadata.ViewQuery{
+			Combinator: "and",
+			Rules:      []metadata.ViewQueryRule{{Field: matchField, Operator: "=", Value: matchValue}},
+		},
+		Limit: 1,
+	})
 	if err != nil {
 		return table.Row{}, "", err
 	}
-	for _, row := range rows {
-		if workflowValuesEqual(row.Values[matchField], matchValue) {
-			changed, err := workflowRowValuesChanged(tableMeta, row.Values, values)
-			if err != nil {
-				return table.Row{}, "", err
-			}
-			if !changed {
-				return row, "noop", nil
-			}
-			updated, err := server.tables.UpdateRow(ctx, catalog, perms, actorID, isDatabaseOwner, dbName, tableName, row.RecordID, values)
-			return updated, "update", err
+	if len(rows) > 0 {
+		row := rows[0]
+		changed, err := workflowRowValuesChanged(tableMeta, row.Values, values)
+		if err != nil {
+			return table.Row{}, "", err
 		}
+		if !changed {
+			return row, "noop", nil
+		}
+		updated, err := server.tables.UpdateRow(ctx, catalog, perms, actorID, isDatabaseOwner, dbName, tableName, row.RecordID, values)
+		return updated, "update", err
 	}
 	created, err := server.tables.CreateRow(ctx, catalog, perms, actorID, isDatabaseOwner, dbName, tableName, values)
 	return created, "create", err

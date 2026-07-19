@@ -8,6 +8,17 @@ const (
 	Write
 )
 
+// Field grant levels are bitmasks: read, update (modify existing rows), and
+// create (fill the field when creating a row) are granted independently.
+// The legacy field levels map onto the bits: 1 (read) is FieldRead, and 2
+// (write) was migrated to FieldAll when the bitmask was introduced.
+const (
+	FieldRead   Level = 1
+	FieldUpdate Level = 2
+	FieldCreate Level = 4
+	FieldAll    Level = FieldRead | FieldUpdate | FieldCreate
+)
+
 type Scope string
 
 const (
@@ -23,6 +34,12 @@ const (
 	// ScopeFile guards viewing and uploading files bound to a table; the
 	// resource is db.table.
 	ScopeFile Scope = "file"
+	// ScopeFieldAdd is a metadata permission: adding non-formula fields to
+	// the table (resource db.table). Independent from data-level field bits.
+	ScopeFieldAdd Scope = "field_add"
+	// ScopeFieldModify is a metadata permission: changing one field's
+	// non-formula definition (resource db.table, Field = field name).
+	ScopeFieldModify Scope = "field_modify"
 )
 
 type Grant struct {
@@ -41,6 +58,8 @@ func New(grants ...Grant) Set {
 	return Set{grants: grants}
 }
 
+// FieldLevel returns the union of the field permission bits granted for the
+// field, combining table-wide field_set grants with per-field grants.
 func (set Set) FieldLevel(subjectID, resource, field string) Level {
 	level := None
 	for _, grant := range set.grants {
@@ -49,11 +68,23 @@ func (set Set) FieldLevel(subjectID, resource, field string) Level {
 		}
 		switch grant.Scope {
 		case ScopeFieldSet:
-			level = maxLevel(level, grant.Level)
+			level |= grant.Level
 		case ScopeField:
 			if grant.Field == field {
-				level = maxLevel(level, grant.Level)
+				level |= grant.Level
 			}
+		}
+	}
+	return level
+}
+
+// FieldSetLevel returns the union of the field permission bits granted by
+// table-wide field_set grants alone.
+func (set Set) FieldSetLevel(subjectID, resource string) Level {
+	level := None
+	for _, grant := range set.grants {
+		if grant.SubjectID == subjectID && grant.Resource == resource && grant.Scope == ScopeFieldSet {
+			level |= grant.Level
 		}
 	}
 	return level
@@ -102,11 +133,33 @@ func (set Set) ResourceLevel(subjectID string, scope Scope, resource string) Lev
 }
 
 func (set Set) CanReadField(subjectID, resource, field string) bool {
-	return set.FieldLevel(subjectID, resource, field) >= Read
+	return set.FieldLevel(subjectID, resource, field)&FieldRead != 0
 }
 
-func (set Set) CanWriteField(subjectID, resource, field string) bool {
-	return set.FieldLevel(subjectID, resource, field) >= Write
+// CanUpdateField reports whether the field may be modified on existing rows.
+func (set Set) CanUpdateField(subjectID, resource, field string) bool {
+	return set.FieldLevel(subjectID, resource, field)&FieldUpdate != 0
+}
+
+// CanCreateField reports whether the field may be filled when creating rows.
+func (set Set) CanCreateField(subjectID, resource, field string) bool {
+	return set.FieldLevel(subjectID, resource, field)&FieldCreate != 0
+}
+
+// CanAddFields is the metadata permission for adding non-formula fields.
+func (set Set) CanAddFields(subjectID, resource string) bool {
+	return set.ResourceLevel(subjectID, ScopeFieldAdd, resource) >= Write
+}
+
+// CanModifyField is the metadata permission for changing one field's
+// non-formula definition.
+func (set Set) CanModifyField(subjectID, resource, field string) bool {
+	for _, grant := range set.grants {
+		if grant.SubjectID == subjectID && grant.Scope == ScopeFieldModify && grant.Resource == resource && grant.Field == field && grant.Level >= Write {
+			return true
+		}
+	}
+	return false
 }
 
 func (set Set) CanReadView(subjectID, resource, view string) bool {
@@ -148,7 +201,26 @@ func (level Level) String() string {
 		return "read"
 	case Write:
 		return "write"
-	default:
-		return "unknown"
 	}
+	if level > Write && level <= FieldAll {
+		parts := []string{}
+		if level&FieldRead != 0 {
+			parts = append(parts, "read")
+		}
+		if level&FieldUpdate != 0 {
+			parts = append(parts, "update")
+		}
+		if level&FieldCreate != 0 {
+			parts = append(parts, "create")
+		}
+		joined := ""
+		for i, part := range parts {
+			if i > 0 {
+				joined += "|"
+			}
+			joined += part
+		}
+		return joined
+	}
+	return "unknown"
 }

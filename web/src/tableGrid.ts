@@ -1,6 +1,7 @@
 import { createElement } from "react";
 import { renderTextEditor, type Column } from "react-data-grid";
 import type { Field, RowRecord } from "./api";
+import { fieldEditable } from "./fieldPermissions";
 
 export type TableGridRow = Record<string, unknown> & { ct_record_id: number };
 
@@ -30,12 +31,12 @@ export function buildTableColumns(
       Number.isFinite(row.ct_record_id) &&
       field.type !== "formula" &&
       field.type !== "file" &&
-      (field.permission_level ?? 2) >= 2,
+      fieldEditable(field.permission_level),
     renderCell: ({ row }) => {
       if (field.type === "file") {
         const recordID = Number(row.ct_record_id);
         const fileID = Number(row[field.name]);
-        const canWrite = Number.isFinite(recordID) && (field.permission_level ?? 2) >= 2;
+        const canWrite = Number.isFinite(recordID) && fieldEditable(field.permission_level);
         if (!Number.isFinite(fileID) || fileID <= 0) {
           if (!canWrite || !fileOptions) {
             return "";

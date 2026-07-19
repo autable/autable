@@ -434,6 +434,9 @@ func (table Table) validateViews(dbName string) error {
 		if view.Name == "" {
 			return fmt.Errorf("database %q table %q contains a view without a name", dbName, table.Name)
 		}
+		if view.Name == AllViewName {
+			return fmt.Errorf("database %q table %q view name %q is reserved for the built-in unfiltered view", dbName, table.Name, AllViewName)
+		}
 		if _, ok := views[view.Name]; ok {
 			return fmt.Errorf("database %q table %q view %q is duplicated", dbName, table.Name, view.Name)
 		}
@@ -578,11 +581,18 @@ func (table Table) View(name string) (View, bool) {
 	return View{}, false
 }
 
+// AllViewName is the built-in unfiltered view covering every row. It is not
+// stored in table metadata; access to it is granted like any other view.
+const AllViewName = "all"
+
 func (table Table) ResolveView(name string) (ResolvedView, error) {
 	return table.resolveView(name, map[string]bool{})
 }
 
 func (table Table) resolveView(name string, visiting map[string]bool) (ResolvedView, error) {
+	if name == AllViewName {
+		return ResolvedView{Name: AllViewName}, nil
+	}
 	view, ok := table.View(name)
 	if !ok {
 		return ResolvedView{}, fmt.Errorf("%w: %s", ErrUnknownView, name)

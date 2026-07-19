@@ -64,13 +64,15 @@ func (server *Server) isAuthorized(ctx context.Context, actorID string, perms pe
 	case accessManageDatabase:
 		return server.isDatabaseOwner(ctx, actorID, request.Database)
 	case accessCreateField, accessWriteFieldSet:
-		return resource != "" && perms.CanWriteResource(actorID, permission.ScopeFieldSet, resource)
+		// Schema-level field management is the field_add metadata
+		// permission; data-level field bits never confer it.
+		return resource != "" && perms.CanAddFields(actorID, resource)
 	case accessDeleteField:
 		return server.isDatabaseOwner(ctx, actorID, request.Database)
-	case accessCreateView, accessWriteViewSet:
-		return resource != "" && perms.CanWriteResource(actorID, permission.ScopeViewSet, resource)
-	case accessWriteView:
-		return resource != "" && (perms.CanWriteResource(actorID, permission.ScopeViewSet, resource) || perms.CanWriteView(actorID, resource, request.View))
+	case accessCreateView, accessWriteViewSet, accessWriteView:
+		// View definitions are the row-level permission boundary; only the
+		// database owner (short-circuited above) may change them.
+		return false
 	case accessDeleteView:
 		return server.isDatabaseOwner(ctx, actorID, request.Database)
 	case accessCreateWorkflow:

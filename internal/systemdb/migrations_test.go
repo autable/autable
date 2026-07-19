@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"autable/internal/permission"
+
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
@@ -36,7 +38,7 @@ func createOldDatabase(t *testing.T, path string, models ...any) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := orm.AutoMigrate(append([]any{&userModel{}}, models...)...); err != nil {
+	if err := orm.AutoMigrate(append([]any{&userModel{}, &permissionGrantModel{}}, models...)...); err != nil {
 		t.Fatal(err)
 	}
 	workflow := preRunnersWorkflowModel{
@@ -212,5 +214,63 @@ func TestReopeningUpgradedDatabaseIsIdempotent(t *testing.T) {
 		if err := db.Close(); err != nil {
 			t.Fatal(err)
 		}
+	}
+}
+
+func TestMigrateRewritesLegacyFieldGrantLevels(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "system.sqlite")
+	createOldDatabase(t, path, &preRunnersWorkflowModel{})
+
+	// Seed pre-bitmask grants: level 2 on field scopes meant full write.
+	orm, err := gorm.Open(sqlite.Open(path), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyGrants := []permissionGrantModel{
+		{SubjectID: "u1", Scope: permission.ScopeFieldSet, Resource: "db.contacts", Field: "", Level: 2},
+		{SubjectID: "u1", Scope: permission.ScopeField, Resource: "db.contacts", Field: "email", Level: 2},
+		{SubjectID: "u1", Scope: permission.ScopeField, Resource: "db.contacts", Field: "name", Level: 1},
+		{SubjectID: "u1", Scope: permission.ScopeView, Resource: "db.contacts", Field: "active", Level: 2},
+	}
+	if err := orm.Create(&legacyGrants).Error; err != nil {
+		t.Fatal(err)
+	}
+	handle, err := orm.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := handle.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	db, err := Open(ctx, path)
+	if err != nil {
+		t.Fatalf("expected legacy database to open, got %v", err)
+	}
+	defer db.Close()
+
+	grants, err := db.GrantListForSubject(ctx, "u1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	levels := map[string]permission.Level{}
+	for _, grant := range grants {
+		levels[string(grant.Scope)+"|"+grant.Field] = grant.Level
+	}
+	if levels["field_set|"] != permission.FieldAll {
+		t.Fatalf("expected field_set level 7, got %#v", levels)
+	}
+	if levels["field|email"] != permission.FieldAll {
+		t.Fatalf("expected field write level 7, got %#v", levels)
+	}
+	if levels["field|name"] != permission.FieldRead {
+		t.Fatalf("expected field read level unchanged, got %#v", levels)
+	}
+	if levels["view|active"] != permission.Write {
+		t.Fatalf("expected view level untouched, got %#v", levels)
+	}
+	if levels["field_add|"] != permission.Write {
+		t.Fatalf("expected seeded field_add grant for full field_set holders, got %#v", levels)
 	}
 }

@@ -25,6 +25,7 @@ import {
   type TableViewSort
 } from "../api";
 import { rowDraftFromRecord } from "../appState";
+import { fieldCreatable, fieldEditable } from "../fieldPermissions";
 import { buildTableColumns, rowRecordToValues, type TableGridRow } from "../tableGrid";
 
 export const ROW_PAGE_SIZE = 200;
@@ -365,7 +366,7 @@ export function useTableWorkspace({
       !previousRow ||
       field === "ct_record_id" ||
       fieldMeta?.type === "formula" ||
-      (fieldMeta?.permission_level ?? 2) < 2
+      !fieldEditable(fieldMeta?.permission_level)
     ) {
       return;
     }
@@ -554,7 +555,9 @@ export function useTableWorkspace({
       onStatus(t("status.createRecordFromAllRecordsOnly"));
       return;
     }
-    const writableFields = activeFields.filter((field) => field.type !== "formula");
+    // Only submit fields the actor can write: the server rejects the whole
+    // create when the payload contains any unwritable field.
+    const writableFields = activeFields.filter((field) => field.type !== "formula" && fieldCreatable(field.permission_level));
     const values = Object.fromEntries(writableFields.map((field) => [field.name, field.name === "status" ? "Review" : ""]));
     if (writableFields.some((field) => field.name === "name")) {
       values.name = `New record ${total + 1}`;
@@ -582,7 +585,11 @@ export function useTableWorkspace({
       return;
     }
     try {
-      const writableFieldNames = new Set(activeFields.filter((field) => field.type !== "formula").map((field) => field.name));
+      const writableFieldNames = new Set(
+        activeFields
+          .filter((field) => field.type !== "formula" && fieldEditable(field.permission_level))
+          .map((field) => field.name)
+      );
       const values = Object.fromEntries(
         Object.entries(selectedRowDraft).filter(([fieldName]) => writableFieldNames.has(fieldName))
       );

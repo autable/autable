@@ -48,6 +48,7 @@ import { useEffect, useMemo, useState } from "react";
 import { QueryBuilder, type Field as QueryBuilderField } from "react-querybuilder";
 import { useTranslation } from "react-i18next";
 import type { Field, RowChange, TableMetadata, TableViewQuery, TableViewSort } from "../api";
+import { fieldCreatable, fieldEditable } from "../fieldPermissions";
 import type { TableGridRow } from "../tableGrid";
 import { RecordDataGrid } from "./RecordDataGrid";
 
@@ -162,7 +163,7 @@ export function TableWorkspace({
   const canWriteDatabase = hasTable && (table.database_permission_level ?? 2) >= 2;
   const canWriteFields = hasTable && (table.field_permission_level ?? table.permission_level ?? 2) >= 2;
   const canWriteViews = hasTable && (table.view_permission_level ?? table.permission_level ?? 2) >= 2;
-  const canCreateRow = selectedTableView === "all" && activeFields.some((field) => canWriteField(field));
+  const canCreateRow = selectedTableView === "all" && activeFields.some((field) => canCreateField(field));
   const hasWritableFields = activeFields.some(canWriteField);
   const [recordPanelOpen, setRecordPanelOpen] = useState(false);
   const [recordPanelTab, setRecordPanelTab] = useState<"details" | "history">("details");
@@ -682,7 +683,11 @@ export function TableWorkspace({
 }
 
 function canWriteField(field: Field): boolean {
-  return field.type !== "formula" && (field.permission_level ?? 2) >= 2;
+  return field.type !== "formula" && fieldEditable(field.permission_level);
+}
+
+function canCreateField(field: Field): boolean {
+  return field.type !== "formula" && fieldCreatable(field.permission_level);
 }
 
 function createFieldVisibilityStorageKey(databaseName: string, tableName: string, viewName: string): string {

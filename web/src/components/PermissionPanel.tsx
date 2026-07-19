@@ -44,6 +44,11 @@ export { compactRoleGrants };
 
 const permissionLevels = [0, 1, 2] as const;
 
+// Field grants are bitmasks (read=1, update=2, create=4); the "all fields"
+// menu offers the useful presets, the per-field editor exposes each bit.
+const fieldLevelPresets = [0, 1, 3, 5, 7] as const;
+const fieldBits = [1, 2, 4] as const;
+
 type PermissionPanelProps = {
   database: DatabaseMetadata;
   forms: FormDefinition[];
@@ -328,8 +333,14 @@ function PermissionMatrix({
               grants={grants}
               onGrantChange={onGrantChange}
             />
+            <FieldAddToggle
+              resource={`${database.name}.${table.name}`}
+              grants={grants}
+              onGrantChange={onGrantChange}
+            />
             <PermissionScopeGroup
               label={t("permission.fields")}
+              kind="fieldBits"
               setScope="field_set"
               setResource={`${database.name}.${table.name}`}
               itemScope="field"
@@ -342,6 +353,25 @@ function PermissionMatrix({
                   resource: `${database.name}.${table.name}`,
                   field: field.name
                 }))}
+              itemExtra={(item) => {
+                const field = table.fields.find((candidate) => candidate.name === item.field);
+                if (!field || field.type === "formula") {
+                  return null;
+                }
+                const level = grantLevel(grants, "field_modify", item.resource, item.field);
+                const defineLabel = t("permission.bits.define");
+                return (
+                  <ToggleButton
+                    size="small"
+                    checked={level >= 2}
+                    appearance={level >= 2 ? "primary" : "secondary"}
+                    aria-label={`${item.label} ${defineLabel}`}
+                    onClick={() => onGrantChange("field_modify", item.resource, item.field, level >= 2 ? 0 : 2)}
+                  >
+                    {defineLabel}
+                  </ToggleButton>
+                );
+              }}
               onGrantChange={onGrantChange}
             />
             <PermissionScopeGroup
@@ -350,12 +380,20 @@ function PermissionMatrix({
               setResource={`${database.name}.${table.name}`}
               itemScope="view"
               grants={grants}
-              items={table.views.map((view) => ({
-                key: view.name,
-                label: view.display_name || view.name,
-                resource: `${database.name}.${table.name}`,
-                field: view.name
-              }))}
+              items={[
+                {
+                  key: "all",
+                  label: t("permission.allRecordsView"),
+                  resource: `${database.name}.${table.name}`,
+                  field: "all"
+                },
+                ...table.views.map((view) => ({
+                  key: view.name,
+                  label: view.display_name || view.name,
+                  resource: `${database.name}.${table.name}`,
+                  field: view.name
+                }))
+              ]}
               onGrantChange={onGrantChange}
             />
           </div>
@@ -442,6 +480,40 @@ function RecordPermissionToggle(props: {
   );
 }
 
+// FieldAddToggle grants the metadata-level permission to add non-formula
+// fields to the table (e.g. for sync workflows using ensure_fields).
+function FieldAddToggle(props: {
+  grants: PermissionGrant[];
+  resource: string;
+  onGrantChange: (
+    scope: PermissionGrant["scope"],
+    resource: string,
+    field: string,
+    level: PermissionGrant["level"]
+  ) => void;
+}) {
+  const { t } = useTranslation();
+  const canAdd = grantLevel(props.grants, "field_add", props.resource, "") >= 2;
+  const label = t("permission.fieldAdd");
+
+  return (
+    <div className="permission-scope">
+      <span className="permission-scope-label">{t("permission.schema")}</span>
+      <div className="perm-split" role="group" aria-label={t("permission.schema")}>
+        <ToggleButton
+          className="perm-split-all"
+          appearance={canAdd ? "primary" : "secondary"}
+          checked={canAdd}
+          aria-label={label}
+          onClick={() => props.onGrantChange("field_add", props.resource, "", canAdd ? 0 : 2)}
+        >
+          {label}
+        </ToggleButton>
+      </div>
+    </div>
+  );
+}
+
 function FilePermissionToggle(props: {
   grants: PermissionGrant[];
   resource: string;
@@ -476,11 +548,13 @@ function FilePermissionToggle(props: {
 
 function PermissionScopeGroup(props: {
   label?: string;
+  kind?: "level" | "fieldBits";
   setScope: PermissionGrant["scope"];
   setResource: string;
   itemScope: PermissionGrant["scope"];
   grants: PermissionGrant[];
   items: ScopeItem[];
+  itemExtra?: (item: ScopeItem) => ReactNode;
   onGrantChange: (
     scope: PermissionGrant["scope"],
     resource: string,
@@ -490,6 +564,10 @@ function PermissionScopeGroup(props: {
 }) {
   const { t } = useTranslation();
   const levelLabels = useLevelLabels();
+  const fieldBitsKind = props.kind === "fieldBits";
+  const menuLevels: readonly number[] = fieldBitsKind ? fieldLevelPresets : permissionLevels;
+  const levelLabel = (level: number) =>
+    fieldBitsKind ? fieldLevelLabel(level, t) : levelLabels[level as (typeof permissionLevels)[number]];
   const setLevel = grantLevel(props.grants, props.setScope, props.setResource, "");
   const partialCount = props.items.filter(
     (item) => grantLevel(props.grants, props.itemScope, item.resource, item.field) > 0
@@ -523,14 +601,14 @@ function PermissionScopeGroup(props: {
               appearance={mode === "all" ? "primary" : "secondary"}
               aria-label={`${props.label ?? props.setScope} ${allLabel}`}
             >
-              {allLabel} · {levelLabels[setLevel]}
+              {allLabel} · {levelLabel(setLevel)}
             </MenuButton>
           </MenuTrigger>
           <MenuPopover>
             <MenuList>
-              {permissionLevels.map((level) => (
+              {menuLevels.map((level) => (
                 <MenuItem key={level} onClick={() => chooseAll(level)}>
-                  {levelLabels[level]}
+                  {levelLabel(level)}
                 </MenuItem>
               ))}
             </MenuList>
@@ -556,18 +634,74 @@ function PermissionScopeGroup(props: {
               <Text size={200}>{t("permission.noPartialItems")}</Text>
             ) : (
               <div className="permission-partial-list">
-                {props.items.map((item) => (
-                  <PermissionLevelSelect
-                    key={item.key}
-                    label={item.label}
-                    value={grantLevel(props.grants, props.itemScope, item.resource, item.field)}
-                    onChange={(level) => changeItem(item, level)}
-                  />
-                ))}
+                {props.items.map((item) =>
+                  fieldBitsKind ? (
+                    <FieldBitsSelect
+                      key={item.key}
+                      label={item.label}
+                      value={grantLevel(props.grants, props.itemScope, item.resource, item.field)}
+                      onChange={(level) => changeItem(item, level)}
+                      extra={props.itemExtra?.(item)}
+                    />
+                  ) : (
+                    <PermissionLevelSelect
+                      key={item.key}
+                      label={item.label}
+                      value={grantLevel(props.grants, props.itemScope, item.resource, item.field)}
+                      onChange={(level) => changeItem(item, level)}
+                    />
+                  )
+                )}
               </div>
             )}
           </PopoverSurface>
         </Popover>
+      </div>
+    </div>
+  );
+}
+
+function fieldLevelLabel(level: number, t: ReturnType<typeof useTranslation>["t"]): string {
+  if (!level) {
+    return t("permission.levels.none");
+  }
+  const parts: string[] = [];
+  if (level & 1) {
+    parts.push(t("permission.bits.read"));
+  }
+  if (level & 2) {
+    parts.push(t("permission.bits.update"));
+  }
+  if (level & 4) {
+    parts.push(t("permission.bits.create"));
+  }
+  return parts.join("+");
+}
+
+function FieldBitsSelect(props: { label: string; value: number; onChange: (level: number) => void; extra?: ReactNode }) {
+  const { t } = useTranslation();
+  const bitLabels: Record<number, string> = {
+    1: t("permission.bits.read"),
+    2: t("permission.bits.update"),
+    4: t("permission.bits.create")
+  };
+  return (
+    <div className="permission-row">
+      <span>{props.label}</span>
+      <div className="field-bits" role="group" aria-label={`${props.label} permission`}>
+        {fieldBits.map((bit) => (
+          <ToggleButton
+            key={bit}
+            size="small"
+            checked={(props.value & bit) !== 0}
+            appearance={(props.value & bit) !== 0 ? "primary" : "secondary"}
+            aria-label={`${props.label} ${bitLabels[bit]}`}
+            onClick={() => props.onChange(props.value ^ bit)}
+          >
+            {bitLabels[bit]}
+          </ToggleButton>
+        ))}
+        {props.extra}
       </div>
     </div>
   );

@@ -5,7 +5,8 @@ export type Field = {
   formula?: string;
   relation_table?: string;
   deleted: boolean;
-  permission_level?: 0 | 1 | 2;
+  // Bitmask: 1 = read, 2 = update existing rows, 4 = fill on create.
+  permission_level?: number;
 };
 
 export type TableViewQuery = {
@@ -167,10 +168,24 @@ export type FormDefinition = {
 
 export type PermissionGrant = {
   subject_id: string;
-  scope: "field_set" | "field" | "record" | "view_set" | "view" | "workflow_set" | "workflow" | "form_set" | "form" | "file";
+  scope:
+    | "field_set"
+    | "field"
+    | "field_add"
+    | "field_modify"
+    | "record"
+    | "view_set"
+    | "view"
+    | "workflow_set"
+    | "workflow"
+    | "form_set"
+    | "form"
+    | "file";
   resource: string;
   field: string;
-  level: 0 | 1 | 2;
+  // 0/1/2 for most scopes; field and field_set use the bitmask
+  // 1 = read, 2 = update, 4 = create.
+  level: number;
 };
 
 export type RoleDefinition = {

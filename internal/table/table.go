@@ -22,6 +22,10 @@ import (
 var (
 	ErrPermissionDenied = errors.New("permission denied")
 	ErrDeletedField     = errors.New("field is soft-deleted")
+	// ErrRecordNotFound is returned both when a record does not exist and
+	// when it exists outside the actor's row set, so probing cannot tell
+	// the two apart.
+	ErrRecordNotFound = errors.New("record not found")
 )
 
 type Row struct {
@@ -39,6 +43,10 @@ type RowListOptions struct {
 	Offset   int
 	Search   string
 }
+
+// CurrentUserPlaceholder in a view query rule value resolves to the acting
+// user's identity, letting one view serve per-user row isolation.
+const CurrentUserPlaceholder = "$current_user"
 
 type RowRepository interface {
 	EnsureTable(ctx context.Context, dbName string, tableMeta metadata.Table) error
@@ -64,6 +72,7 @@ type Service struct {
 	history     history.Store
 	rowChangeFn RowChangeHandler
 	fileBinder  FileBinder
+	identityFn  func(ctx context.Context, actorID string) string
 }
 
 func NewServiceWithRepository(historyStore history.Store, rows RowRepository) *Service {
@@ -85,6 +94,25 @@ func (service *Service) SetFileBinder(binder FileBinder) {
 	service.mu.Lock()
 	defer service.mu.Unlock()
 	service.fileBinder = binder
+}
+
+// SetIdentityResolver maps an actor id to the value $current_user resolves
+// to in view queries (the user's email). Without a resolver the raw actor
+// id is used.
+func (service *Service) SetIdentityResolver(resolver func(ctx context.Context, actorID string) string) {
+	service.mu.Lock()
+	defer service.mu.Unlock()
+	service.identityFn = resolver
+}
+
+func (service *Service) identityFor(ctx context.Context, actorID string) string {
+	service.mu.RLock()
+	resolver := service.identityFn
+	service.mu.RUnlock()
+	if resolver == nil {
+		return actorID
+	}
+	return resolver(ctx, actorID)
 }
 
 // bindFileValues locks every referenced file to this record. Binding is
@@ -124,7 +152,7 @@ func (service *Service) CreateRow(ctx context.Context, catalog metadata.Catalog,
 	if !isDatabaseOwner && !perms.CanCreateRecord(actorID, resource) {
 		return Row{}, fmt.Errorf("%w: %s", ErrPermissionDenied, resource)
 	}
-	if err := validateWritableFields(tableMeta, perms, actorID, isDatabaseOwner, resource, values); err != nil {
+	if err := validateWritableFields(tableMeta, perms, actorID, isDatabaseOwner, resource, values, permission.FieldCreate); err != nil {
 		return Row{}, err
 	}
 	storedValues, err := normalizeInputValues(tableMeta, values)
@@ -166,7 +194,7 @@ func (service *Service) CreateRow(ctx context.Context, catalog metadata.Catalog,
 		return Row{}, err
 	}
 	service.notifyRowChange(ctx, historyKey, change)
-	return row, nil
+	return filterReadableRow(perms, actorID, isDatabaseOwner, resource, row), nil
 }
 
 func (service *Service) UpdateRow(ctx context.Context, catalog metadata.Catalog, perms permission.Set, actorID string, isDatabaseOwner bool, dbName, tableName string, recordID int64, values map[string]any) (Row, error) {
@@ -175,8 +203,13 @@ func (service *Service) UpdateRow(ctx context.Context, catalog metadata.Catalog,
 		return Row{}, fmt.Errorf("table %s.%s not found", dbName, tableName)
 	}
 	resource := dbName + "." + tableName
-	if err := validateWritableFields(tableMeta, perms, actorID, isDatabaseOwner, resource, values); err != nil {
+	if err := validateWritableFields(tableMeta, perms, actorID, isDatabaseOwner, resource, values, permission.FieldUpdate); err != nil {
 		return Row{}, err
+	}
+	if inRowSet, err := service.RowInActorRowSet(ctx, catalog, perms, actorID, isDatabaseOwner, dbName, tableName, recordID); err != nil {
+		return Row{}, err
+	} else if !inRowSet {
+		return Row{}, fmt.Errorf("%w: %d", ErrRecordNotFound, recordID)
 	}
 
 	existing, err := service.rows.Row(ctx, dbName, tableMeta, recordID)
@@ -218,7 +251,7 @@ func (service *Service) UpdateRow(ctx context.Context, catalog metadata.Catalog,
 		return Row{}, err
 	}
 	service.notifyRowChange(ctx, historyKey, change)
-	return updated, nil
+	return filterReadableRow(perms, actorID, isDatabaseOwner, resource, updated), nil
 }
 
 func (service *Service) DeleteRow(ctx context.Context, catalog metadata.Catalog, perms permission.Set, actorID string, isDatabaseOwner bool, dbName, tableName string, recordID int64) (Row, error) {
@@ -229,6 +262,11 @@ func (service *Service) DeleteRow(ctx context.Context, catalog metadata.Catalog,
 	resource := dbName + "." + tableName
 	if !isDatabaseOwner && !perms.CanDeleteRecord(actorID, resource) {
 		return Row{}, fmt.Errorf("%w: %s", ErrPermissionDenied, resource)
+	}
+	if inRowSet, err := service.RowInActorRowSet(ctx, catalog, perms, actorID, isDatabaseOwner, dbName, tableName, recordID); err != nil {
+		return Row{}, err
+	} else if !inRowSet {
+		return Row{}, fmt.Errorf("%w: %d", ErrRecordNotFound, recordID)
 	}
 
 	row, err := service.rows.DeleteRow(ctx, dbName, tableMeta, recordID)
@@ -251,7 +289,7 @@ func (service *Service) DeleteRow(ctx context.Context, catalog metadata.Catalog,
 		return Row{}, err
 	}
 	service.notifyRowChange(ctx, historyKey, change)
-	return row, nil
+	return filterReadableRow(perms, actorID, isDatabaseOwner, resource, row), nil
 }
 
 func (service *Service) Rows(ctx context.Context, catalog metadata.Catalog, perms permission.Set, actorID string, isDatabaseOwner bool, dbName, tableName, viewName string, temporarySorts ...metadata.ViewSort) ([]Row, error) {
@@ -269,6 +307,7 @@ func (service *Service) RowsWithOptions(ctx context.Context, catalog metadata.Ca
 	if empty {
 		return []Row{}, nil
 	}
+	resolved.Query = substituteQueryVariables(resolved.Query, service.identityFor(ctx, actorID))
 	rows, err := service.rows.Rows(ctx, dbName, tableMeta, resolved)
 	if err != nil {
 		return nil, err
@@ -287,6 +326,7 @@ func (service *Service) RowsPageWithOptions(ctx context.Context, catalog metadat
 	if empty {
 		return []Row{}, 0, nil
 	}
+	resolved.Query = substituteQueryVariables(resolved.Query, service.identityFor(ctx, actorID))
 	countView := metadata.ResolvedView{Name: resolved.Name, Query: resolved.Query}
 	total, err := service.rows.CountRows(ctx, dbName, tableMeta, countView)
 	if err != nil {
@@ -309,19 +349,23 @@ func resolveRowListOptions(catalog metadata.Catalog, perms permission.Set, actor
 	}
 	resource := dbName + "." + tableName
 
-	var resolved metadata.ResolvedView
-	if options.ViewName != "" {
-		var err error
-		resolved, err = tableMeta.ResolveView(options.ViewName)
-		if err != nil {
-			return metadata.Table{}, metadata.ResolvedView{}, false, err
-		}
-		if !perms.CanReadView(actorID, resource, options.ViewName) && !isDatabaseOwner {
-			return metadata.Table{}, metadata.ResolvedView{}, false, fmt.Errorf("%w: view %s", ErrPermissionDenied, options.ViewName)
-		}
-		if !isDatabaseOwner && !viewFieldsReadable(perms, actorID, resource, resolved.Query, resolved.Sorts) {
-			return metadata.Table{}, metadata.ResolvedView{}, false, fmt.Errorf("%w: view %s", ErrPermissionDenied, options.ViewName)
-		}
+	// Every read resolves to a view: the view is the row-level permission
+	// boundary, and the built-in unfiltered "all" view needs a grant like
+	// any other. An empty view name means "all" — there is no unchecked
+	// path.
+	viewName := options.ViewName
+	if viewName == "" {
+		viewName = metadata.AllViewName
+	}
+	resolved, err := tableMeta.ResolveView(viewName)
+	if err != nil {
+		return metadata.Table{}, metadata.ResolvedView{}, false, err
+	}
+	if !isDatabaseOwner && !perms.CanReadView(actorID, resource, viewName) {
+		return metadata.Table{}, metadata.ResolvedView{}, false, fmt.Errorf("%w: view %s", ErrPermissionDenied, viewName)
+	}
+	if !isDatabaseOwner && !viewFieldsReadable(perms, actorID, resource, resolved.Query, resolved.Sorts) {
+		return metadata.Table{}, metadata.ResolvedView{}, false, fmt.Errorf("%w: view %s", ErrPermissionDenied, viewName)
 	}
 	if options.Query != nil {
 		if !isDatabaseOwner && !viewFieldsReadable(perms, actorID, resource, options.Query, nil) {
@@ -365,6 +409,88 @@ func resolveRowListOptions(catalog metadata.Catalog, perms permission.Set, actor
 	return tableMeta, resolved, false, nil
 }
 
+// substituteQueryVariables clones the query, replacing $current_user rule
+// values with the acting user's identity. Cloning matters: resolved queries
+// share nodes with the cached catalog metadata.
+func substituteQueryVariables(query *metadata.ViewQuery, identity string) *metadata.ViewQuery {
+	if query == nil {
+		return nil
+	}
+	next := *query
+	next.Rules = substituteRuleVariables(query.Rules, identity)
+	return &next
+}
+
+func substituteRuleVariables(rules []metadata.ViewQueryRule, identity string) []metadata.ViewQueryRule {
+	if len(rules) == 0 {
+		return rules
+	}
+	next := make([]metadata.ViewQueryRule, len(rules))
+	for i, rule := range rules {
+		rule.Rules = substituteRuleVariables(rule.Rules, identity)
+		if value, ok := rule.Value.(string); ok && value == CurrentUserPlaceholder {
+			rule.Value = identity
+		}
+		next[i] = rule
+	}
+	return next
+}
+
+// RowInActorRowSet reports whether a record belongs to the actor's row set:
+// the union of the rows selected by every view the actor may read. The
+// database owner sees everything. Any operation touching an existing row
+// must pass this check; failures are reported as "not found".
+func (service *Service) RowInActorRowSet(ctx context.Context, catalog metadata.Catalog, perms permission.Set, actorID string, isDatabaseOwner bool, dbName, tableName string, recordID int64) (bool, error) {
+	if isDatabaseOwner {
+		return true, nil
+	}
+	tableMeta, ok := catalog.Table(dbName, tableName)
+	if !ok {
+		return false, fmt.Errorf("table %s.%s not found", dbName, tableName)
+	}
+	resource := dbName + "." + tableName
+	viewNames := make([]string, 0, len(tableMeta.Views)+1)
+	viewNames = append(viewNames, metadata.AllViewName)
+	for _, view := range tableMeta.Views {
+		viewNames = append(viewNames, view.Name)
+	}
+	identity := service.identityFor(ctx, actorID)
+	for _, viewName := range viewNames {
+		if !perms.CanReadView(actorID, resource, viewName) {
+			continue
+		}
+		resolved, err := tableMeta.ResolveView(viewName)
+		if err != nil {
+			continue
+		}
+		if !viewFieldsReadable(perms, actorID, resource, resolved.Query, nil) {
+			continue
+		}
+		if viewName == metadata.AllViewName {
+			return service.recordExists(ctx, dbName, tableMeta, recordID, nil)
+		}
+		query := substituteQueryVariables(resolved.Query, identity)
+		if exists, err := service.recordExists(ctx, dbName, tableMeta, recordID, query); err != nil {
+			return false, err
+		} else if exists {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (service *Service) recordExists(ctx context.Context, dbName string, tableMeta metadata.Table, recordID int64, query *metadata.ViewQuery) (bool, error) {
+	membership := combineRuntimeQueries(query, &metadata.ViewQuery{
+		Combinator: "and",
+		Rules:      []metadata.ViewQueryRule{{Field: "ct_record_id", Operator: "=", Value: recordID}},
+	})
+	count, err := service.rows.CountRows(ctx, dbName, tableMeta, metadata.ResolvedView{Query: membership})
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
 // searchViewQuery expands a free-text search term into an OR group of
 // contains-rules over the fields the actor can read. Relation and file
 // fields are excluded: they store internal integer ids, so a match there
@@ -389,6 +515,12 @@ func searchViewQuery(tableMeta metadata.Table, perms permission.Set, actorID, re
 		return nil, false
 	}
 	return &metadata.ViewQuery{Combinator: "or", Rules: rules}, true
+}
+
+// filterReadableRow redacts values the actor cannot read from a single row,
+// so write operations never echo back more than the actor may see.
+func filterReadableRow(perms permission.Set, actorID string, isDatabaseOwner bool, resource string, row Row) Row {
+	return filterReadableRowValues(perms, actorID, isDatabaseOwner, resource, []Row{row})[0]
 }
 
 func filterReadableRowValues(perms permission.Set, actorID string, isDatabaseOwner bool, resource string, rows []Row) []Row {
@@ -489,7 +621,10 @@ func viewQueryRuleFields(rule metadata.ViewQueryRule) []string {
 	return []string{rule.Field}
 }
 
-func validateWritableFields(tableMeta metadata.Table, perms permission.Set, actorID string, isDatabaseOwner bool, resource string, values map[string]any) error {
+// validateWritableFields checks every supplied field against requiredBit:
+// permission.FieldCreate when creating a row, permission.FieldUpdate when
+// modifying an existing one.
+func validateWritableFields(tableMeta metadata.Table, perms permission.Set, actorID string, isDatabaseOwner bool, resource string, values map[string]any, requiredBit permission.Level) error {
 	for fieldName := range values {
 		field, ok := tableMeta.Field(fieldName)
 		if !ok {
@@ -504,7 +639,7 @@ func validateWritableFields(tableMeta metadata.Table, perms permission.Set, acto
 		if field.Type == "formula" {
 			return fmt.Errorf("%w: %s", ErrPermissionDenied, fieldName)
 		}
-		if !isDatabaseOwner && !perms.CanWriteField(actorID, resource, fieldName) {
+		if !isDatabaseOwner && perms.FieldLevel(actorID, resource, fieldName)&requiredBit == 0 {
 			return fmt.Errorf("%w: %s", ErrPermissionDenied, fieldName)
 		}
 	}

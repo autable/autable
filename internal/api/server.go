@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"crypto/subtle"
 	"encoding/json"
@@ -317,6 +318,7 @@ func NewServerWithWorkflowRunnerAndAuth(catalog metadata.Catalog, system *system
 	}, runnerhub.DefaultJobTimeout)
 	server.runner.SetRemoteDispatcher(server.runnerHub)
 	server.tables.SetRowChangeHandler(server.dispatchRowChangeEvent)
+	server.tables.SetIdentityResolver(server.actorQueryIdentity)
 	server.routes()
 	return server
 }
@@ -937,6 +939,17 @@ func (server *Server) listTableRowsPageAs(ctx context.Context, actorID string, d
 	return server.tables.RowsPageWithOptions(ctx, server.catalogSnapshot(), perms, actorID, isOwner, dbName, tableName, options)
 }
 
+// actorQueryIdentity is the value $current_user resolves to in view
+// queries: the user's email, or the raw subject id for non-user subjects
+// (workflows, roles), which normally matches no rows.
+func (server *Server) actorQueryIdentity(ctx context.Context, actorID string) string {
+	user, err := server.system.User(ctx, actorID)
+	if err == nil && user.Email != "" {
+		return user.Email
+	}
+	return actorID
+}
+
 func (server *Server) upsertTableRowAs(ctx context.Context, actorID string, dbName string, tableName string, matchField string, values map[string]any) (table.Row, string, error) {
 	perms, isOwner, err := server.tablePermissions(ctx, actorID, dbName)
 	if err != nil {
@@ -951,8 +964,15 @@ func (server *Server) createTableFieldsAs(ctx context.Context, actorID string, d
 		return workflowFieldMutation{}, err
 	}
 	resource := dbName + "." + tableName
-	if !isOwner && perms.ResourceLevel(actorID, permission.ScopeFieldSet, resource) < permission.Write {
-		return workflowFieldMutation{}, table.ErrPermissionDenied
+	if !isOwner {
+		if !perms.CanAddFields(actorID, resource) {
+			return workflowFieldMutation{}, table.ErrPermissionDenied
+		}
+		for _, field := range fields {
+			if field.Type == "formula" {
+				return workflowFieldMutation{}, fmt.Errorf("%w: formula fields require database owner", table.ErrPermissionDenied)
+			}
+		}
 	}
 	return server.addTableFields(ctx, dbName, tableName, fields)
 }
@@ -973,6 +993,9 @@ func writeTableMutationError(w http.ResponseWriter, err error) {
 	status := http.StatusBadRequest
 	if errors.Is(err, table.ErrPermissionDenied) {
 		status = http.StatusForbidden
+	}
+	if errors.Is(err, table.ErrRecordNotFound) {
+		status = http.StatusNotFound
 	}
 	writeError(w, status, err)
 }
@@ -1091,8 +1114,7 @@ func (server *Server) handleRowHistory(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	tableMeta, ok := server.catalogSnapshot().Table(dbName, tableName)
-	if !ok {
+	if _, ok := server.catalogSnapshot().Table(dbName, tableName); !ok {
 		writeError(w, http.StatusBadRequest, fmt.Errorf("table %s.%s not found", dbName, tableName))
 		return
 	}
@@ -1107,9 +1129,19 @@ func (server *Server) handleRowHistory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resource := dbName + "." + tableName
-	if !canReadRowHistory(perms, actorID, isOwner, resource, tableMeta) {
-		writeError(w, http.StatusForbidden, table.ErrPermissionDenied)
-		return
+	// Row history is row-level: the record must be inside the actor's row
+	// set, and historical values are redacted to readable fields — the
+	// same double gate as live reads.
+	if !isOwner {
+		inRowSet, err := server.tables.RowInActorRowSet(r.Context(), server.catalogSnapshot(), perms, actorID, false, dbName, tableName, recordID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		if !inRowSet {
+			writeError(w, http.StatusNotFound, fmt.Errorf("%w: %d", table.ErrRecordNotFound, recordID))
+			return
+		}
 	}
 	entries, err := server.history.GetPrefix(r.Context(), history.RowPrefix(dbName, tableName, recordID))
 	if err != nil {
@@ -1123,7 +1155,8 @@ func (server *Server) handleRowHistory(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, err)
 			return
 		}
-		change.Values = readableHistoryValues(change.Values, perms, actorID, isOwner, resource, tableMeta)
+		change.Values = readableHistoryValues(change.Values, perms, actorID, isOwner, resource)
+		change.Diff = readableHistoryDiff(change.Diff, perms, actorID, isOwner, resource)
 		changes = append(changes, rowHistoryResponse{HistoryKey: entry.Key, RowChange: change})
 	}
 	writeJSON(w, http.StatusOK, changes)
@@ -1502,38 +1535,86 @@ func (server *Server) handleUpdateTableMetadata(w http.ResponseWriter, r *http.R
 	writeJSON(w, http.StatusOK, visibleTableMetadata(perms, actorID, dbName, isOwner, updated))
 }
 
+// authorizeFieldMetadataPatch enforces the metadata layer: field_add for
+// new fields, per-field field_modify for definition changes, and owner-only
+// for anything involving formulas or deletion. Formulas evaluate over the
+// whole row server-side, so letting anyone else define them would bypass
+// field read permissions.
 func (server *Server) authorizeFieldMetadataPatch(w http.ResponseWriter, actorID string, isOwner bool, dbName, tableName string, perms permission.Set, existing metadata.Table, fields []metadata.Field) bool {
-	resource := dbName + "." + tableName
-	if !isOwner && !perms.CanWriteResource(actorID, permission.ScopeFieldSet, resource) {
-		writeError(w, http.StatusForbidden, table.ErrPermissionDenied)
-		return false
+	if isOwner {
+		return true
 	}
+	resource := dbName + "." + tableName
 	for _, field := range fields {
 		existingField, ok := existing.Field(field.Name)
-		if ok && !existingField.Deleted && field.Deleted && !isOwner {
+		switch {
+		case !ok:
+			if field.Type == "formula" {
+				writeError(w, http.StatusForbidden, fmt.Errorf("formula field %q requires database owner", field.Name))
+				return false
+			}
+			if !perms.CanAddFields(actorID, resource) {
+				writeError(w, http.StatusForbidden, fmt.Errorf("adding field %q requires the field_add permission", field.Name))
+				return false
+			}
+		case existingField.Deleted != field.Deleted:
 			writeError(w, http.StatusForbidden, fmt.Errorf("delete field %q requires database owner", field.Name))
 			return false
+		case fieldDefinitionChanged(existingField, field):
+			if existingField.Type == "formula" || field.Type == "formula" {
+				writeError(w, http.StatusForbidden, fmt.Errorf("formula field %q requires database owner", field.Name))
+				return false
+			}
+			if !perms.CanModifyField(actorID, resource, field.Name) {
+				writeError(w, http.StatusForbidden, fmt.Errorf("modifying field %q requires the field_modify permission", field.Name))
+				return false
+			}
 		}
 	}
 	return true
 }
 
-func (server *Server) authorizeViewMetadataPatch(w http.ResponseWriter, actorID string, isOwner bool, dbName, tableName string, perms permission.Set, existing metadata.Table, views []metadata.View) bool {
-	resource := dbName + "." + tableName
-	if isOwner || perms.CanWriteResource(actorID, permission.ScopeViewSet, resource) {
+func fieldDefinitionChanged(existing, incoming metadata.Field) bool {
+	return existing.Type != incoming.Type ||
+		existing.ValueType != incoming.ValueType ||
+		existing.Formula != incoming.Formula ||
+		existing.RelationTable != incoming.RelationTable
+}
+
+// authorizeViewMetadataPatch: view definitions are the row-level permission
+// boundary, so changing them is database-owner-only. Unchanged views pass so
+// non-owners with field rights can still PUT the full table metadata.
+func (server *Server) authorizeViewMetadataPatch(w http.ResponseWriter, _ string, isOwner bool, _, _ string, _ permission.Set, existing metadata.Table, views []metadata.View) bool {
+	if isOwner || viewDefinitionsEqual(existing.Views, views) {
 		return true
 	}
-	for _, view := range views {
-		if _, ok := existing.View(view.Name); !ok {
-			writeError(w, http.StatusForbidden, fmt.Errorf("create view %q requires view set write permission", view.Name))
-			return false
+	writeError(w, http.StatusForbidden, errors.New("changing views requires database owner"))
+	return false
+}
+
+// viewDefinitionsEqual compares view definitions ignoring the response-only
+// permission level annotation the frontend echoes back.
+func viewDefinitionsEqual(existing, incoming []metadata.View) bool {
+	normalize := func(views []metadata.View) []metadata.View {
+		next := make([]metadata.View, len(views))
+		for i, view := range views {
+			view.PermissionLevel = 0
+			if view.Sorts == nil {
+				view.Sorts = []metadata.ViewSort{}
+			}
+			next[i] = view
 		}
-		if !perms.CanWriteView(actorID, resource, view.Name) {
-			writeError(w, http.StatusForbidden, table.ErrPermissionDenied)
-			return false
-		}
+		return next
 	}
-	return true
+	left, err := json.Marshal(normalize(existing))
+	if err != nil {
+		return false
+	}
+	right, err := json.Marshal(normalize(incoming))
+	if err != nil {
+		return false
+	}
+	return bytes.Equal(left, right)
 }
 
 func (server *Server) handleWorkflowRunsRoute(w http.ResponseWriter, r *http.Request) {
@@ -2475,13 +2556,23 @@ func visibleTableMetadata(perms permission.Set, actorID, dbName string, isOwner 
 	if isOwner {
 		dbLevel = permission.Write
 	}
-	fieldSetLevel := perms.ResourceLevel(actorID, permission.ScopeFieldSet, resource)
+	// Field grant levels are bitmasks; collapse them to the legacy 0/1/2
+	// scale for the table-level UI hints (2 = may add fields).
+	fieldSetHint := permission.None
+	if perms.CanAddFields(actorID, resource) {
+		fieldSetHint = permission.Write
+	} else if perms.FieldSetLevel(actorID, resource) != permission.None {
+		fieldSetHint = permission.Read
+	}
+	// View management is owner-only; view grants only confer read, so the
+	// view-set hint is clamped to read for non-owners.
 	viewSetLevel := perms.ResourceLevel(actorID, permission.ScopeViewSet, resource)
+	viewSetHint := minPermissionLevel(viewSetLevel, permission.Read)
 	annotated := tableMeta
-	annotated.PermissionLevel = int(maxPermissionLevel(dbLevel, maxPermissionLevel(fieldSetLevel, viewSetLevel)))
+	annotated.PermissionLevel = int(maxPermissionLevel(dbLevel, maxPermissionLevel(fieldSetHint, viewSetHint)))
 	annotated.DatabasePermissionLevel = int(dbLevel)
-	annotated.FieldPermissionLevel = int(maxPermissionLevel(dbLevel, fieldSetLevel))
-	annotated.ViewPermissionLevel = int(maxPermissionLevel(dbLevel, viewSetLevel))
+	annotated.FieldPermissionLevel = int(maxPermissionLevel(dbLevel, fieldSetHint))
+	annotated.ViewPermissionLevel = int(dbLevel)
 	if dbLevel >= permission.Write {
 		annotated.Fields = annotateFieldPermissionLevels(perms, actorID, resource, dbLevel, annotated.Fields)
 		annotated.Views = annotateViewPermissionLevels(perms, actorID, resource, dbLevel, annotated.Views)
@@ -2507,7 +2598,7 @@ func visibleTableMetadata(perms permission.Set, actorID, dbName string, isOwner 
 			continue
 		}
 		if viewFieldsReadable(perms, actorID, resource, resolved.Query, resolved.Sorts) {
-			view.PermissionLevel = int(viewLevel)
+			view.PermissionLevel = int(minPermissionLevel(viewLevel, permission.Read))
 			visible.Views = append(visible.Views, view)
 		}
 	}
@@ -2517,7 +2608,11 @@ func visibleTableMetadata(perms permission.Set, actorID, dbName string, isOwner 
 func annotateFieldPermissionLevels(perms permission.Set, actorID, resource string, dbLevel permission.Level, fields []metadata.Field) []metadata.Field {
 	annotated := make([]metadata.Field, 0, len(fields))
 	for _, field := range fields {
-		field.PermissionLevel = int(maxPermissionLevel(dbLevel, perms.FieldLevel(actorID, resource, field.Name)))
+		level := perms.FieldLevel(actorID, resource, field.Name)
+		if dbLevel >= permission.Write {
+			level = permission.FieldAll
+		}
+		field.PermissionLevel = int(level)
 		annotated = append(annotated, field)
 	}
 	return annotated
@@ -2526,10 +2621,18 @@ func annotateFieldPermissionLevels(perms permission.Set, actorID, resource strin
 func annotateViewPermissionLevels(perms permission.Set, actorID, resource string, dbLevel permission.Level, views []metadata.View) []metadata.View {
 	annotated := make([]metadata.View, 0, len(views))
 	for _, view := range views {
-		view.PermissionLevel = int(maxPermissionLevel(dbLevel, perms.ViewLevel(actorID, resource, view.Name)))
+		level := minPermissionLevel(perms.ViewLevel(actorID, resource, view.Name), permission.Read)
+		view.PermissionLevel = int(maxPermissionLevel(dbLevel, level))
 		annotated = append(annotated, view)
 	}
 	return annotated
+}
+
+func minPermissionLevel(left, right permission.Level) permission.Level {
+	if left < right {
+		return left
+	}
+	return right
 }
 
 func maxPermissionLevel(left, right permission.Level) permission.Level {
@@ -2662,7 +2765,7 @@ func (server *Server) requireDatabaseOwner(w http.ResponseWriter, r *http.Reques
 
 func (server *Server) grantDatabaseName(ctx context.Context, grant permission.Grant) (string, error) {
 	switch grant.Scope {
-	case permission.ScopeFieldSet, permission.ScopeField, permission.ScopeRecord, permission.ScopeViewSet, permission.ScopeView, permission.ScopeFile:
+	case permission.ScopeFieldSet, permission.ScopeField, permission.ScopeRecord, permission.ScopeViewSet, permission.ScopeView, permission.ScopeFile, permission.ScopeFieldAdd, permission.ScopeFieldModify:
 		dbName, _, ok := strings.Cut(grant.Resource, ".")
 		if !ok || dbName == "" {
 			return "", fmt.Errorf("grant resource %q must be db.table", grant.Resource)
@@ -2891,6 +2994,16 @@ func (server *Server) validateRoleMembers(ctx context.Context, dbName string, me
 
 func (server *Server) validateGrantResource(ctx context.Context, dbName string, grant permission.Grant) error {
 	switch grant.Scope {
+	case permission.ScopeField, permission.ScopeFieldSet:
+		if grant.Level < permission.None || grant.Level > permission.FieldAll {
+			return fmt.Errorf("field grant level must be a bitmask between 0 and %d, got %d", permission.FieldAll, grant.Level)
+		}
+	default:
+		if grant.Level < permission.None || grant.Level > permission.Write {
+			return fmt.Errorf("grant level must be between 0 and %d, got %d", permission.Write, grant.Level)
+		}
+	}
+	switch grant.Scope {
 	case permission.ScopeFieldSet:
 		if grant.Field != "" {
 			return errors.New("field set grant cannot include field")
@@ -2955,7 +3068,7 @@ func (server *Server) validateGrantResource(ctx context.Context, dbName string, 
 		if grant.Field == "" {
 			return errors.New("view grant requires field")
 		}
-		found := false
+		found := grant.Field == metadata.AllViewName
 		for _, view := range tableMeta.Views {
 			if view.Name == grant.Field {
 				found = true
@@ -2975,6 +3088,36 @@ func (server *Server) validateGrantResource(ctx context.Context, dbName string, 
 		}
 		if _, ok := server.catalogSnapshot().Table(dbName, tableName); !ok {
 			return fmt.Errorf("table %s.%s not found", dbName, tableName)
+		}
+	case permission.ScopeFieldAdd:
+		if grant.Field != "" {
+			return errors.New("field add grant cannot include field")
+		}
+		_, tableName, ok := strings.Cut(grant.Resource, ".")
+		if !ok || tableName == "" {
+			return fmt.Errorf("grant resource %q must be db.table", grant.Resource)
+		}
+		if _, ok := server.catalogSnapshot().Table(dbName, tableName); !ok {
+			return fmt.Errorf("table %s.%s not found", dbName, tableName)
+		}
+	case permission.ScopeFieldModify:
+		_, tableName, ok := strings.Cut(grant.Resource, ".")
+		if !ok || tableName == "" {
+			return fmt.Errorf("grant resource %q must be db.table", grant.Resource)
+		}
+		tableMeta, ok := server.catalogSnapshot().Table(dbName, tableName)
+		if !ok {
+			return fmt.Errorf("table %s.%s not found", dbName, tableName)
+		}
+		if grant.Field == "" {
+			return errors.New("field modify grant requires field")
+		}
+		field, ok := tableMeta.Field(grant.Field)
+		if !ok || field.Deleted || strings.HasPrefix(field.Name, "ct_") {
+			return fmt.Errorf("field %s.%s.%s not found", dbName, tableName, grant.Field)
+		}
+		if field.Type == "formula" {
+			return errors.New("formula fields are managed by the database owner only")
 		}
 	case permission.ScopeWorkflowSet:
 		if grant.Resource != dbName {
@@ -3170,14 +3313,25 @@ func (server *Server) formPermissionLevel(ctx context.Context, perms permission.
 	)
 }
 
-func canReadRowHistory(_ permission.Set, _ string, isDatabaseOwner bool, _ string, _ metadata.Table) bool {
-	return isDatabaseOwner
-}
-
-func readableHistoryValues(values map[string]any, _ permission.Set, _ string, _ bool, _ string, _ metadata.Table) map[string]any {
+func readableHistoryValues(values map[string]any, perms permission.Set, actorID string, isDatabaseOwner bool, resource string) map[string]any {
 	readable := make(map[string]any, len(values))
 	for fieldName, value := range values {
-		readable[fieldName] = value
+		if isDatabaseOwner || perms.CanReadField(actorID, resource, fieldName) {
+			readable[fieldName] = value
+		}
+	}
+	return readable
+}
+
+func readableHistoryDiff(diff history.RowDiff, perms permission.Set, actorID string, isDatabaseOwner bool, resource string) history.RowDiff {
+	if diff == nil {
+		return nil
+	}
+	readable := make(history.RowDiff, len(diff))
+	for fieldName, fieldDiff := range diff {
+		if isDatabaseOwner || perms.CanReadField(actorID, resource, fieldName) {
+			readable[fieldName] = fieldDiff
+		}
 	}
 	return readable
 }
@@ -3809,11 +3963,24 @@ func previewableContentType(contentType string) bool {
 // canViewFile allows downloads only for files already bound to a record:
 // permissions are mandatory, so an upload that no row references yet is
 // visible to nobody. The viewer additionally needs table file access.
+// canViewFile is row-level: besides the table file grant, the record the
+// file is bound to must be inside the actor's row set.
 func (server *Server) canViewFile(ctx context.Context, actorID string, record systemdb.FileRecord) bool {
 	if record.RecordID <= 0 {
 		return false
 	}
-	return server.canAccessTableFiles(ctx, actorID, record.DatabaseName, record.TableName)
+	if !server.canAccessTableFiles(ctx, actorID, record.DatabaseName, record.TableName) {
+		return false
+	}
+	if server.isDatabaseOwner(ctx, actorID, record.DatabaseName) {
+		return true
+	}
+	perms, err := server.system.EffectiveGrantsForSubject(ctx, actorID)
+	if err != nil {
+		return false
+	}
+	inRowSet, err := server.tables.RowInActorRowSet(ctx, server.catalogSnapshot(), perms, actorID, false, record.DatabaseName, record.TableName, record.RecordID)
+	return err == nil && inRowSet
 }
 
 // canAccessTableFiles reports whether the actor may work with files of the

@@ -37,6 +37,26 @@ var migrations = []func(orm *gorm.DB) error{
 	func(orm *gorm.DB) error {
 		return orm.Exec("DROP TABLE IF EXISTS `runner_token_models`").Error
 	},
+	// 2 → 3: field grant levels became bitmasks (read=1, update=2,
+	// create=4). Legacy level 2 meant full write access, which is 7 in
+	// bits; leaving it untouched would silently mean "update only".
+	func(orm *gorm.DB) error {
+		return orm.Exec("UPDATE `permission_grant_models` SET `level` = 7 WHERE `scope` IN ('field', 'field_set') AND `level` = 2").Error
+	},
+	// 3 → 4: adding fields moved from "full field_set grant" to the
+	// dedicated field_add metadata scope. Subjects holding a full-bit
+	// field_set grant (the pre-split full-access semantics, e.g. workflow
+	// subjects relying on ensure_fields) keep their ability via a seeded
+	// field_add grant.
+	func(orm *gorm.DB) error {
+		return orm.Exec(
+			"INSERT INTO `permission_grant_models` (`subject_id`, `scope`, `resource`, `field`, `level`) " +
+				"SELECT `subject_id`, 'field_add', `resource`, '', 2 FROM `permission_grant_models` source " +
+				"WHERE `scope` = 'field_set' AND `level` = 7 " +
+				"AND NOT EXISTS (SELECT 1 FROM `permission_grant_models` existing " +
+				"WHERE existing.`subject_id` = source.`subject_id` AND existing.`scope` = 'field_add' " +
+				"AND existing.`resource` = source.`resource` AND existing.`field` = '')").Error
+	},
 }
 
 func currentSchemaVersion() int64 {

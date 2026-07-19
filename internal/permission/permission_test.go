@@ -11,10 +11,10 @@ func TestFieldLevelPermission(t *testing.T) {
 	if !perms.CanReadField("u1", "db.contacts", "name") {
 		t.Fatal("expected table read permission to apply")
 	}
-	if perms.CanWriteField("u1", "db.contacts", "name") {
+	if perms.CanUpdateField("u1", "db.contacts", "name") {
 		t.Fatal("did not expect table read permission to allow writes")
 	}
-	if !perms.CanWriteField("u1", "db.contacts", "email") {
+	if !perms.CanUpdateField("u1", "db.contacts", "email") {
 		t.Fatal("expected field write override")
 	}
 	if perms.CanReadField("u2", "db.contacts", "email") {
@@ -28,13 +28,13 @@ func TestFieldGrantsDoNotOverrideFieldSet(t *testing.T) {
 		Grant{SubjectID: "u1", Scope: ScopeField, Resource: "db.contacts", Field: "email", Level: Read},
 	)
 
-	if !perms.CanWriteField("u1", "db.contacts", "name") {
+	if !perms.CanUpdateField("u1", "db.contacts", "name") {
 		t.Fatal("expected field set write permission to apply without a field grant")
 	}
 	if !perms.CanReadField("u1", "db.contacts", "email") {
 		t.Fatal("expected field read grant to allow reads")
 	}
-	if !perms.CanWriteField("u1", "db.contacts", "email") {
+	if !perms.CanUpdateField("u1", "db.contacts", "email") {
 		t.Fatal("expected field set write to remain effective")
 	}
 }
