@@ -13,6 +13,7 @@ import (
 
 	"autable/internal/auth"
 	"autable/internal/permission"
+	"autable/internal/sqliteutil"
 
 	"github.com/google/uuid"
 	"gorm.io/driver/sqlite"
@@ -175,7 +176,7 @@ func Open(ctx context.Context, path string) (*DB, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, err
 	}
-	orm, err := gorm.Open(sqlite.Open(path), &gorm.Config{})
+	orm, err := gorm.Open(sqlite.Open(sqliteutil.DSN(path)), &gorm.Config{})
 	if err != nil {
 		return nil, err
 	}

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"autable/internal/metadata"
+	"autable/internal/sqliteutil"
 	"autable/internal/table"
 
 	"gorm.io/driver/sqlite"
@@ -56,7 +57,7 @@ func (repository *Repository) OpenDatabase(ctx context.Context, name, path strin
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	db, err := gorm.Open(sqlite.Open(path), &gorm.Config{})
+	db, err := gorm.Open(sqlite.Open(sqliteutil.DSN(path)), &gorm.Config{})
 	if err != nil {
 		return err
 	}
