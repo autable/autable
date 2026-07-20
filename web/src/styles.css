@@ -919,6 +919,9 @@ select {
   min-width: 0;
   min-height: 100vh;
   background: var(--colorNeutralBackground2);
+  /* The app shell locks #root children to the viewport with overflow
+     hidden; the published form page scrolls as a whole page instead. */
+  overflow-y: auto;
 }
 
 .published-form-main {
@@ -933,6 +936,8 @@ select {
 
 .published-form-card {
   min-height: auto;
+  /* Page-level scrolling; no nested scrollbar inside the card. */
+  overflow: visible;
 }
 
 .form-record-detail {
