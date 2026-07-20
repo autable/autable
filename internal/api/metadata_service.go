@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 
 	"autable/internal/metadata"
 )
@@ -56,11 +57,20 @@ func (server *Server) updateTable(ctx context.Context, dbName, tableName string,
 	}
 	server.catalogMu.Lock()
 	defer server.catalogMu.Unlock()
+	existing, _ := server.catalog.Table(dbName, tableName)
 	next, err := server.catalog.MergeTable(dbName, tableName, tableMeta)
 	if err != nil {
 		return metadata.Table{}, err
 	}
-	if err := server.tables.SyncTable(ctx, next, dbName, tableName); err != nil {
+	merged, _ := next.Table(dbName, tableName)
+	// Recomputing formulas rewrites every row — on large tables that is the
+	// dominant cost of a metadata save. View or plain-field edits only need
+	// the physical table brought up to date.
+	if formulaDefinitionsChanged(existing, merged) {
+		if err := server.tables.SyncTable(ctx, next, dbName, tableName); err != nil {
+			return metadata.Table{}, err
+		}
+	} else if err := server.tables.EnsureTable(ctx, next, dbName, tableName); err != nil {
 		return metadata.Table{}, err
 	}
 	if err := metadata.Save(server.metadataPath, next); err != nil {
@@ -69,6 +79,23 @@ func (server *Server) updateTable(ctx context.Context, dbName, tableName string,
 	server.catalog = next
 	updated, _ := next.Table(dbName, tableName)
 	return updated, nil
+}
+
+func formulaDefinitionsChanged(existing, next metadata.Table) bool {
+	type formulaDef struct {
+		Formula   string
+		ValueType string
+	}
+	collect := func(tableMeta metadata.Table) map[string]formulaDef {
+		defs := map[string]formulaDef{}
+		for _, field := range tableMeta.ActiveFields() {
+			if field.Type == "formula" {
+				defs[field.Name] = formulaDef{Formula: field.Formula, ValueType: field.ValueType}
+			}
+		}
+		return defs
+	}
+	return !maps.Equal(collect(existing), collect(next))
 }
 
 func (server *Server) moveField(ctx context.Context, dbName, tableName, fieldName string, request fieldPositionRequest) (metadata.Table, error) {

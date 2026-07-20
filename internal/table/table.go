@@ -568,6 +568,17 @@ func (service *Service) SyncTable(ctx context.Context, catalog metadata.Catalog,
 	if err := service.rows.EnsureTable(ctx, dbName, tableMeta); err != nil {
 		return err
 	}
+	formulaFields := []metadata.Field{}
+	for _, field := range tableMeta.ActiveFields() {
+		if field.Type == "formula" {
+			formulaFields = append(formulaFields, field)
+		}
+	}
+	// Without formula fields there is nothing to recompute; loading and
+	// rewriting every row would only burn time on large tables.
+	if len(formulaFields) == 0 {
+		return nil
+	}
 	rows, err := service.rows.Rows(ctx, dbName, tableMeta)
 	if err != nil {
 		return err
@@ -576,6 +587,16 @@ func (service *Service) SyncTable(ctx context.Context, catalog metadata.Catalog,
 		nextValues, err := calculateFormulaValues(tableMeta, row.RecordID, cloneValues(row.Values))
 		if err != nil {
 			return err
+		}
+		changed := false
+		for _, field := range formulaFields {
+			if !reflect.DeepEqual(nextValues[field.Name], row.Values[field.Name]) {
+				changed = true
+				break
+			}
+		}
+		if !changed {
+			continue
 		}
 		if _, err := service.rows.UpdateRow(ctx, dbName, tableMeta, row.RecordID, nextValues); err != nil {
 			return err
