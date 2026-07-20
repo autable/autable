@@ -905,6 +905,9 @@ select {
   background: var(--colorNeutralBackground1);
 }
 
+/* The editor preview pane scrolls internally; the published page instead
+   scrolls at the shell level (see .published-form-shell), so the card
+   there overrides this back to visible. */
 .form-preview {
   overflow: auto;
 }
@@ -913,19 +916,15 @@ select {
   overflow: hidden;
 }
 
+/* The published form page lives inside the FluentProvider div that the
+   app shell locks to the viewport (#root > * is overflow hidden), so the
+   shell itself is the scroll container: viewport-high, content-sized
+   children, page-level scrolling. */
 .published-form-shell {
-  display: grid;
-  grid-template-rows: minmax(0, 1fr);
   min-width: 0;
-  min-height: 100vh;
-  background: var(--colorNeutralBackground2);
-}
-
-/* The app shell locks #root children to the viewport with overflow hidden
-   (an id selector, so a plain class rule loses); the published form page
-   scrolls as a whole page instead. */
-#root > .published-form-shell {
+  height: 100%;
   overflow-y: auto;
+  background: var(--colorNeutralBackground2);
 }
 
 .published-form-main {
