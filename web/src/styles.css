@@ -806,6 +806,9 @@ select {
 .split-view {
   display: grid;
   grid-template-columns: minmax(520px, 1fr) 360px;
+  /* Bound the single implicit row so panes fit the viewport and scroll
+     internally instead of growing past it and getting clipped. */
+  grid-template-rows: minmax(0, 1fr);
   gap: 18px;
 }
 
@@ -900,6 +903,10 @@ select {
   padding: 16px;
   border: 1px solid var(--colorNeutralStroke2);
   background: var(--colorNeutralBackground1);
+}
+
+.form-preview {
+  overflow: auto;
 }
 
 .history-pane {
