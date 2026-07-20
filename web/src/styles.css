@@ -919,8 +919,12 @@ select {
   min-width: 0;
   min-height: 100vh;
   background: var(--colorNeutralBackground2);
-  /* The app shell locks #root children to the viewport with overflow
-     hidden; the published form page scrolls as a whole page instead. */
+}
+
+/* The app shell locks #root children to the viewport with overflow hidden
+   (an id selector, so a plain class rule loses); the published form page
+   scrolls as a whole page instead. */
+#root > .published-form-shell {
   overflow-y: auto;
 }
 
