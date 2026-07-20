@@ -8,6 +8,8 @@ databases:
           fields:
             - name: "134"
               type: string
+              options:
+                - 同意
               deleted: false
             - name: "555"
               type: string

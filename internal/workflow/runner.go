@@ -131,7 +131,11 @@ func (runner *Runner) RunAt(ctx context.Context, definition Definition, inputs m
 	go func() {
 		select {
 		case <-ctx.Done():
-			runtime.Interrupt(fmt.Sprintf("workflow run exceeded its %s timeout", timeout))
+			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				runtime.Interrupt(fmt.Sprintf("workflow run exceeded its %s timeout", timeout))
+			} else {
+				runtime.Interrupt("workflow run canceled")
+			}
 		case <-watchDone:
 		}
 	}()

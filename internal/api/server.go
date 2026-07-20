@@ -1722,7 +1722,11 @@ func (server *Server) handleRunWorkflow(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	run, key, err := server.runner.Run(r.Context(), workflow.Definition{
+	// A manual run must not die with the HTTP request: proxies cut idle
+	// connections long before slow syncs finish, which used to cancel the
+	// request context and abort the run mid-flight. The run keeps its own
+	// lifetime; the response is simply lost if the client went away.
+	run, key, err := server.runner.Run(context.WithoutCancel(r.Context()), workflow.Definition{
 		ID:                   workflowDefinition.ID,
 		DatabaseName:         workflowDefinition.DatabaseName,
 		Script:               workflowDefinition.Script,
