@@ -160,6 +160,57 @@ describe("renderFormScript", () => {
     expect(result.elements).toEqual([{ kind: "html", html: "<strong>Custom note</strong>" }]);
   });
 
+  it("renders excel import buttons from api.excelImport", () => {
+    const rendered = renderFormScript(`
+      function render(api, root) {
+        root.append(api.excelImport({
+          table: "inventory",
+          label: "导入盘点表",
+          matchField: "条码",
+          fields: { "条码": "string", "数量": "int" },
+          duplicateStrategy: "update"
+        }));
+        return { table: "inventory" };
+      }
+    `);
+    expect(rendered.error).toBeUndefined();
+    expect(rendered.elements[0]).toEqual({
+      kind: "excelImport",
+      table: "inventory",
+      label: "导入盘点表",
+      matchField: "条码",
+      fields: { 条码: "string", 数量: "int" },
+      duplicateStrategy: "update"
+    });
+    expect(rendered.fields).toEqual({});
+  });
+
+  it("rejects invalid excelImport configs", () => {
+    const missingTable = renderFormScript(`
+      function render(api, root) {
+        root.append(api.excelImport({ label: "Import" }));
+        return { table: "inventory" };
+      }
+    `);
+    expect(missingTable.error).toContain("excelImport requires table");
+
+    const badType = renderFormScript(`
+      function render(api, root) {
+        root.append(api.excelImport({ table: "inventory", fields: { "数量": "date" } }));
+        return { table: "inventory" };
+      }
+    `);
+    expect(badType.error).toContain("unsupported type");
+
+    const badStrategy = renderFormScript(`
+      function render(api, root) {
+        root.append(api.excelImport({ table: "inventory", duplicateStrategy: "merge" }));
+        return { table: "inventory" };
+      }
+    `);
+    expect(badStrategy.error).toContain("duplicateStrategy");
+  });
+
   it("renders file inputs from api.file", () => {
     const rendered = renderFormScript(`
       function render(api, root) {

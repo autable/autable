@@ -19,6 +19,7 @@ import { listRowsPage, uploadFile, type RowRecord, type TableMetadata } from "..
 import type { FormElement } from "../formRuntime";
 import { useBarcodeScanner, type BarcodeScanResult } from "../hooks/useBarcodeScanner";
 import { rowRecordToValues, type TableGridRow } from "../tableGrid";
+import { ExcelImportButton } from "./ExcelImportButton";
 import { RecordDataGrid } from "./RecordDataGrid";
 
 const RELATION_PAGE_SIZE = 200;
@@ -53,7 +54,7 @@ export function FormPreviewFields({
   }, [result]);
   return (
     <>
-      {elements.map((element) => {
+      {elements.map((element, elementIndex) => {
         if (element.kind === "input") {
           return element.scanner ? (
             <ScannerInput
@@ -111,6 +112,22 @@ export function FormPreviewFields({
               onChange={(value) => onFormValueChange(element.field, value)}
               relationTable={relationTable}
               value={formValues[element.field] ?? ""}
+            />
+          );
+        }
+        if (element.kind === "excelImport") {
+          return (
+            <ExcelImportButton
+              key={`excel-import-${elementIndex}`}
+              databaseName={databaseName}
+              tableName={element.table}
+              tables={tables}
+              label={element.label}
+              pinned={{
+                matchField: element.matchField,
+                fields: element.fields,
+                duplicateStrategy: element.duplicateStrategy
+              }}
             />
           );
         }

@@ -1818,3 +1818,103 @@ select {
     grid-template-columns: 1fr;
   }
 }
+
+.import-content {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: min(70vh, 640px);
+  overflow-y: auto;
+}
+
+.import-configure,
+.import-preview,
+.import-summary,
+.import-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.import-file-summary {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.import-columns {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border: 1px solid var(--colorNeutralStroke2);
+  border-radius: 6px;
+  padding: 8px;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.import-column-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.import-new-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.import-blocked {
+  color: var(--colorNeutralForeground3);
+}
+
+.import-dedup {
+  display: flex;
+  gap: 16px;
+}
+
+.import-dedup .field-stack {
+  min-width: 220px;
+}
+
+.import-preview-scroll {
+  overflow: auto;
+  max-height: 320px;
+  border: 1px solid var(--colorNeutralStroke2);
+  border-radius: 6px;
+}
+
+.import-preview-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 12px;
+}
+
+.import-preview-table th,
+.import-preview-table td {
+  border-bottom: 1px solid var(--colorNeutralStroke2);
+  padding: 4px 8px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.import-preview-table th {
+  position: sticky;
+  top: 0;
+  background: var(--colorNeutralBackground3);
+}
+
+.import-row-invalid {
+  background: var(--colorStatusDangerBackground1);
+}
+
+.import-cell-invalid {
+  color: var(--colorStatusDangerForeground1);
+}
+
+.import-failed ul {
+  margin: 0;
+  padding-left: 20px;
+}

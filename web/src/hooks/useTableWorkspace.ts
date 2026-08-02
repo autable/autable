@@ -418,6 +418,31 @@ export function useTableWorkspace({
     }
   }
 
+  // Excel import creates fields and rows through the field/row APIs, so both
+  // the catalog and the loaded page are stale afterwards.
+  async function reloadAfterImport() {
+    if (!databaseName || !table.name) {
+      return;
+    }
+    try {
+      const nextCatalog = await loadMetadata();
+      loadGenerationRef.current += 1;
+      const page = await listRowsPage(databaseName, table.name, {
+        view: selectedTableView,
+        sorts: temporarySort ? [temporarySort] : undefined,
+        search,
+        limit: ROW_PAGE_SIZE,
+        offset: 0
+      });
+      onCatalogChanged(nextCatalog, table.name, selectedTableView);
+      setRows(page.rows.map(rowRecordToValues));
+      setTotal(page.total);
+      setRowsViewName(selectedTableView);
+    } catch (error) {
+      onStatus(error instanceof Error ? error.message : t("status.importReloadFailed"), "error");
+    }
+  }
+
   async function persistTableMetadata(nextTable: TableMetadata, successMessage: string, nextViewName = selectedTableView) {
     if (!databaseName || !table.name) {
       onStatus(t("status.selectTableBeforeMetadata"));
@@ -694,6 +719,7 @@ export function useTableWorkspace({
     deleteSelectedRow,
     editGridRows,
     moveFieldPosition,
+    reloadAfterImport,
     loadMoreRows,
     loadSelectedRowHistory,
     resetRows,

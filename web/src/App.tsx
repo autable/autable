@@ -795,6 +795,7 @@ function WorkspaceApp() {
               onSelectedRowValueChange={tableWorkspace.updateSelectedRowDraft}
               onUpdateFieldFormula={tableWorkspace.updateFieldFormulaFromCanvas}
               onUpdateFieldOptions={tableWorkspace.updateFieldOptionsFromCanvas}
+              onImported={tableWorkspace.reloadAfterImport}
               onUpdateSelectedRow={tableWorkspace.updateSelectedRowFromEditor}
               onUpdateSelectedView={tableWorkspace.updateSelectedViewFromCanvas}
               rowHistory={tableWorkspace.rowHistory}

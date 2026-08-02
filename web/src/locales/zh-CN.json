@@ -328,7 +328,8 @@
     "workflowRunSaved": "工作流运行已保存：{{key}}",
     "workflowSaveFailed": "工作流保存失败",
     "workflowStatus": "{{name}} {{status}}",
-    "workflowStatusUpdateFailed": "工作流状态更新失败"
+    "workflowStatusUpdateFailed": "工作流状态更新失败",
+    "importReloadFailed": "导入后刷新失败"
   },
   "table": {
     "addField": "添加字段",
@@ -480,5 +481,52 @@
     "reset": "重置令牌",
     "loadFailed": "运行器加载失败",
     "resetFailed": "运行器令牌重置失败"
+  },
+  "import": {
+    "import": "导入",
+    "dialogTitle": "导入到「{{table}}」",
+    "tableMissing": "未找到表格 {{table}}",
+    "noData": "文件中没有数据",
+    "parseFailed": "文件解析失败",
+    "importFailed": "导入失败",
+    "fileSummary": "文件：{{file}} · 共 {{rows}} 行数据",
+    "sheet": "工作表",
+    "duplicateHeaders": "重复表头已忽略（保留第一列）：{{headers}}",
+    "columnsTitle": "选择要导入的列",
+    "existingField": "已有字段（{{type}}）",
+    "newField": "新建字段",
+    "newFieldType": "新字段 {{header}} 的类型",
+    "blocked": {
+      "invalidName": "表头不能用作字段名",
+      "reservedName": "表头使用了保留前缀 ct_",
+      "unsupportedFieldType": "已有字段类型不支持导入"
+    },
+    "type": {
+      "string": "文本",
+      "int": "整数",
+      "float": "小数"
+    },
+    "matchField": "去重字段",
+    "noDedup": "不去重（全部追加）",
+    "strategy": "命中重复时",
+    "strategyUpdate": "覆盖导入列",
+    "strategySkip": "跳过该行",
+    "next": "下一步：预览",
+    "back": "上一步",
+    "start": "导入 {{count}} 行",
+    "cancelImport": "取消导入",
+    "importing": "正在导入 {{done}} / {{total}}…",
+    "previewSummary": "{{file}} · 可导入 {{valid}} 行，无效 {{invalid}} 行",
+    "previewTruncated": "仅显示前 {{shown}} 行，共 {{total}} 行",
+    "invalidRowsHint": "{{count}} 行包含无效单元格，将被跳过",
+    "cancelledHint": "导入已取消，部分行未导入",
+    "summaryFields": "新建字段 {{count}} 个：{{names}}",
+    "summaryRows": "新增 {{created}} 行，更新 {{updated}} 行，无变化 {{unchanged}} 行，跳过 {{skipped}} 行",
+    "summaryInvalid": "{{count}} 行因无效单元格被跳过",
+    "summaryFailed": "{{count}} 行导入失败",
+    "failedRow": "第 {{index}} 行：{{error}}",
+    "problemType": "“{{value}}”不是{{type}}",
+    "problemEnum": "“{{value}}”不在允许的选项中",
+    "problemMissingMatch": "缺少去重字段的值"
   }
 }

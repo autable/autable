@@ -10,6 +10,14 @@ export type FormElement =
   | { kind: "select"; field: string; label: string; options: string[] }
   | { kind: "file"; field: string; label: string }
   | { kind: "relation"; field: string; label: string; table: string; view?: string; fields?: string[] }
+  | {
+      kind: "excelImport";
+      table: string;
+      label?: string;
+      matchField?: string;
+      fields?: Record<string, string>;
+      duplicateStrategy?: "update" | "skip";
+    }
   | { kind: "button"; id: string; label: string; actionID: string }
   | { kind: "submit"; id: string; label: string; actionID: string }
   | { kind: "html"; html: string };
@@ -59,6 +67,14 @@ type ButtonConfig = {
   id?: string;
   label: string;
   action: FormAction;
+};
+
+type ExcelImportConfig = {
+  table: string;
+  label?: string;
+  matchField?: string;
+  fields?: Record<string, string>;
+  duplicateStrategy?: string;
 };
 
 export type FormRowsAPI = {
@@ -136,6 +152,7 @@ export function renderFormScript(script: string): FormRenderResult {
         ...(fields ? { fields } : {})
       };
     },
+    excelImport: (config: ExcelImportConfig): FormElement => normalizeExcelImportConfig(config),
     button: (labelOrConfig: string | ButtonConfig, action?: FormAction): FormElement => {
       const config = normalizeButtonConfig(labelOrConfig, action);
       const actionID = registerAction(actions, config.id ?? `button_${nextActionID++}`, config.action);
@@ -294,6 +311,41 @@ function registerAction(actions: Record<string, FormAction>, requestedID: string
   return actionID;
 }
 
+function normalizeExcelImportConfig(config: ExcelImportConfig): FormElement {
+  if (!config || typeof config !== "object" || typeof config.table !== "string" || config.table === "") {
+    throw new Error("excelImport requires table");
+  }
+  let fields: Record<string, string> | undefined;
+  if (config.fields !== undefined) {
+    if (!config.fields || typeof config.fields !== "object" || Array.isArray(config.fields)) {
+      throw new Error("excelImport fields must map header names to string|int|float");
+    }
+    fields = {};
+    for (const [name, type] of Object.entries(config.fields)) {
+      const typeName = String(type);
+      if (typeName !== "string" && typeName !== "int" && typeName !== "float") {
+        throw new Error(`excelImport field ${name} has unsupported type ${typeName}`);
+      }
+      fields[name] = typeName;
+    }
+  }
+  let duplicateStrategy: "update" | "skip" | undefined;
+  if (config.duplicateStrategy !== undefined) {
+    if (config.duplicateStrategy !== "update" && config.duplicateStrategy !== "skip") {
+      throw new Error("excelImport duplicateStrategy must be update or skip");
+    }
+    duplicateStrategy = config.duplicateStrategy;
+  }
+  return {
+    kind: "excelImport",
+    table: config.table,
+    label: config.label === undefined ? undefined : String(config.label),
+    matchField: config.matchField === undefined ? undefined : String(config.matchField),
+    fields,
+    duplicateStrategy
+  };
+}
+
 function normalizeButtonConfig(labelOrConfig: string | ButtonConfig, action?: FormAction): ButtonConfig {
   if (typeof labelOrConfig === "string") {
     if (typeof action !== "function") {
@@ -326,5 +378,14 @@ function isFormElement(value: unknown): value is FormElement {
     return false;
   }
   const kind = (value as { kind?: unknown }).kind;
-  return kind === "input" || kind === "select" || kind === "file" || kind === "relation" || kind === "button" || kind === "submit" || kind === "html";
+  return (
+    kind === "input" ||
+    kind === "select" ||
+    kind === "file" ||
+    kind === "relation" ||
+    kind === "excelImport" ||
+    kind === "button" ||
+    kind === "submit" ||
+    kind === "html"
+  );
 }

@@ -328,7 +328,8 @@
     "workflowRunSaved": "Workflow run saved: {{key}}",
     "workflowSaveFailed": "Workflow save failed",
     "workflowStatus": "{{name}} {{status}}",
-    "workflowStatusUpdateFailed": "Workflow status update failed"
+    "workflowStatusUpdateFailed": "Workflow status update failed",
+    "importReloadFailed": "Reloading after import failed"
   },
   "table": {
     "addField": "Add field",
@@ -480,5 +481,52 @@
     "reset": "Reset token",
     "loadFailed": "Runners could not be loaded",
     "resetFailed": "Runner token reset failed"
+  },
+  "import": {
+    "import": "Import",
+    "dialogTitle": "Import into “{{table}}”",
+    "tableMissing": "Table {{table}} was not found",
+    "noData": "The file contains no data",
+    "parseFailed": "Failed to parse the file",
+    "importFailed": "Import failed",
+    "fileSummary": "File: {{file}} · {{rows}} data rows",
+    "sheet": "Worksheet",
+    "duplicateHeaders": "Duplicate headers ignored (first column kept): {{headers}}",
+    "columnsTitle": "Columns to import",
+    "existingField": "Existing field ({{type}})",
+    "newField": "New field",
+    "newFieldType": "Type for new field {{header}}",
+    "blocked": {
+      "invalidName": "Header cannot be used as a field name",
+      "reservedName": "Header uses the reserved ct_ prefix",
+      "unsupportedFieldType": "Existing field type does not support import"
+    },
+    "type": {
+      "string": "Text",
+      "int": "Integer",
+      "float": "Number"
+    },
+    "matchField": "Deduplicate by",
+    "noDedup": "No deduplication (append all)",
+    "strategy": "When a match exists",
+    "strategyUpdate": "Update imported columns",
+    "strategySkip": "Skip the row",
+    "next": "Next: preview",
+    "back": "Back",
+    "start": "Import {{count}} rows",
+    "cancelImport": "Cancel import",
+    "importing": "Importing {{done}} / {{total}}…",
+    "previewSummary": "{{file}} · {{valid}} importable rows, {{invalid}} invalid rows",
+    "previewTruncated": "Showing first {{shown}} of {{total}} rows",
+    "invalidRowsHint": "{{count}} rows have invalid cells and will be skipped",
+    "cancelledHint": "Import was cancelled; some rows were not imported",
+    "summaryFields": "Created {{count}} fields: {{names}}",
+    "summaryRows": "Created {{created}}, updated {{updated}}, unchanged {{unchanged}}, skipped {{skipped}}",
+    "summaryInvalid": "{{count}} rows were skipped because of invalid cells",
+    "summaryFailed": "{{count}} rows failed",
+    "failedRow": "Row {{index}}: {{error}}",
+    "problemType": "“{{value}}” is not {{type}}",
+    "problemEnum": "“{{value}}” is not an allowed option",
+    "problemMissingMatch": "Missing dedup value"
   }
 }

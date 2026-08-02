@@ -37,6 +37,7 @@ This repository currently contains the backend core primitives:
 - A form JavaScript runtime that requires `function render(api, root)` to render controls with `field` configs and return `{ table }`.
 - Form submissions send input JSON; the backend executes the form JavaScript to resolve the target table and field-bound controls before writing records.
 - Runtime data is rooted at `data.path`: `system.sqlite`, `leveldb`, and per-database `<database>.sqlite` files are derived from that directory instead of being configured separately.
+- Excel import into tables, available from the table toolbar and from form scripts via `api.excelImport({ table, label, matchField, fields, duplicateStrategy })`: the file is parsed in the browser (SheetJS), users pick the worksheet and columns, missing `string`/`int`/`float` fields are auto-created through the field API, and rows are written serially through the existing create/upsert row APIs with per-row dedup on a match field (update or skip on duplicates).
 
 ## Development Rules
 

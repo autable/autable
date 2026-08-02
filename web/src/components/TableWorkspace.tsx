@@ -50,6 +50,7 @@ import { useTranslation } from "react-i18next";
 import type { Field, RowChange, TableMetadata, TableViewQuery, TableViewSort } from "../api";
 import { fieldCreatable, fieldEditable } from "../fieldPermissions";
 import type { TableGridRow } from "../tableGrid";
+import { ExcelImportButton } from "./ExcelImportButton";
 import { RecordDataGrid } from "./RecordDataGrid";
 
 type TableWorkspaceProps = {
@@ -84,6 +85,7 @@ type TableWorkspaceProps = {
   onUpdateSelectedView: () => void;
   onUpdateFieldFormula: (fieldName: string, formula: string) => void;
   onUpdateFieldOptions: (fieldName: string, optionsText: string) => void;
+  onImported: () => void | Promise<void>;
   newFieldFormula: string;
   newFieldName: string;
   newFieldOptions: string;
@@ -140,6 +142,7 @@ export function TableWorkspace({
   onUpdateSelectedView,
   onUpdateFieldFormula,
   onUpdateFieldOptions,
+  onImported,
   newFieldFormula,
   newFieldName,
   newFieldOptions,
@@ -433,6 +436,14 @@ export function TableWorkspace({
           <ToolbarButton icon={<HistoryRegular />} onClick={() => openHistoryPanel()} disabled={!selectedRecordID}>
             {t("common.history")}
           </ToolbarButton>
+          <ExcelImportButton
+            toolbar
+            databaseName={databaseName}
+            tableName={table.name}
+            tables={tables}
+            disabled={!canCreateRow}
+            onImported={() => void onImported()}
+          />
           <ToolbarButton
             icon={<AddRegular />}
             appearance="primary"
