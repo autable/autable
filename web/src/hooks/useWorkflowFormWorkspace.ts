@@ -195,12 +195,12 @@ export function useWorkflowFormWorkspace({
 
   function applyWorkflowRuns(runs: WorkflowRunResponse[], preferredRunKey = "") {
     const newestFirst = [...runs].reverse();
-    const loadedRuns = new Map(workflowRuns.filter((run) => !run.summary).map((run) => [run.history_key, run]));
-    const mergedRuns = newestFirst.map((run) => loadedRuns.get(run.history_key) ?? run);
-    setWorkflowRuns(mergedRuns);
-    const preferredExists = preferredRunKey && mergedRuns.some((run) => run.history_key === preferredRunKey);
-    setSelectedWorkflowRunKey(preferredExists ? preferredRunKey : mergedRuns[0]?.history_key ?? "");
-    return mergedRuns;
+    // Merge against the live state, not the render closure: a concurrent list
+    // refresh must never clobber a run detail that already finished loading.
+    setWorkflowRuns((current) => mergeWorkflowRuns(current, newestFirst));
+    const preferredExists = preferredRunKey && newestFirst.some((run) => run.history_key === preferredRunKey);
+    setSelectedWorkflowRunKey(preferredExists ? preferredRunKey : newestFirst[0]?.history_key ?? "");
+    return newestFirst;
   }
 
   async function refreshWorkflowRuns(preferredRunKey = "", workflowID = selectedWorkflow?.id ?? 0) {
@@ -302,6 +302,11 @@ export function useWorkflowFormWorkspace({
     try {
       const response = await runWorkflow(selectedWorkflow.id, {});
       await refreshWorkflowRuns(response.history_key, selectedWorkflow.id);
+      // The run response already carries the full run detail; seed it so the
+      // history panel does not depend on the summary-upgrade fetch.
+      setWorkflowRuns((current) =>
+        current.map((item) => (item.history_key === response.history_key ? response : item))
+      );
       if (response.run.error) {
         onStatus(t("status.workflowFailed", { error: response.run.error }));
         return response;
@@ -630,6 +635,16 @@ function run(info) {
     diff: info.inputs.diff
   };
 }`;
+}
+
+// Prefer runs whose detail already finished loading over their incoming
+// summaries, so a concurrent list refresh never wipes loaded outputs.
+export function mergeWorkflowRuns(
+  current: WorkflowRunResponse[],
+  incoming: WorkflowRunResponse[]
+): WorkflowRunResponse[] {
+  const loadedRuns = new Map(current.filter((run) => !run.summary).map((run) => [run.history_key, run]));
+  return incoming.map((run) => (run.summary ? loadedRuns.get(run.history_key) ?? run : run));
 }
 
 function defaultFormScript(targetTable: string) {
