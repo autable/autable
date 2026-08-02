@@ -317,9 +317,11 @@ export function useTableWorkspace({
           setRelationRows(Object.fromEntries(entries));
         }
       })
-      .catch(() => {
+      .catch((error) => {
         if (!cancelled) {
-          setRelationRows({});
+          // Keep the existing cache: wiping it silently downgraded relation
+          // labels to raw ids and made relation double-clicks do nothing.
+          onStatus(error instanceof Error ? error.message : t("status.relationRowsLoadFailed"), "error");
         }
       });
     return () => {

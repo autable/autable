@@ -329,7 +329,8 @@
     "workflowSaveFailed": "Workflow save failed",
     "workflowStatus": "{{name}} {{status}}",
     "workflowStatusUpdateFailed": "Workflow status update failed",
-    "importReloadFailed": "Reloading after import failed"
+    "importReloadFailed": "Reloading after import failed",
+    "relationRowsLoadFailed": "Loading relation records failed"
   },
   "table": {
     "addField": "Add field",

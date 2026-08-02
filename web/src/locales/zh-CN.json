@@ -329,7 +329,8 @@
     "workflowSaveFailed": "工作流保存失败",
     "workflowStatus": "{{name}} {{status}}",
     "workflowStatusUpdateFailed": "工作流状态更新失败",
-    "importReloadFailed": "导入后刷新失败"
+    "importReloadFailed": "导入后刷新失败",
+    "relationRowsLoadFailed": "关联记录加载失败"
   },
   "table": {
     "addField": "添加字段",
