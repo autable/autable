@@ -41,7 +41,6 @@ export type FileCellOptions = {
 export function buildTableColumns(
   fields: Field[],
   relationLabels: RelationLabelMap = {},
-  onOpenRelation?: (field: Field, recordID: number) => void,
   fileOptions?: FileCellOptions
 ): Column<TableGridRow>[] {
   return fields.map((field) => ({
@@ -101,12 +100,12 @@ export function buildTableColumns(
       if (!Number.isFinite(recordID) || recordID <= 0) {
         return "";
       }
+      // Opening the relation detail is handled by the grid-level
+      // onCellDoubleClick: a span-level handler loses the event when the
+      // first click's selection re-render replaces the span mid-double-click.
       return createElement(
         "span",
-        {
-          className: "relation-cell",
-          onDoubleClick: () => onOpenRelation?.(field, recordID)
-        },
+        { className: "relation-cell" },
         relationLabels[field.name]?.[recordID] || `#${recordID}`
       );
     }

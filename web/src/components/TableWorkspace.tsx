@@ -86,6 +86,7 @@ type TableWorkspaceProps = {
   onUpdateFieldFormula: (fieldName: string, formula: string) => void;
   onUpdateFieldOptions: (fieldName: string, optionsText: string) => void;
   onImported: () => void | Promise<void>;
+  onOpenRelationCell: (fieldName: string, row: TableGridRow) => void;
   newFieldFormula: string;
   newFieldName: string;
   newFieldOptions: string;
@@ -143,6 +144,7 @@ export function TableWorkspace({
   onUpdateFieldFormula,
   onUpdateFieldOptions,
   onImported,
+  onOpenRelationCell,
   newFieldFormula,
   newFieldName,
   newFieldOptions,
@@ -465,6 +467,9 @@ export function TableWorkspace({
           }}
           onSelectedCellChange={(args) => {
             onSelectGridCell(args);
+          }}
+          onCellDoubleClick={({ column, row }) => {
+            onOpenRelationCell(String(column.key), row);
           }}
           onColumnsReorder={(sourceColumnKey, targetColumnKey) => {
             void onMoveFieldPosition(sourceColumnKey, targetColumnKey);

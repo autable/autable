@@ -796,6 +796,7 @@ function WorkspaceApp() {
               onUpdateFieldFormula={tableWorkspace.updateFieldFormulaFromCanvas}
               onUpdateFieldOptions={tableWorkspace.updateFieldOptionsFromCanvas}
               onImported={tableWorkspace.reloadAfterImport}
+              onOpenRelationCell={tableWorkspace.openRelationDetail}
               onUpdateSelectedRow={tableWorkspace.updateSelectedRowFromEditor}
               onUpdateSelectedView={tableWorkspace.updateSelectedViewFromCanvas}
               rowHistory={tableWorkspace.rowHistory}

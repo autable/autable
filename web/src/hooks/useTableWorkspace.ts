@@ -109,24 +109,31 @@ export function useTableWorkspace({
   }, [activeFields, relationRows, tables]);
   const columns = useMemo(
     () =>
-      buildTableColumns(
-        activeFields,
-        relationLabels,
-        (field, recordID) => {
-          const targetTable = tables.find((item) => item.name === field.relation_table);
-          const row = relationRows[field.relation_table ?? ""]?.find((item) => Number(item.ct_record_id) === recordID);
-          if (targetTable && row) {
-            setRelationDetail({ field, table: targetTable, row });
-          }
-        },
-        {
-          labels: fileLabels,
-          onUpload: uploadFileToCell,
-          onDownload: (fileID) => window.open(fileDownloadURL(fileID), "_blank")
-        }
-      ),
-    [activeFields, fileLabels, relationLabels, relationRows, tables]
+      buildTableColumns(activeFields, relationLabels, {
+        labels: fileLabels,
+        onUpload: uploadFileToCell,
+        onDownload: (fileID) => window.open(fileDownloadURL(fileID), "_blank")
+      }),
+    [activeFields, fileLabels, relationLabels]
   );
+
+  // Wired to the grid's onCellDoubleClick so the event survives the
+  // selection re-render a double-click's first click triggers.
+  function openRelationDetail(fieldName: string, row: TableGridRow) {
+    const field = activeFields.find((candidate) => candidate.name === fieldName);
+    if (!field || field.type !== "relation" || !field.relation_table) {
+      return;
+    }
+    const recordID = Number(row[fieldName]);
+    if (!Number.isFinite(recordID) || recordID <= 0) {
+      return;
+    }
+    const targetTable = tables.find((item) => item.name === field.relation_table);
+    const targetRow = relationRows[field.relation_table]?.find((item) => Number(item.ct_record_id) === recordID);
+    if (targetTable && targetRow) {
+      setRelationDetail({ field, table: targetTable, row: targetRow });
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -721,6 +728,7 @@ export function useTableWorkspace({
     deleteSelectedRow,
     editGridRows,
     moveFieldPosition,
+    openRelationDetail,
     reloadAfterImport,
     loadMoreRows,
     loadSelectedRowHistory,
