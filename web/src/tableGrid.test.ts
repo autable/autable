@@ -29,6 +29,13 @@ describe("tableGrid", () => {
     });
   });
 
+  it("does not make relation fields editable so double-click only opens the detail panel", () => {
+    const columns = buildTableColumns([{ name: "owner", type: "relation", relation_table: "contacts", deleted: false }]);
+    expect(
+      typeof columns[0].editable === "function" ? columns[0].editable({ ct_record_id: 1 }) : columns[0].editable
+    ).toBe(false);
+  });
+
   it("does not make file fields editable and shows resolved file names", () => {
     const columns = buildTableColumns([{ name: "attachment", type: "file", deleted: false }]);
     expect(

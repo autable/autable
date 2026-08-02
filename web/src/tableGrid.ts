@@ -50,10 +50,14 @@ export function buildTableColumns(
     minWidth: Math.max(128, field.name.length * 14),
     resizable: true,
     renderEditCell: field.type === "string" && field.options?.length ? renderEnumEditor(field.options) : renderTextEditor,
+    // Relation cells stay out of grid editing: double-click opens the
+    // relation detail, and letting react-data-grid also start its raw-id
+    // editor made the two race. Relations are edited via the row panel.
     editable: (row) =>
       Number.isFinite(row.ct_record_id) &&
       field.type !== "formula" &&
       field.type !== "file" &&
+      field.type !== "relation" &&
       fieldEditable(field.permission_level),
     renderCell: ({ row }) => {
       if (field.type === "file") {
