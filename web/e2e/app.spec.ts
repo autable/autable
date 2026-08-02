@@ -51,7 +51,10 @@ async function registerUser(page: Page): Promise<AuthUser> {
   await page.goto("/");
   const user = (await api(page, "POST", "/api/auth/register", {
     email,
-    password: "correct horse"
+    password: "correct horse",
+    // The nav account button shows display_name; keep it equal to the email
+    // so existing name-based assertions keep working.
+    display_name: email
   })) as AuthUser;
   await page.reload();
   await expect(page.getByRole("button", { name: email })).toBeVisible();
@@ -253,7 +256,8 @@ async function setupWorkspace(page: Page): Promise<WorkspaceSetup> {
     script:
       "function render(api, root) { root.append(api.input({ field: 'name', label: 'Name' }), api.input({ field: 'email', label: 'Email', type: 'email' }), api.select({ field: 'status', label: 'Status', options: ['Active', 'Review'] }), api.submit('Create record')); return { table: 'contacts' }; }"
   });
-  await page.reload();
+  // Selection is scoped to the URL route, so land on the database directly.
+  await page.goto(`/databases/${databaseName}`);
   await waitForTableReady(page, databaseName);
   return { user, databaseName, tableName };
 }
@@ -326,7 +330,7 @@ test("shows database-owned workflow and form lists across table owners", async (
 
   await api(page, "POST", "/api/auth/logout");
   await loginUser(page, dbOwner.email);
-  await page.goto("/");
+  await page.goto(`/databases/${databaseName}`);
   await waitForWorkspaceReady(page, databaseName);
   await page.getByRole("button", { name: "Workflow", exact: true }).click();
   await expect(page.getByRole("button", { name: workflowName })).toBeVisible();
@@ -373,7 +377,7 @@ test("hides workflow and form resources without resource permission", async ({ p
 
   await api(page, "POST", "/api/auth/logout");
   await loginUser(page, resourceUser.email);
-  await page.goto("/");
+  await page.goto(`/databases/${databaseName}`);
   await waitForTableReady(page, databaseName);
   const tableCanvas = page.locator(".table-view");
   const tableActions = tableCanvas.getByRole("toolbar", { name: "Table canvas actions" });
@@ -416,7 +420,7 @@ test("prevents partial field readers from mutating table metadata", async ({ pag
 
   await api(page, "POST", "/api/auth/logout");
   await loginUser(page, reader.email);
-  await page.goto("/");
+  await page.goto(`/databases/${databaseName}`);
   await waitForTableReady(page, databaseName);
   await expect(page.getByRole("button", { name: "Add field" })).toBeDisabled();
   await expect(page.getByRole("button", { name: "Create View" })).toHaveCount(0);
@@ -504,7 +508,7 @@ test("renders read-only workflow and form resources as non-editable", async ({ p
 
   await api(page, "POST", "/api/auth/logout");
   await loginUser(page, readOnlyUser.email);
-  await page.goto("/");
+  await page.goto(`/databases/${databaseName}`);
   await waitForWorkspaceReady(page, databaseName);
 
   await page.getByRole("button", { name: "Workflow", exact: true }).click();
@@ -512,7 +516,7 @@ test("renders read-only workflow and form resources as non-editable", async ({ p
   await expect(page.getByTestId("workflow-js-editor")).toHaveAttribute("aria-disabled", "true");
   await expect(page.getByRole("button", { name: "Edit config notifier" })).toBeDisabled();
   await expect(page.getByRole("button", { name: "Save" })).toBeDisabled();
-  await expect(page.getByRole("button", { name: "Run" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Run", exact: true })).toBeDisabled();
 
   await page.getByRole("button", { name: "Form", exact: true }).click();
   await expect(page.getByRole("button", { name: formName })).toBeVisible();
@@ -888,7 +892,19 @@ test("covers workflow editor, node list, and run history through the real backen
   await expect(page.getByLabel("Secret row_change.token")).toHaveValue("x".repeat("hidden-token".length));
   await expect(page.getByText(/Saved secret length/)).toHaveCount(0);
   await page.keyboard.press("Escape");
-  await page.getByRole("button", { name: "Run" }).click();
+  // Run executes the saved script; the saved-toast text is ambiguous with
+  // earlier saves, so poll the API until the edited script is persisted.
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect
+    .poll(async () => {
+      const saved = (await api(page, "GET", `/api/databases/${workspace.databaseName}/workflows`)) as Array<{
+        name: string;
+        script: string;
+      }>;
+      return saved.find((item) => item.name === workflowName)?.script ?? "";
+    })
+    .toContain("record_id: 1");
+  await page.getByRole("button", { name: "Run", exact: true }).click();
   await expect(page.getByText(/Workflow run saved: whistory_/).first()).toBeVisible();
   await page.getByRole("tab", { name: "History" }).click();
   await expect(page.getByRole("button", { name: "Workflow run history" })).toBeVisible();
@@ -896,6 +912,23 @@ test("covers workflow editor, node list, and run history through the real backen
   await expect(runList.getByRole("button", { name: /Run input/ })).toBeVisible();
   await expect(runList.getByRole("button", { name: /Run output/ })).toBeVisible();
   await runList.getByRole("button", { name: /Run output/ }).click();
+  // Assert the persisted run first; it also gives the summary-detail fetch in
+  // the history panel time to land before the editor value is checked.
+  await expect
+    .poll(async () => {
+      const runs = (await api(page, "GET", `/api/workflows/${savedWorkflow?.id}/runs`)) as Array<{
+        history_key: string;
+      }>;
+      const latest = runs[runs.length - 1];
+      if (!latest) {
+        return "";
+      }
+      const detail = (await api(page, "GET", `/api/workflows/${savedWorkflow?.id}/runs/${latest.history_key}`)) as {
+        run: { outputs?: Record<string, unknown> };
+      };
+      return JSON.stringify(detail.run.outputs ?? {});
+    })
+    .toContain('"record_id":1');
   await expect
     .poll(() => monacoEditorValueByTestID(page, "workflow-run-output-editor"))
     .toContain('"record_id": 1');
@@ -921,11 +954,19 @@ test("runs table row workflow nodes through the real backend", async ({ page }) 
   expect(rowNodeWorkflow?.id).toBeTruthy();
   const workflowSubject = `workflow:${rowNodeWorkflow?.id}`;
   const tableResource = `${workspace.databaseName}.${workspace.tableName}`;
+  // Field levels are a bitmask (1 read, 2 update, 4 fill-on-create) and the
+  // list node needs view read: grant full field bits plus the all-view read.
   await api(page, "POST", "/api/permissions/grants", {
     subject_id: workflowSubject,
     scope: "field_set",
     resource: tableResource,
-    level: 2
+    level: 7
+  });
+  await api(page, "POST", "/api/permissions/grants", {
+    subject_id: workflowSubject,
+    scope: "view_set",
+    resource: tableResource,
+    level: 1
   });
   await api(page, "POST", "/api/permissions/grants", {
     subject_id: workflowSubject,
@@ -948,9 +989,19 @@ test("runs table row workflow nodes through the real backend", async ({ page }) 
   );
   await page.waitForTimeout(workflowEvaluationDelayMs);
   await expect(page.getByLabel("Instances").getByText("create_contact")).toBeVisible();
+  // Run executes the saved script; the saved-toast text is ambiguous with
+  // earlier saves, so poll the API until the edited script is persisted.
   await page.getByRole("button", { name: "Save" }).click();
-  await expect(page.getByText(/Workflow saved as #/).first()).toBeVisible();
-  await page.getByRole("button", { name: "Run" }).click();
+  await expect
+    .poll(async () => {
+      const saved = (await api(page, "GET", `/api/databases/${workspace.databaseName}/workflows`)) as Array<{
+        name: string;
+        script: string;
+      }>;
+      return saved.find((item) => item.name === workflowName)?.script ?? "";
+    })
+    .toContain("create_contact");
+  await page.getByRole("button", { name: "Run", exact: true }).click();
   await expect(page.getByText(/Workflow run saved: whistory_/).first()).toBeVisible();
   await page.getByRole("tab", { name: "History" }).click();
 
@@ -1079,7 +1130,8 @@ test("publishes form links that require login and explicit form permission", asy
   const readerEmail = `form-reader-${Date.now()}-${sequence}@example.com`;
   const reader = (await api(page, "POST", "/api/auth/register", {
     email: readerEmail,
-    password: "correct horse"
+    password: "correct horse",
+    display_name: readerEmail
   })) as AuthUser;
   await loginUser(page, workspace.user.email);
   await api(page, "POST", "/api/permissions/grants", {
@@ -1089,12 +1141,14 @@ test("publishes form links that require login and explicit form permission", asy
     field: "",
     level: 1
   });
+  // Field levels are a bitmask; the form reader only needs 4 (fill on create)
+  // to submit rows through the published form.
   await api(page, "POST", "/api/permissions/grants", {
     subject_id: reader.id,
     scope: "field_set",
     resource: `${workspace.databaseName}.${workspace.tableName}`,
     field: "",
-    level: 2
+    level: 4
   });
   await api(page, "POST", "/api/permissions/grants", {
     subject_id: reader.id,
@@ -1128,7 +1182,7 @@ test("publishes form links that require login and explicit form permission", asy
       expect.objectContaining({ name: "Published User", email: "published@example.com", status: "Review" })
     ])
   );
-  await page.goto("/");
+  await page.goto(`/databases/${workspace.databaseName}`);
   await waitForWorkspaceReady(page, workspace.databaseName);
   await page.getByRole("button", { name: "Form", exact: true }).click();
   await page.getByRole("button", { name: "Unpublish" }).click();
@@ -1158,26 +1212,22 @@ test("covers role members and resource permission grants through the real backen
   await page.getByRole("button", { name: "Permission", exact: true }).click();
   await createNamedResource(page, "Create Role", "New role name", "editor");
   await expect(page.getByRole("button", { name: /editor/ })).toBeVisible();
-  const permissionView = page.locator(".permission-view");
-  await permissionView.getByRole("button", { name: /Members/ }).click();
-  const membersPopover = page.getByRole("complementary", { name: "Members" }).or(page.locator(".members-popover"));
-  await membersPopover.getByRole("combobox", { name: "Role member email" }).fill(user.email);
+  await page.getByRole("button", { name: /Members/ }).click();
+  const membersDialog = page.getByRole("dialog", { name: "Members" });
+  await membersDialog.getByRole("combobox", { name: "Role member display name" }).fill(user.email);
   await page.getByRole("option", { name: user.email }).click();
-  await expect(membersPopover.getByText(user.email)).toBeVisible();
+  await expect(membersDialog.getByText(user.email)).toBeVisible();
   await page.keyboard.press("Escape");
 
-  await permissionView.getByRole("button", { name: "Fields Partial" }).click();
-  await page.getByLabel("email permission").selectOption("2");
-  await page.keyboard.press("Escape");
-  await permissionView.getByRole("button", { name: "Views All" }).click();
-  await page.getByRole("menuitem", { name: "Read" }).click();
-  await permissionView.getByRole("button", { name: "workflow_set Partial" }).click();
-  await page.getByLabel(`${workflow.name} permission`).selectOption("1");
-  await page.keyboard.press("Escape");
-  await permissionView.getByRole("button", { name: "form_set Partial" }).click();
-  await page.getByLabel(`${form.name} permission`).selectOption("2");
-  await page.keyboard.press("Escape");
-  await permissionView.getByRole("button", { name: "Save" }).click();
+  // Tables tab: field bits are toggle buttons; views have a read toggle.
+  await page.getByRole("tab", { name: "Tables" }).click();
+  await page.getByRole("button", { name: "email Update" }).click();
+  await page.getByRole("button", { name: "All views Read" }).click();
+  await page.getByRole("tab", { name: "Workflows" }).click();
+  await page.getByLabel(`${workflow.name} permission`).selectOption({ label: "Read" });
+  await page.getByRole("tab", { name: "Forms" }).click();
+  await page.getByLabel(`${form.name} permission`).selectOption({ label: "Write" });
+  await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.getByText("Saved role editor").first()).toBeVisible();
 
   const roles = (await api(page, "GET", `/api/databases/${databaseName}/roles`)) as Array<{

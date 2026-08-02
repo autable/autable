@@ -36,7 +36,9 @@ async function registerUser(page: Page) {
   await page.goto("/");
   await page.getByRole("button", { name: "Login" }).click();
   const dialog = page.getByRole("dialog");
+  await dialog.getByRole("tab", { name: "Register" }).click();
   await dialog.getByLabel("Email").fill(email);
+  await dialog.getByLabel("Display name").fill(email);
   await dialog.getByLabel("Password").fill("correct horse");
   await dialog.getByRole("button", { name: "Register" }).click();
   await page.getByRole("button", { name: email }).waitFor();
@@ -75,7 +77,7 @@ test("capture workspace screenshots", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "Login" }).click();
   await page.getByRole("dialog").waitFor();
-  await page.getByRole("button", { name: "Register" }).waitFor();
+  await page.getByRole("tab", { name: "Register" }).waitFor();
   await page.waitForTimeout(600);
   await shot(page, "01-login-dialog");
   await page.keyboard.press("Escape");
@@ -131,7 +133,8 @@ test("capture workspace screenshots", async ({ page }) => {
     script:
       "function render(api, root) {\n  root.append(\n    api.input({ field: 'name', label: 'Name' }),\n    api.input({ field: 'email', label: 'Email', type: 'email' }),\n    api.select({ field: 'status', label: 'Status', options: ['Active', 'Review', 'Backlog'] }),\n    api.submit('Create record')\n  );\n  return { table: 'contacts' };\n}"
   });
-  await page.reload();
+  // Selection is scoped to the URL route, so land on the database directly.
+  await page.goto(`/databases/${databaseName}`);
   await page.getByRole("button", { name: databaseName }).waitFor();
   await page.getByRole("button", { name: /Contacts/ }).waitFor();
 
@@ -181,7 +184,7 @@ test("capture workspace screenshots", async ({ page }) => {
 
   // Workflow view.
   await page.getByRole("button", { name: "Workflow", exact: true }).click();
-  await page.getByText("Instances").waitFor();
+  await page.getByText("Instances", { exact: true }).waitFor();
   await page.waitForTimeout(500);
   await shot(page, "06-workflow-editor");
   await navShot(page, "nav-02-workflow");
@@ -195,7 +198,7 @@ test("capture workspace screenshots", async ({ page }) => {
 
   // Workflow run + history.
   await capture(page, "08-workflow-history", async () => {
-    await page.getByRole("button", { name: "Run" }).click(bestEffort);
+    await page.getByRole("button", { name: "Run", exact: true }).click(bestEffort);
     await page.getByText(/Workflow run saved/).first().waitFor(bestEffort);
     await page.getByRole("tab", { name: "History" }).click(bestEffort);
     await page.locator(".workflow-run-node-list").waitFor(bestEffort);
