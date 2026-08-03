@@ -747,9 +747,9 @@ func normalizeInputValues(tableMeta metadata.Table, values map[string]any) (map[
 		}
 		normalizedValue, err := normalizeFieldValue(field, value)
 		if err != nil {
-			logFieldValueError(tableMeta.Name, key, err)
-			normalized[key] = nil
-			continue
+			// Silently storing nil here lost data on every malformed write and
+			// left nothing but a server log to explain the empty cell.
+			return nil, fmt.Errorf("field %q: %w", key, err)
 		}
 		normalized[key] = normalizedValue
 	}
@@ -760,12 +760,13 @@ func logFormulaValueError(tableName, fieldName string, err error) {
 	slog.Warn("formula field value cleared after calculation error", "table", tableName, "field", fieldName, "error", err)
 }
 
-func logFieldValueError(tableName, fieldName string, err error) {
-	slog.Warn("field value cleared after conversion error", "table", tableName, "field", fieldName, "error", err)
-}
-
 func normalizeFieldValue(field metadata.Field, value any) (any, error) {
 	if value == nil {
+		return nil, nil
+	}
+	// A form that leaves a number, relation, or file empty sends "", which
+	// means "no value" rather than a malformed number.
+	if text, ok := value.(string); ok && strings.TrimSpace(text) == "" && field.StorageType() != "string" {
 		return nil, nil
 	}
 	switch field.StorageType() {

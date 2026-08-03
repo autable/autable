@@ -803,7 +803,7 @@ func TestFormulaErrorsClearValueInsteadOfFailingWrite(t *testing.T) {
 	}
 }
 
-func TestInvalidTypedFieldInputClearsValueInsteadOfKeepingOldValue(t *testing.T) {
+func TestInvalidTypedFieldInputIsRejectedAndLeavesTheValueAlone(t *testing.T) {
 	ctx := context.Background()
 	store := history.NewMemoryStore()
 	catalog := metadata.Catalog{Databases: []metadata.Database{{
@@ -827,23 +827,62 @@ func TestInvalidTypedFieldInputClearsValueInsteadOfKeepingOldValue(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	updated, err := service.UpdateRow(ctx, catalog, perms, "u1", false, "db", "contacts", row.RecordID, map[string]any{"12": "0.5"})
+	// Storing nil here would answer 200 and quietly drop the cell, leaving a
+	// server log as the only trace.
+	if _, err := service.UpdateRow(ctx, catalog, perms, "u1", false, "db", "contacts", row.RecordID, map[string]any{"12": "0.5"}); err == nil {
+		t.Fatal("expected an unparseable int to be rejected")
+	}
+	rows, err := service.RowsWithOptions(ctx, catalog, perms, "u1", false, "db", "contacts", table.RowListOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if updated.Values["12"] != nil {
-		t.Fatalf("expected invalid int input to clear value, got %#v", updated.Values)
+	if len(rows) != 1 || fmt.Sprint(rows[0].Values["12"]) != "5" {
+		t.Fatalf("expected the stored value to survive a rejected write, got %#v", rows)
 	}
 	entries, err := store.GetPrefix(ctx, history.RowPrefix("db", "contacts", row.RecordID))
 	if err != nil {
 		t.Fatal(err)
 	}
-	change, err := history.DecodeRowChange(entries[len(entries)-1])
+	if len(entries) != 1 {
+		t.Fatalf("expected a rejected write to add no history, got %d entries", len(entries))
+	}
+}
+
+// Empty text is how a form says "no value", not a malformed number.
+func TestEmptyTextClearsNumberRelationAndFileFields(t *testing.T) {
+	ctx := context.Background()
+	catalog := metadata.Catalog{Databases: []metadata.Database{{
+		Name: "db",
+		Tables: []metadata.Table{
+			{Name: "owners", Fields: []metadata.Field{{Name: "name", Type: "string"}}},
+			{Name: "contacts", Fields: []metadata.Field{
+				{Name: "score", Type: "int"},
+				{Name: "rate", Type: "float"},
+				{Name: "owner", Type: "relation", RelationTable: "owners"},
+			}},
+		},
+	}}}
+	service, catalog, _ := newSQLiteService(t, history.NewMemoryStore(), catalog)
+
+	created, err := service.CreateRow(ctx, catalog, permission.Set{}, "owner", true, "db", "contacts", map[string]any{
+		"score": 7,
+		"rate":  1.5,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if fmt.Sprint(change.Diff["12"].Old) != "5" || change.Diff["12"].New != nil {
-		t.Fatalf("expected history to record value cleared, got %#v", change.Diff)
+	updated, err := service.UpdateRow(ctx, catalog, permission.Set{}, "owner", true, "db", "contacts", created.RecordID, map[string]any{
+		"score": "",
+		"rate":  "  ",
+		"owner": "",
+	})
+	if err != nil {
+		t.Fatalf("expected empty text to clear typed fields, got %v", err)
+	}
+	for _, field := range []string{"score", "rate", "owner"} {
+		if updated.Values[field] != nil {
+			t.Fatalf("expected %q to be cleared, got %#v", field, updated.Values[field])
+		}
 	}
 }
 
