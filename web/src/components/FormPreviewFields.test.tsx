@@ -281,6 +281,37 @@ describe("FormPreviewFields", () => {
     expect(onAction).toHaveBeenCalledWith("change_contract", { contract: "7" });
   });
 
+  it("submits nothing until a multi-valued select is ticked", async () => {
+    const user = userEvent.setup();
+    const onFormValueChange = vi.fn();
+    const multiTable: TableMetadata = {
+      name: "orders",
+      display_name: "Orders",
+      fields: [{ name: "channels", type: "string", options: ["email", "phone"], multiple: true, deleted: false }],
+      views: []
+    };
+
+    render(
+      <FluentProvider theme={webLightTheme}>
+        <FormPreviewFields
+          databaseName="workspace"
+          elements={[{ kind: "select", field: "channels", label: "Channels", options: ["email", "phone"] }]}
+          formTable="orders"
+          formValues={{}}
+          onAction={vi.fn()}
+          onFormValueChange={onFormValueChange}
+          tables={[multiTable]}
+        />
+      </FluentProvider>
+    );
+
+    // An untouched single-valued select would submit its first option; this one
+    // seeds an empty selection instead.
+    await waitFor(() => expect(onFormValueChange).toHaveBeenCalledWith("channels", ""));
+    await user.click(screen.getByLabelText("phone"));
+    expect(onFormValueChange).toHaveBeenCalledWith("channels", "phone");
+  });
+
   it("renders disabled inputs that scripts fill in", () => {
     render(
       <FluentProvider theme={webLightTheme}>

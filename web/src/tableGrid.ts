@@ -26,6 +26,13 @@ function renderEnumEditor(options: string[]) {
   };
 }
 
+// Mirrors metadata.OptionSeparator on the server.
+export const OPTION_SEPARATOR = ",";
+
+export function selectedOptions(value: string): string[] {
+  return value === "" ? [] : value.split(OPTION_SEPARATOR);
+}
+
 export type TableGridRow = Record<string, unknown> & { ct_record_id: number };
 
 export type RelationLabelMap = Record<string, Record<number, string>>;
@@ -48,15 +55,19 @@ export function buildTableColumns(
     name: field.name,
     minWidth: Math.max(128, field.name.length * 14),
     resizable: true,
-    renderEditCell: field.type === "string" && field.options?.length ? renderEnumEditor(field.options) : renderTextEditor,
+    renderEditCell:
+      field.type === "string" && field.options?.length && !field.multiple ? renderEnumEditor(field.options) : renderTextEditor,
     // Relation cells stay out of grid editing: double-click opens the
     // relation detail, and letting react-data-grid also start its raw-id
-    // editor made the two race. Relations are edited via the row panel.
+    // editor made the two race. Multi-valued enums are out for a different
+    // reason: a cell-sized control cannot offer a set of choices without
+    // fighting the grid. Both are edited through the row panel.
     editable: (row) =>
       Number.isFinite(row.ct_record_id) &&
       field.type !== "formula" &&
       field.type !== "file" &&
       field.type !== "relation" &&
+      !(field.type === "string" && field.options?.length && field.multiple) &&
       fieldEditable(field.permission_level),
     renderCell: ({ row }) => {
       if (field.type === "file") {

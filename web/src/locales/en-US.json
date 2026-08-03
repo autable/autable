@@ -416,7 +416,8 @@
     "viewSortDirection": "View sort direction",
     "viewSortField": "View sort field",
     "writableFields": "Writable fields",
-    "byActor": "by {{actor}}"
+    "byActor": "by {{actor}}",
+    "fieldOptionsMultiple": "Allow several options"
   },
   "workflow": {
     "editConfig": "Edit config {{id}}",

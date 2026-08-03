@@ -6,6 +6,8 @@ export type Field = {
   // For string fields: restricts values to this list (enum). Empty stays
   // allowed; absent means free text.
   options?: string[];
+  // Lets an enum hold several options at once, comma-separated.
+  multiple?: boolean;
   relation_table?: string;
   deleted: boolean;
   // Bitmask: 1 = read, 2 = update existing rows, 4 = fill on create.

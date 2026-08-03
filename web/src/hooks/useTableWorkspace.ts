@@ -64,6 +64,7 @@ export function useTableWorkspace({
   const [selectedRowDraft, setSelectedRowDraft] = useState<Record<string, string>>({});
   const [newFieldName, setNewFieldName] = useState("");
   const [newFieldOptions, setNewFieldOptions] = useState("");
+  const [newFieldMultiple, setNewFieldMultiple] = useState(false);
   const [newFieldType, setNewFieldType] = useState("string");
   const [newFormulaValueType, setNewFormulaValueType] = useState("string");
   const [newFieldFormula, setNewFieldFormula] = useState("");
@@ -520,6 +521,7 @@ export function useTableWorkspace({
           value_type: newFieldType === "formula" ? newFormulaValueType : undefined,
           formula: newFieldType === "formula" ? formula : undefined,
           options: newFieldType === "string" && parsedOptions.length > 0 ? parsedOptions : undefined,
+          multiple: newFieldType === "string" && parsedOptions.length > 0 && newFieldMultiple ? true : undefined,
           relation_table: newFieldType === "relation" ? newRelationTable : undefined,
           deleted: false
         }
@@ -527,6 +529,7 @@ export function useTableWorkspace({
     };
     await persistTableMetadata(nextTable, t("status.createdField", { name }));
     setNewFieldName("");
+    setNewFieldMultiple(false);
     setNewFieldType("string");
     setNewFieldOptions("");
     setNewFormulaValueType("string");
@@ -560,7 +563,7 @@ export function useTableWorkspace({
     await persistTableMetadata(nextTable, t("status.updatedFormula", { name: fieldName }));
   }
 
-  async function updateFieldOptionsFromCanvas(fieldName: string, optionsText: string) {
+  async function updateFieldOptionsFromCanvas(fieldName: string, optionsText: string, multiple: boolean) {
     const field = table.fields.find((item) => item.name === fieldName);
     if (!field || field.type !== "string") {
       onStatus(t("status.fieldNotString", { name: fieldName }));
@@ -573,7 +576,9 @@ export function useTableWorkspace({
     const nextTable = {
       ...table,
       fields: table.fields.map((item) =>
-        item.name === fieldName ? { ...item, options: parsed.length > 0 ? parsed : undefined } : item
+        item.name === fieldName
+          ? { ...item, options: parsed.length > 0 ? parsed : undefined, multiple: parsed.length > 0 && multiple ? true : undefined }
+          : item
       )
     };
     await persistTableMetadata(nextTable, t("status.updatedFieldOptions", { name: fieldName }));
@@ -705,6 +710,7 @@ export function useTableWorkspace({
     displayedRows,
     newFieldName,
     newFieldFormula,
+    newFieldMultiple,
     newFieldOptions,
     newFieldType,
     newRelationTable,
@@ -736,6 +742,7 @@ export function useTableWorkspace({
     setSearchText,
     setNewFieldName,
     setNewFieldFormula,
+    setNewFieldMultiple,
     setNewFieldOptions,
     setNewFieldType,
     setNewRelationTable,

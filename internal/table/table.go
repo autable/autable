@@ -718,8 +718,21 @@ func validateEnumValues(tableMeta metadata.Table, values map[string]any) error {
 		if text == "" {
 			continue
 		}
-		if !slices.Contains(field.Options, text) {
-			return fmt.Errorf("field %q value %q is not one of the allowed options", fieldName, text)
+		if !field.Multiple {
+			if !slices.Contains(field.Options, text) {
+				return fmt.Errorf("field %q value %q is not one of the allowed options", fieldName, text)
+			}
+			continue
+		}
+		seen := map[string]struct{}{}
+		for _, option := range metadata.SelectedOptions(text) {
+			if !slices.Contains(field.Options, option) {
+				return fmt.Errorf("field %q value %q is not one of the allowed options", fieldName, option)
+			}
+			if _, ok := seen[option]; ok {
+				return fmt.Errorf("field %q selects option %q twice", fieldName, option)
+			}
+			seen[option] = struct{}{}
 		}
 	}
 	return nil

@@ -405,3 +405,57 @@ func TestFileFieldValidationAndStorageType(t *testing.T) {
 		t.Fatal("expected relation_table on a file field to be rejected")
 	}
 }
+
+func TestMultiValuedEnumValidation(t *testing.T) {
+	valid := Catalog{Databases: []Database{{
+		Name: "workspace",
+		Tables: []Table{{
+			Name:   "contacts",
+			Fields: []Field{{Name: "channels", Type: "string", Options: []string{"email", "phone"}, Multiple: true}},
+		}},
+	}}}
+	if err := valid.Validate(); err != nil {
+		t.Fatal(err)
+	}
+
+	withoutOptions := Catalog{Databases: []Database{{
+		Name: "workspace",
+		Tables: []Table{{
+			Name:   "contacts",
+			Fields: []Field{{Name: "channels", Type: "string", Multiple: true}},
+		}},
+	}}}
+	if err := withoutOptions.Validate(); err == nil {
+		t.Fatal("expected a multi-valued field without options to be rejected")
+	}
+
+	// An option carrying the separator could not be split back out.
+	separatorInOption := Catalog{Databases: []Database{{
+		Name: "workspace",
+		Tables: []Table{{
+			Name:   "contacts",
+			Fields: []Field{{Name: "channels", Type: "string", Options: []string{"email,phone"}, Multiple: true}},
+		}},
+	}}}
+	if err := separatorInOption.Validate(); err == nil {
+		t.Fatal("expected an option containing the separator to be rejected")
+	}
+	// The same option is fine while the field holds one value at a time.
+	singleValued := separatorInOption
+	singleValued.Databases[0].Tables[0].Fields[0].Multiple = false
+	if err := singleValued.Validate(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSelectedOptionsSplitsStoredCells(t *testing.T) {
+	if got := SelectedOptions(""); got != nil {
+		t.Fatalf("expected an empty cell to select nothing, got %#v", got)
+	}
+	if got := SelectedOptions("email"); len(got) != 1 || got[0] != "email" {
+		t.Fatalf("unexpected single selection: %#v", got)
+	}
+	if got := SelectedOptions("email,post"); len(got) != 2 || got[1] != "post" {
+		t.Fatalf("unexpected multiple selection: %#v", got)
+	}
+}

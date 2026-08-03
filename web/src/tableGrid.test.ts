@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildTableColumns, displayTableCellValue, rowRecordToValues } from "./tableGrid";
+import { buildTableColumns, displayTableCellValue, rowRecordToValues, selectedOptions } from "./tableGrid";
 
 describe("tableGrid", () => {
   it("builds columns from user fields without exposing ct_record_id", () => {
@@ -27,6 +27,23 @@ describe("tableGrid", () => {
       name: "Ada",
       ct_record_id: 7
     });
+  });
+
+  it("splits multi-valued enum cells", () => {
+    expect(selectedOptions("")).toEqual([]);
+    expect(selectedOptions("电汇")).toEqual(["电汇"]);
+    expect(selectedOptions("电汇,现金")).toEqual(["电汇", "现金"]);
+  });
+
+  it("keeps multi-valued enums out of grid editing so they are set in the row panel", () => {
+    const columns = buildTableColumns([
+      { name: "channels", type: "string", options: ["email", "phone"], multiple: true, deleted: false },
+      { name: "status", type: "string", options: ["todo", "done"], deleted: false }
+    ]);
+    const editable = (column: (typeof columns)[number]) =>
+      typeof column.editable === "function" ? column.editable({ ct_record_id: 1 }) : column.editable;
+    expect(editable(columns[0])).toBe(false);
+    expect(editable(columns[1])).toBe(true);
   });
 
   it("does not make relation fields editable so double-click only opens the detail panel", () => {

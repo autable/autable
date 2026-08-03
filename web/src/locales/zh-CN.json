@@ -416,7 +416,8 @@
     "viewSortDirection": "视图排序方向",
     "viewSortField": "视图排序字段",
     "writableFields": "可写字段",
-    "byActor": "由 {{actor}} 操作"
+    "byActor": "由 {{actor}} 操作",
+    "fieldOptionsMultiple": "允许多选"
   },
   "workflow": {
     "editConfig": "编辑配置 {{id}}",

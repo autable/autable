@@ -21,6 +21,7 @@ import {
   Tab,
   TabList,
   Text,
+  Checkbox,
   Textarea,
   Toolbar,
   ToolbarButton
@@ -50,6 +51,7 @@ import { useTranslation } from "react-i18next";
 import type { Field, RowChange, TableMetadata, TableViewQuery, TableViewSort } from "../api";
 import { fieldCreatable, fieldEditable } from "../fieldPermissions";
 import type { TableGridRow } from "../tableGrid";
+import { EnumOptionCheckboxes } from "./EnumOptionCheckboxes";
 import { ExcelImportButton } from "./ExcelImportButton";
 import { RecordDataGrid } from "./RecordDataGrid";
 
@@ -67,6 +69,7 @@ type TableWorkspaceProps = {
   onNewFieldFormulaChange: (value: string) => void;
   onNewFieldNameChange: (value: string) => void;
   onNewFieldOptionsChange: (value: string) => void;
+  onNewFieldMultipleChange: (value: boolean) => void;
   onNewFieldTypeChange: (value: string) => void;
   onNewFormulaValueTypeChange: (value: string) => void;
   onNewRelationTableChange: (value: string) => void;
@@ -84,11 +87,12 @@ type TableWorkspaceProps = {
   onUpdateSelectedRow: () => void;
   onUpdateSelectedView: () => void;
   onUpdateFieldFormula: (fieldName: string, formula: string) => void;
-  onUpdateFieldOptions: (fieldName: string, optionsText: string) => void;
+  onUpdateFieldOptions: (fieldName: string, optionsText: string, multiple: boolean) => void;
   onImported: () => void | Promise<void>;
   onOpenRelationCell: (fieldName: string, row: TableGridRow) => void;
   newFieldFormula: string;
   newFieldName: string;
+  newFieldMultiple: boolean;
   newFieldOptions: string;
   newFieldType: string;
   newFormulaValueType: string;
@@ -125,6 +129,7 @@ export function TableWorkspace({
   onNewFieldFormulaChange,
   onNewFieldNameChange,
   onNewFieldOptionsChange,
+  onNewFieldMultipleChange,
   onNewFieldTypeChange,
   onNewFormulaValueTypeChange,
   onNewRelationTableChange,
@@ -147,6 +152,7 @@ export function TableWorkspace({
   onOpenRelationCell,
   newFieldFormula,
   newFieldName,
+  newFieldMultiple,
   newFieldOptions,
   newFieldType,
   newFormulaValueType,
@@ -187,7 +193,13 @@ export function TableWorkspace({
   const [recordMenu, setRecordMenu] = useState<{ x: number; y: number; recordID: number } | null>(null);
   const [fieldCreator, setFieldCreator] = useState<{ x: number; y: number } | null>(null);
   const [formulaEditor, setFormulaEditor] = useState<{ x: number; y: number; fieldName: string; formula: string } | null>(null);
-  const [optionsEditor, setOptionsEditor] = useState<{ x: number; y: number; fieldName: string; options: string } | null>(null);
+  const [optionsEditor, setOptionsEditor] = useState<{
+    x: number;
+    y: number;
+    fieldName: string;
+    options: string;
+    multiple: boolean;
+  } | null>(null);
   const selectedView = useMemo(
     () => (table.views ?? []).find((viewDef) => viewDef.name === selectedTableView),
     [selectedTableView, table.views]
@@ -300,7 +312,8 @@ export function TableWorkspace({
                   x: point.x,
                   y: point.y,
                   fieldName: targetField.name,
-                  options: (targetField.options ?? []).join(", ")
+                  options: (targetField.options ?? []).join(", "),
+                  multiple: Boolean(targetField.multiple)
                 })
               }
               onSort={(fieldName, direction) =>
@@ -607,6 +620,13 @@ export function TableWorkspace({
                   />
                 </FluentField>
               )}
+              {newFieldType === "string" && newFieldOptions.trim() !== "" && (
+                <Checkbox
+                  checked={newFieldMultiple}
+                  label={t("table.fieldOptionsMultiple")}
+                  onChange={(_, data) => onNewFieldMultipleChange(Boolean(data.checked))}
+                />
+              )}
               {newFieldType === "relation" && (
                 <FluentField label={t("table.targetTable")}>
                   <Select
@@ -727,6 +747,13 @@ export function TableWorkspace({
                   placeholder={t("table.fieldOptionsPlaceholder")}
                 />
               </FluentField>
+              <Checkbox
+                checked={Boolean(optionsEditor?.multiple)}
+                label={t("table.fieldOptionsMultiple")}
+                onChange={(_, data) =>
+                  setOptionsEditor((current) => (current ? { ...current, multiple: Boolean(data.checked) } : current))
+                }
+              />
               <div className="field-editor-actions">
                 <Button onClick={() => setOptionsEditor(null)}>{t("common.cancel")}</Button>
                 <Button
@@ -734,7 +761,7 @@ export function TableWorkspace({
                   icon={<SaveRegular />}
                   onClick={() => {
                     if (optionsEditor) {
-                      void onUpdateFieldOptions(optionsEditor.fieldName, optionsEditor.options);
+                      void onUpdateFieldOptions(optionsEditor.fieldName, optionsEditor.options, optionsEditor.multiple);
                     }
                     setOptionsEditor(null);
                   }}
@@ -1204,7 +1231,15 @@ function RecordDrawer({
         <div className="record-detail-list">
           {fields.map((field) => (
             <FluentField key={field.name} label={field.name}>
-              {field.type === "string" && field.options?.length ? (
+              {field.type === "string" && field.options?.length && field.multiple ? (
+                <EnumOptionCheckboxes
+                  label={t("table.valueLabel", { name: field.name })}
+                  options={field.options}
+                  value={values[field.name] ?? ""}
+                  disabled={!selectedRecordID || !canWriteField(field)}
+                  onChange={(next) => onChange(field.name, next)}
+                />
+              ) : field.type === "string" && field.options?.length ? (
                 <Select
                   aria-label={t("table.valueLabel", { name: field.name })}
                   value={values[field.name] ?? ""}

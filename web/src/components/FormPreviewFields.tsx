@@ -19,6 +19,7 @@ import { listRowsPage, uploadFile, type RowRecord, type TableMetadata } from "..
 import type { FormElement } from "../formRuntime";
 import { useBarcodeScanner, type BarcodeScanResult } from "../hooks/useBarcodeScanner";
 import { rowRecordToValues, type TableGridRow } from "../tableGrid";
+import { EnumOptionCheckboxes } from "./EnumOptionCheckboxes";
 import { ExcelImportButton } from "./ExcelImportButton";
 import { RecordDataGrid } from "./RecordDataGrid";
 
@@ -68,7 +69,8 @@ export function FormPreviewFields({
             <FormTextInput
               key={element.field}
               element={element}
-              enumOptions={enumFieldOptions(tables, formTable, element.field)}
+              enumOptions={enumField(tables, formTable, element.field)?.options}
+              enumMultiple={enumField(tables, formTable, element.field)?.multiple}
               onAction={onAction}
               onFormValueChange={onFormValueChange}
               value={formValues[element.field] ?? ""}
@@ -76,6 +78,17 @@ export function FormPreviewFields({
           );
         }
         if (element.kind === "select") {
+          // A select bound to a multi-valued enum has to offer every option.
+          if (enumField(tables, formTable, element.field)?.multiple) {
+            return (
+              <MultiEnumSelect
+                key={element.field}
+                element={element}
+                onFormValueChange={onFormValueChange}
+                value={formValues[element.field]}
+              />
+            );
+          }
           return (
             <label key={element.field} className="field-stack">
               <span>{element.label}</span>
@@ -169,15 +182,48 @@ export function FormPreviewFields({
   );
 }
 
+// A single-valued select submits its first option when untouched, which is
+// what the closed dropdown shows. A multi-valued one shows nothing checked,
+// so it has to submit nothing until someone ticks a box.
+function MultiEnumSelect({
+  element,
+  onFormValueChange,
+  value
+}: {
+  element: Extract<FormElement, { kind: "select" }>;
+  onFormValueChange: (name: string, value: string) => void;
+  value?: string;
+}) {
+  useEffect(() => {
+    if (value === undefined) {
+      onFormValueChange(element.field, "");
+    }
+  }, [element.field, onFormValueChange, value]);
+
+  return (
+    <label className="field-stack">
+      <span>{element.label}</span>
+      <EnumOptionCheckboxes
+        label={element.label}
+        options={element.options}
+        value={value ?? ""}
+        onChange={(next) => onFormValueChange(element.field, next)}
+      />
+    </label>
+  );
+}
+
 function FormTextInput({
   element,
   enumOptions,
+  enumMultiple,
   onAction,
   onFormValueChange,
   value
 }: {
   element: Extract<FormElement, { kind: "input" }>;
   enumOptions?: string[];
+  enumMultiple?: boolean;
   onAction: (actionID: string, valueOverrides?: Record<string, string>) => void | Promise<void>;
   onFormValueChange: (name: string, value: string) => void;
   value: string;
@@ -190,7 +236,20 @@ function FormTextInput({
   };
 
   // Enum fields on the target table render as a dropdown so users pick a
-  // legal value instead of typing one.
+  // legal value instead of typing one; multi-valued ones render as checkboxes.
+  if (enumOptions?.length && enumMultiple) {
+    return (
+      <label className="field-stack">
+        <span>{element.label}</span>
+        <EnumOptionCheckboxes
+          label={element.label}
+          options={enumOptions}
+          value={value}
+          onChange={handleTextChange}
+        />
+      </label>
+    );
+  }
   if (enumOptions?.length) {
     return (
       <label className="field-stack">
@@ -220,7 +279,11 @@ function FormTextInput({
   );
 }
 
-function enumFieldOptions(tables: TableMetadata[], formTable: string | undefined, fieldName: string): string[] | undefined {
+function enumField(
+  tables: TableMetadata[],
+  formTable: string | undefined,
+  fieldName: string
+): { options: string[]; multiple: boolean } | undefined {
   if (!formTable) {
     return undefined;
   }
@@ -230,7 +293,7 @@ function enumFieldOptions(tables: TableMetadata[], formTable: string | undefined
   if (!field || field.type !== "string" || !field.options?.length) {
     return undefined;
   }
-  return field.options;
+  return { options: field.options, multiple: Boolean(field.multiple) };
 }
 
 function ScannerInput({

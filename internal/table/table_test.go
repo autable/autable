@@ -1413,6 +1413,65 @@ func TestQueryByRecordIDNeedsNoSystemFieldGrant(t *testing.T) {
 	}
 }
 
+func TestMultiValuedEnumAcceptsSeveralOptions(t *testing.T) {
+	ctx := context.Background()
+	catalog := metadata.Catalog{Databases: []metadata.Database{{
+		Name: "db",
+		Tables: []metadata.Table{{
+			Name: "contacts",
+			Fields: []metadata.Field{
+				{Name: "name", Type: "string"},
+				{Name: "channels", Type: "string", Options: []string{"email", "phone", "post"}, Multiple: true},
+			},
+		}},
+	}}}
+	service, catalog, _ := newSQLiteService(t, history.NewMemoryStore(), catalog)
+
+	created, err := service.CreateRow(ctx, catalog, permission.Set{}, "owner", true, "db", "contacts", map[string]any{
+		"name":     "Ada",
+		"channels": "email,post",
+	})
+	if err != nil {
+		t.Fatalf("expected several options to pass: %v", err)
+	}
+	if created.Values["channels"] != "email,post" {
+		t.Fatalf("expected the selection to be stored verbatim, got %#v", created.Values["channels"])
+	}
+	if _, err := service.UpdateRow(ctx, catalog, permission.Set{}, "owner", true, "db", "contacts", created.RecordID, map[string]any{
+		"channels": "email,fax",
+	}); err == nil || !strings.Contains(err.Error(), "allowed options") {
+		t.Fatalf("expected an unknown option to be rejected, got %v", err)
+	}
+	if _, err := service.UpdateRow(ctx, catalog, permission.Set{}, "owner", true, "db", "contacts", created.RecordID, map[string]any{
+		"channels": "email,email",
+	}); err == nil || !strings.Contains(err.Error(), "twice") {
+		t.Fatalf("expected a repeated option to be rejected, got %v", err)
+	}
+	if _, err := service.UpdateRow(ctx, catalog, permission.Set{}, "owner", true, "db", "contacts", created.RecordID, map[string]any{
+		"channels": "",
+	}); err != nil {
+		t.Fatalf("expected an empty selection to pass: %v", err)
+	}
+}
+
+func TestSingleValuedEnumStillRejectsASeparatedList(t *testing.T) {
+	ctx := context.Background()
+	catalog := metadata.Catalog{Databases: []metadata.Database{{
+		Name: "db",
+		Tables: []metadata.Table{{
+			Name:   "contacts",
+			Fields: []metadata.Field{{Name: "status", Type: "string", Options: []string{"todo", "done"}}},
+		}},
+	}}}
+	service, catalog, _ := newSQLiteService(t, history.NewMemoryStore(), catalog)
+
+	if _, err := service.CreateRow(ctx, catalog, permission.Set{}, "owner", true, "db", "contacts", map[string]any{
+		"status": "todo,done",
+	}); err == nil || !strings.Contains(err.Error(), "allowed options") {
+		t.Fatalf("expected a list in a single-valued enum to be rejected, got %v", err)
+	}
+}
+
 func TestEnumStringFieldRejectsValuesOutsideOptions(t *testing.T) {
 	ctx := context.Background()
 	catalog := metadata.Catalog{Databases: []metadata.Database{{

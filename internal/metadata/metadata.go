@@ -35,6 +35,20 @@ type Table struct {
 	ViewPermissionLevel     int     `yaml:"-" json:"view_permission_level"`
 }
 
+// OptionSeparator joins the values of a multi-valued enum. Options may not
+// contain it, so a stored value always splits back into exactly what was
+// chosen.
+const OptionSeparator = ","
+
+// SelectedOptions splits a stored multi-valued enum cell into its options.
+// An empty cell selects nothing.
+func SelectedOptions(value string) []string {
+	if value == "" {
+		return nil
+	}
+	return strings.Split(value, OptionSeparator)
+}
+
 type Field struct {
 	Name      string `yaml:"name" json:"name"`
 	Type      string `yaml:"type" json:"type"`
@@ -43,7 +57,10 @@ type Field struct {
 	// Options turns a string field into an enum: writes must use one of
 	// the listed values (empty stays allowed). No options = free text.
 	// Storage is unchanged, so this needs no migration.
-	Options         []string `yaml:"options,omitempty" json:"options,omitempty"`
+	Options []string `yaml:"options,omitempty" json:"options,omitempty"`
+	// Multiple lets an enum hold several options at once, stored as a
+	// comma-separated list. Storage is unchanged, so this needs no migration.
+	Multiple        bool     `yaml:"multiple,omitempty" json:"multiple,omitempty"`
 	RelationTable   string   `yaml:"relation_table,omitempty" json:"relation_table,omitempty"`
 	Deleted         bool     `yaml:"deleted" json:"deleted"`
 	PermissionLevel int      `yaml:"-" json:"permission_level,omitempty"`
@@ -431,8 +448,14 @@ func (table Table) validate(dbName string, tableIndex int) error {
 				if _, ok := seenOptions[option]; ok {
 					return fmt.Errorf("database %q table %q field %q option %q is duplicated", dbName, table.Name, field.Name, option)
 				}
+				if field.Multiple && strings.Contains(option, OptionSeparator) {
+					return fmt.Errorf("database %q table %q field %q option %q must not contain %q because the field is multi-valued", dbName, table.Name, field.Name, option, OptionSeparator)
+				}
 				seenOptions[option] = struct{}{}
 			}
+		}
+		if field.Multiple && len(field.Options) == 0 {
+			return fmt.Errorf("database %q table %q field %q is multi-valued but has no options", dbName, table.Name, field.Name)
 		}
 		if field.Type != "formula" && strings.TrimSpace(field.Formula) != "" {
 			return fmt.Errorf("database %q table %q field %q formula is only allowed on formula fields", dbName, table.Name, field.Name)

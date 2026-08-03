@@ -1918,3 +1918,9 @@ select {
   margin: 0;
   padding-left: 20px;
 }
+
+.enum-option-checkboxes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 16px;
+}
