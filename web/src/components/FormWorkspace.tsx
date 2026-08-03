@@ -7,7 +7,7 @@ import { formEditorExtraLibs } from "../editorTypes";
 import type { FormRenderResult } from "../formRuntime";
 import { AIScriptAssistant } from "./AIScriptAssistant";
 import { FormRunner } from "./FormRunner";
-import { JavaScriptEditor } from "./JavaScriptEditor";
+import { JavaScriptEditor } from "./JavaScriptEditorLazy";
 
 type FormWorkspaceProps = {
   aiEnabled: boolean;

@@ -38,7 +38,7 @@ import type {
 import { workflowEditorExtraLibs } from "../editorTypes";
 import type { WorkflowTriggerDeclaration } from "../workflowInstances";
 import { AIScriptAssistant } from "./AIScriptAssistant";
-import { JavaScriptEditor } from "./JavaScriptEditor";
+import { JavaScriptEditor } from "./JavaScriptEditorLazy";
 
 type WorkflowWorkspaceProps = {
   aiEnabled: boolean;

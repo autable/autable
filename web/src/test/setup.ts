@@ -3,6 +3,12 @@ import { cleanup } from "@testing-library/react";
 import React from "react";
 import { afterEach, vi } from "vitest";
 
+// The editor is lazy-loaded behind setupMonaco; tests render the mocked
+// @monaco-editor/react below instead of pulling in the real Monaco bundle.
+vi.mock("../monacoLocal", () => ({
+  setupMonaco: () => Promise.resolve()
+}));
+
 vi.mock("@monaco-editor/react", () => ({
   default: ({
     className,

@@ -3,7 +3,7 @@ import MonacoEditor, { useMonaco, type Monaco } from "@monaco-editor/react";
 import { useTranslation } from "react-i18next";
 import type { EditorExtraLib } from "../editorTypes";
 
-type JavaScriptEditorProps = {
+export type JavaScriptEditorProps = {
   canWrite: boolean;
   extraLibs?: EditorExtraLib[];
   label: string;

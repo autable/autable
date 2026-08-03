@@ -4,7 +4,6 @@ import { FluentProvider, webLightTheme } from "@fluentui/react-components";
 import "react-data-grid/lib/styles.css";
 import "react-querybuilder/dist/query-builder.css";
 import "./i18n";
-import "./monacoLocal";
 import "./styles.css";
 import { App } from "./App";
 
