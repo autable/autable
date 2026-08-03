@@ -97,11 +97,33 @@ export type FormRowsAPI = {
   list(table: string, options?: unknown): Promise<unknown>;
 };
 
+export type FormPdfInput = {
+  html: string;
+  name?: string;
+  width?: number;
+  scale?: number;
+  orientation?: "portrait" | "landscape";
+  marginMm?: number;
+  // Where the generated file is filed; defaults to the form's own table and an
+  // unattached record.
+  table?: string;
+  record_id?: number;
+};
+
+export type FormPdfResult = {
+  id: number;
+  name: string;
+  size: number;
+};
+
 export type FormActionAPI = {
   value(field: string): string;
   values(): Record<string, string>;
   setValue(field: string, value: string): void;
   rows: FormRowsAPI;
+  // Renders html to a PDF, uploads it, and returns the stored file so the
+  // script can write its id into a file field.
+  pdf(input: FormPdfInput): Promise<FormPdfResult>;
   show(value: unknown): void;
 };
 

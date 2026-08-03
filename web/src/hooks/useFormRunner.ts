@@ -5,9 +5,11 @@ import {
   createRow,
   listRows,
   updateRow,
+  uploadFile,
   upsertRow,
   type RowListOptions
 } from "../api";
+import { renderHtmlToPdfFile } from "../formPdf";
 import { renderFormScript, type FormActionAPI } from "../formRuntime";
 
 type UseFormRunnerOptions = {
@@ -68,6 +70,11 @@ export function useFormRunner({ databaseName, script, onStatus, onRowCreated }: 
         update: async (table, recordID, rowValues) => updateRow(databaseName, table, recordID, rowValues),
         upsert: async (table, input) => upsertRow(databaseName, table, input.match_field, input.values),
         list: async (table, options) => listRows(databaseName, table, undefined, undefined, options as RowListOptions)
+      },
+      pdf: async (input) => {
+        const file = await renderHtmlToPdfFile(input);
+        const stored = await uploadFile(file, databaseName, input.table ?? rendered.table ?? "", input.record_id ?? 0);
+        return { id: stored.id, name: stored.name, size: stored.size };
       },
       show: setResult
     };
