@@ -1,103 +1,130 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { renderHtmlToPdfFile } from "./formPdf";
+import { renderHtmlToPdfFile, usedCharacters } from "./formPdf";
 
-const addImage = vi.fn();
-const addPage = vi.fn();
-const html2canvas = vi.fn();
+const htmlToPdfmake = vi.fn();
+const addVirtualFileSystem = vi.fn();
+const addFonts = vi.fn();
+const createPdf = vi.fn();
 
-vi.mock("jspdf", () => ({
-  jsPDF: class {
-    internal = {
-      pageSize: { getWidth: () => 210, getHeight: () => 297 }
-    };
-    addImage = addImage;
-    addPage = addPage;
-    output() {
-      return new Blob(["%PDF-1.4"], { type: "application/pdf" });
-    }
+vi.mock("html-to-pdfmake", () => ({ default: (...args: unknown[]) => htmlToPdfmake(...args) }));
+vi.mock("pdfmake/build/pdfmake", () => ({
+  default: {
+    addVirtualFileSystem: (...args: unknown[]) => addVirtualFileSystem(...args),
+    addFonts: (...args: unknown[]) => addFonts(...args),
+    createPdf: (...args: unknown[]) => createPdf(...args)
   }
 }));
 
-vi.mock("html2canvas-pro", () => ({ default: (...args: unknown[]) => html2canvas(...args) }));
+// Stands in for the subsetter: records the code points it was asked to keep and
+// hands back a marker "font" so the pdfmake call can be checked.
+const SUBSET_BYTES = new Uint8Array([1, 2, 3, 4]);
+let requestedCodePoints: number[] = [];
 
-function fakeCanvas(width: number, height: number) {
+function fakeHarfbuzz() {
+  const memory = new WebAssembly.Memory({ initial: 2 });
+  const heap = new Uint8Array(memory.buffer);
+  heap.set(SUBSET_BYTES, 64);
   return {
-    width,
-    height,
-    toDataURL: () => `data:image/jpeg;base64,whole-${width}x${height}`,
-    getContext: () => ({
-      fillStyle: "",
-      fillRect: vi.fn(),
-      drawImage: vi.fn()
-    })
+    memory,
+    malloc: () => 1024,
+    free: vi.fn(),
+    hb_blob_create: () => 1,
+    hb_blob_destroy: vi.fn(),
+    hb_blob_get_data: () => 64,
+    hb_blob_get_length: () => SUBSET_BYTES.length,
+    hb_face_create: () => 2,
+    hb_face_destroy: vi.fn(),
+    hb_face_reference_blob: () => 3,
+    hb_set_add: (_set: number, codePoint: number) => requestedCodePoints.push(codePoint),
+    hb_subset_input_create_or_fail: () => 4,
+    hb_subset_input_destroy: vi.fn(),
+    hb_subset_input_unicode_set: () => 5,
+    hb_subset_or_fail: () => 6
   };
 }
 
 beforeEach(() => {
-  addImage.mockClear();
-  addPage.mockClear();
-  html2canvas.mockReset();
-  // Slice canvases are created through document.createElement.
-  const originalCreate = document.createElement.bind(document);
-  vi.spyOn(document, "createElement").mockImplementation((tag: string) => {
-    if (tag === "canvas") {
-      return fakeCanvas(0, 0) as unknown as HTMLCanvasElement;
-    }
-    return originalCreate(tag);
+  requestedCodePoints = [];
+  htmlToPdfmake.mockReturnValue([{ text: "converted" }]);
+  createPdf.mockReturnValue({ getBlob: async () => new Blob(["%PDF-1.3"], { type: "application/pdf" }) });
+  vi.stubGlobal("fetch", vi.fn(async () => new Response(new Uint8Array([9, 9, 9]))));
+  vi.stubGlobal("WebAssembly", {
+    Memory: WebAssembly.Memory,
+    instantiate: async () => ({ instance: { exports: fakeHarfbuzz() } })
   });
 });
 
 afterEach(() => {
-  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+  vi.clearAllMocks();
+});
+
+describe("usedCharacters", () => {
+  it("collects the rendered text, not the markup", () => {
+    const characters = usedCharacters('<table><tr><td style="color:red">合计</td><td>12</td></tr></table>');
+    expect([...characters].sort().join("")).toBe("12合计");
+  });
+
+  it("deduplicates and keeps spaces", () => {
+    expect(usedCharacters("<div>a a b</div>")).toBe("a b");
+  });
 });
 
 describe("renderHtmlToPdfFile", () => {
-  it("rasterises off-screen html and returns a named pdf file", async () => {
-    html2canvas.mockImplementation(async (element: HTMLElement) => {
-      // The host must be in the document while html2canvas runs.
-      expect(element.isConnected).toBe(true);
-      expect(element.textContent).toContain("月度报表");
-      expect(element.style.width).toBe("900px");
-      return fakeCanvas(1800, 500);
-    });
+  it("subsets the bundled font to the characters the document renders", async () => {
+    await renderHtmlToPdfFile({ html: "<div>合计 12</div>", name: "月度报表" });
 
-    const file = await renderHtmlToPdfFile({
-      html: "<div>月度报表</div>",
-      name: "月度报表",
-      width: 900
+    const requested = String.fromCodePoint(...requestedCodePoints);
+    expect([...requested].sort().join("")).toBe(" 12合计");
+    // The whole font is never handed to pdfmake.
+    expect(addVirtualFileSystem).toHaveBeenCalledWith({ "document.ttf": btoa("\x01\x02\x03\x04") });
+    expect(addFonts).toHaveBeenCalledWith({
+      Document: expect.objectContaining({ normal: "document.ttf", bold: "document.ttf" })
     });
+  });
 
+  it("typesets the converted html at A4 with the bundled font", async () => {
+    const file = await renderHtmlToPdfFile({ html: "<div>合计</div>", name: "月度报表" });
+
+    expect(htmlToPdfmake).toHaveBeenCalledWith(
+      "<div>合计</div>",
+      expect.objectContaining({ tableAutoSize: true, ignoreStyles: ["font-family"] })
+    );
+    expect(createPdf).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: [{ text: "converted" }],
+        pageSize: "A4",
+        pageOrientation: "portrait",
+        defaultStyle: expect.objectContaining({ font: "Document" })
+      })
+    );
     expect(file.name).toBe("月度报表.pdf");
     expect(file.type).toBe("application/pdf");
-    expect(html2canvas).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({ backgroundColor: "#ffffff", scale: 2, width: 900 })
-    );
-    expect(addImage).toHaveBeenCalledTimes(1);
-    expect(addPage).not.toHaveBeenCalled();
-    // Nothing is left behind in the document.
-    expect(document.body.querySelector("[aria-hidden='true']")).toBeNull();
   });
 
-  it("splits a tall canvas across pages", async () => {
-    // A4 portrait with 10mm margins fits 277mm of a 190mm-wide page, so a
-    // canvas 3x taller than that ratio needs three pages.
-    html2canvas.mockResolvedValue(fakeCanvas(1000, Math.ceil((1000 / 190) * 277 * 2.5)));
-
-    await renderHtmlToPdfFile({ html: "<div>long</div>" });
-
-    expect(addPage).toHaveBeenCalledTimes(2);
-    expect(addImage).toHaveBeenCalledTimes(3);
+  it("honours orientation and margins", async () => {
+    await renderHtmlToPdfFile({ html: "<div>x</div>", orientation: "landscape", marginMm: 25.4 });
+    const definition = createPdf.mock.calls[0][0] as { pageOrientation: string; pageMargins: number[] };
+    expect(definition.pageOrientation).toBe("landscape");
+    expect(definition.pageMargins.every((value) => Math.abs(value - 72) < 0.01)).toBe(true);
   });
 
-  it("removes the off-screen host when rendering fails", async () => {
-    html2canvas.mockRejectedValue(new Error("boom"));
-    await expect(renderHtmlToPdfFile({ html: "<div>x</div>" })).rejects.toThrow("boom");
-    expect(document.body.querySelector("[aria-hidden='true']")).toBeNull();
-  });
-
-  it("rejects empty html", async () => {
+  it("rejects empty html before loading anything", async () => {
     await expect(renderHtmlToPdfFile({ html: "   " })).rejects.toThrow("pdf requires html");
-    expect(html2canvas).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("fails loudly when a bundled artefact is missing, and retries after", async () => {
+    // The loaders memoise, so start from a clean module to exercise a first load.
+    vi.resetModules();
+    const { renderHtmlToPdfFile: render } = await import("./formPdf");
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("", { status: 404 })));
+    await expect(render({ html: "<div>x</div>" })).rejects.toThrow("could not be loaded");
+
+    // A failed load is not remembered: the next attempt reaches the network again.
+    const retry = vi.fn(async () => new Response(new Uint8Array([9, 9, 9])));
+    vi.stubGlobal("fetch", retry);
+    await render({ html: "<div>x</div>" });
+    expect(retry).toHaveBeenCalled();
   });
 });

@@ -100,8 +100,6 @@ export type FormRowsAPI = {
 export type FormPdfInput = {
   html: string;
   name?: string;
-  width?: number;
-  scale?: number;
   orientation?: "portrait" | "landscape";
   marginMm?: number;
   // Where the generated file is filed; defaults to the form's own table and an
