@@ -27,9 +27,9 @@ const table: TableMetadata = {
   display_name: "Inventory",
   views: [],
   fields: [
-    { name: "条码", type: "string", deleted: false },
+    { name: "编号", type: "string", deleted: false },
     { name: "数量", type: "int", deleted: false },
-    { name: "状态", type: "string", deleted: false, options: ["在库", "出库"] },
+    { name: "状态", type: "string", deleted: false, options: ["启用", "停用"] },
     { name: "合计", type: "formula", deleted: false },
     { name: "旧列", type: "float", deleted: true }
   ]
@@ -40,7 +40,7 @@ describe("parseWorkbook", () => {
     const sheets = await parseWorkbook(
       workbookBuffer({
         Sheet1: [
-          [" 条码 ", "数量", "", "备注"],
+          [" 编号 ", "数量", "", "备注"],
           ["A01", 3, null, "ok"],
           [null, null, null, null],
           ["A02", null, null, ""]
@@ -48,20 +48,20 @@ describe("parseWorkbook", () => {
       })
     );
     expect(sheets).toHaveLength(1);
-    expect(sheets[0].headers).toEqual(["条码", "数量", "备注"]);
+    expect(sheets[0].headers).toEqual(["编号", "数量", "备注"]);
     expect(sheets[0].rows).toEqual([
-      { 条码: "A01", 数量: 3, 备注: "ok" },
-      { 条码: "A02" }
+      { 编号: "A01", 数量: 3, 备注: "ok" },
+      { 编号: "A02" }
     ]);
   });
 
   it("keeps the first occurrence of duplicate headers", async () => {
     const sheets = await parseWorkbook(
-      workbookBuffer({ Sheet1: [["条码", "条码"], ["A01", "A02"]] })
+      workbookBuffer({ Sheet1: [["编号", "编号"], ["A01", "A02"]] })
     );
-    expect(sheets[0].headers).toEqual(["条码"]);
-    expect(sheets[0].duplicateHeaders).toEqual(["条码"]);
-    expect(sheets[0].rows).toEqual([{ 条码: "A01" }]);
+    expect(sheets[0].headers).toEqual(["编号"]);
+    expect(sheets[0].duplicateHeaders).toEqual(["编号"]);
+    expect(sheets[0].rows).toEqual([{ 编号: "A01" }]);
   });
 
   it("finds the header row below leading blank rows and drops empty sheets", async () => {
@@ -70,14 +70,14 @@ describe("parseWorkbook", () => {
         Empty: [[]],
         Data: [
           [null, null],
-          ["条码"],
+          ["编号"],
           ["A01"]
         ]
       })
     );
     expect(sheets).toHaveLength(1);
     expect(sheets[0].name).toBe("Data");
-    expect(sheets[0].rows).toEqual([{ 条码: "A01" }]);
+    expect(sheets[0].rows).toEqual([{ 编号: "A01" }]);
   });
 });
 
@@ -124,7 +124,7 @@ describe("coerceCellValue", () => {
 
 describe("fieldNameProblem", () => {
   it("mirrors the backend field name rules", () => {
-    expect(fieldNameProblem("条码")).toBeUndefined();
+    expect(fieldNameProblem("编号")).toBeUndefined();
     expect(fieldNameProblem("")).toBe("invalidName");
     expect(fieldNameProblem("a.b")).toBe("invalidName");
     expect(fieldNameProblem("a;b")).toBe("invalidName");
@@ -136,7 +136,7 @@ describe("fieldNameProblem", () => {
 describe("columnTarget", () => {
   it("matches existing fields with their type and enum options", () => {
     expect(columnTarget("数量", table, [])).toEqual({ kind: "existing", type: "int" });
-    expect(columnTarget("状态", table, [])).toEqual({ kind: "existing", type: "string", options: ["在库", "出库"] });
+    expect(columnTarget("状态", table, [])).toEqual({ kind: "existing", type: "string", options: ["启用", "停用"] });
   });
 
   it("blocks formula fields and invalid names", () => {
@@ -149,7 +149,7 @@ describe("columnTarget", () => {
   });
 
   it("infers the type for new fields", () => {
-    expect(columnTarget("盘点人", table, ["张三"])).toEqual({ kind: "new", inferredType: "string" });
+    expect(columnTarget("经办人", table, ["张三"])).toEqual({ kind: "new", inferredType: "string" });
     expect(columnTarget("件数", table, [1, 2])).toEqual({ kind: "new", inferredType: "int" });
   });
 });
@@ -157,30 +157,30 @@ describe("columnTarget", () => {
 describe("prepareRows", () => {
   const sheet: ParsedSheet = {
     name: "Sheet1",
-    headers: ["条码", "数量", "状态", "内部"],
+    headers: ["编号", "数量", "状态", "内部"],
     duplicateHeaders: [],
     rows: [
-      { 条码: "A01", 数量: 3, 状态: "在库", 内部: "x" },
-      { 条码: "A02", 数量: "三个", 状态: "丢失" },
+      { 编号: "A01", 数量: 3, 状态: "启用", 内部: "x" },
+      { 编号: "A02", 数量: "三个", 状态: "未知" },
       { 数量: 5 }
     ]
   };
   const columns: ImportColumnPlan[] = [
-    { header: "条码", include: true, type: "string" },
+    { header: "编号", include: true, type: "string" },
     { header: "数量", include: true, type: "int" },
-    { header: "状态", include: true, type: "string", options: ["在库", "出库"] },
+    { header: "状态", include: true, type: "string", options: ["启用", "停用"] },
     { header: "内部", include: false, type: "string" }
   ];
 
   it("coerces included columns and reports problems", () => {
-    const rows = prepareRows(sheet, columns, "条码");
-    expect(rows[0]).toEqual({ index: 1, values: { 条码: "A01", 数量: 3, 状态: "在库" }, problems: [] });
-    expect(rows[1].values).toEqual({ 条码: "A02" });
+    const rows = prepareRows(sheet, columns, "编号");
+    expect(rows[0]).toEqual({ index: 1, values: { 编号: "A01", 数量: 3, 状态: "启用" }, problems: [] });
+    expect(rows[1].values).toEqual({ 编号: "A02" });
     expect(rows[1].problems).toEqual([
       { kind: "type", header: "数量", value: "三个", type: "int" },
-      { kind: "enum", header: "状态", value: "丢失" }
+      { kind: "enum", header: "状态", value: "未知" }
     ]);
-    expect(rows[2].problems).toEqual([{ kind: "missingMatch", header: "条码" }]);
+    expect(rows[2].problems).toEqual([{ kind: "missingMatch", header: "编号" }]);
   });
 
   it("does not require a match value without a match field", () => {
@@ -219,17 +219,17 @@ function fakeApi(existingRows: Record<string, unknown>[] = []): { api: ImportApi
 
 describe("runImport", () => {
   const validRows = [
-    { index: 1, values: { 条码: "A01", 数量: 3 }, problems: [] },
-    { index: 2, values: { 条码: "A02", 数量: 5 }, problems: [] }
+    { index: 1, values: { 编号: "A01", 数量: 3 }, problems: [] },
+    { index: 2, values: { 编号: "A02", 数量: 5 }, problems: [] }
   ];
 
   it("creates fields once and upserts serially with the update strategy", async () => {
-    const { api, calls } = fakeApi([{ 条码: "A02" }]);
+    const { api, calls } = fakeApi([{ 编号: "A02" }]);
     const progress: number[] = [];
     const summary = await runImport({
       rows: validRows,
       newFields: [{ name: "数量", type: "int" }],
-      matchField: "条码",
+      matchField: "编号",
       duplicateStrategy: "update",
       api,
       onProgress: (done) => progress.push(done)
@@ -247,11 +247,11 @@ describe("runImport", () => {
   });
 
   it("prefetches existing match values and skips duplicates with the skip strategy", async () => {
-    const { api, calls } = fakeApi([{ 条码: "A01" }]);
+    const { api, calls } = fakeApi([{ 编号: "A01" }]);
     const summary = await runImport({
-      rows: [...validRows, { index: 3, values: { 条码: "A02" }, problems: [] }],
+      rows: [...validRows, { index: 3, values: { 编号: "A02" }, problems: [] }],
       newFields: [],
-      matchField: "条码",
+      matchField: "编号",
       duplicateStrategy: "skip",
       api
     });
@@ -277,7 +277,7 @@ describe("runImport", () => {
     const failing: ImportApi = {
       ...api,
       createRow: async (values) => {
-        if (values["条码"] === "A01") {
+        if (values["编号"] === "A01") {
           throw new Error("boom");
         }
         return {};

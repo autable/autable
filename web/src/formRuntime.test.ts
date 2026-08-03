@@ -200,9 +200,9 @@ describe("renderFormScript", () => {
       function render(api, root) {
         root.append(api.excelImport({
           table: "inventory",
-          label: "导入盘点表",
-          matchField: "条码",
-          fields: { "条码": "string", "数量": "int" },
+          label: "导入数据",
+          matchField: "编号",
+          fields: { "编号": "string", "数量": "int" },
           duplicateStrategy: "update"
         }));
         return { table: "inventory" };
@@ -212,9 +212,9 @@ describe("renderFormScript", () => {
     expect(rendered.elements[0]).toEqual({
       kind: "excelImport",
       table: "inventory",
-      label: "导入盘点表",
-      matchField: "条码",
-      fields: { 条码: "string", 数量: "int" },
+      label: "导入数据",
+      matchField: "编号",
+      fields: { 编号: "string", 数量: "int" },
       duplicateStrategy: "update"
     });
     expect(rendered.fields).toEqual({});
