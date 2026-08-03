@@ -109,7 +109,12 @@ export function FormPreviewFields({
               key={element.field}
               databaseName={databaseName}
               element={element}
-              onChange={(value) => onFormValueChange(element.field, value)}
+              onChange={(value) => {
+                onFormValueChange(element.field, value);
+                if (element.onChangeActionID) {
+                  void onAction(element.onChangeActionID, { [element.field]: value });
+                }
+              }}
               relationTable={relationTable}
               value={formValues[element.field] ?? ""}
             />
@@ -190,7 +195,7 @@ function FormTextInput({
     return (
       <label className="field-stack">
         <span>{element.label}</span>
-        <Select value={value} onChange={(_, data) => handleTextChange(data.value)}>
+        <Select disabled={element.disabled} value={value} onChange={(_, data) => handleTextChange(data.value)}>
           <option value="" />
           {enumOptions.map((option) => (
             <option key={option} value={option}>
@@ -205,7 +210,12 @@ function FormTextInput({
   return (
     <label className="field-stack">
       <span>{element.label}</span>
-      <Input type={element.inputType} value={value} onChange={(_, data) => handleTextChange(data.value)} />
+      <Input
+        disabled={element.disabled}
+        type={element.inputType}
+        value={value}
+        onChange={(_, data) => handleTextChange(data.value)}
+      />
     </label>
   );
 }
@@ -293,6 +303,7 @@ function ScannerInput({
       <div className={element.scanner ? "scanner-input" : undefined}>
         <Input
           aria-label={element.label}
+          disabled={element.disabled}
           type={element.inputType}
           value={value}
           onChange={(_, data) => handleTextChange(data.value)}
@@ -302,6 +313,7 @@ function ScannerInput({
             type="button"
             icon={<ScanQrCode24Regular />}
             aria-label={t("form.scanField", { label: element.label })}
+            disabled={element.disabled}
             onClick={() => setOpen(true)}
           >
             {t("form.scan")}

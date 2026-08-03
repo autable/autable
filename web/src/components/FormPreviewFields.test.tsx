@@ -238,4 +238,73 @@ describe("FormPreviewFields", () => {
     );
     expect(await screen.findByDisplayValue("PR-002")).toBeInTheDocument();
   });
+
+  it("runs the relation onChange action after a pick so scripts can fill other fields", async () => {
+    const user = userEvent.setup();
+    const onAction = vi.fn();
+    const onFormValueChange = vi.fn();
+    const relationTable: TableMetadata = {
+      name: "contracts",
+      display_name: "Contracts",
+      fields: [{ name: "contract_no", type: "string", deleted: false }],
+      views: []
+    };
+    vi.mocked(listRowsPage).mockResolvedValue({
+      rows: [{ record_id: 7, values: { contract_no: "HT-007" } }],
+      total: 1
+    });
+
+    render(
+      <FluentProvider theme={webLightTheme}>
+        <FormPreviewFields
+          databaseName="workspace"
+          elements={[
+            {
+              kind: "relation",
+              field: "contract",
+              label: "Contract",
+              table: "contracts",
+              onChangeActionID: "change_contract"
+            }
+          ]}
+          formValues={{}}
+          onAction={onAction}
+          onFormValueChange={onFormValueChange}
+          tables={[relationTable]}
+        />
+      </FluentProvider>
+    );
+
+    await user.click(screen.getByRole("button", { name: "Choose" }));
+    await user.click(await screen.findByText("HT-007"));
+    expect(onFormValueChange).toHaveBeenCalledWith("contract", "7");
+    expect(onAction).toHaveBeenCalledWith("change_contract", { contract: "7" });
+  });
+
+  it("renders disabled inputs that scripts fill in", () => {
+    render(
+      <FluentProvider theme={webLightTheme}>
+        <FormPreviewFields
+          databaseName="workspace"
+          elements={[
+            {
+              kind: "input",
+              field: "total",
+              label: "Total",
+              inputType: "text",
+              scanner: false,
+              disabled: true
+            }
+          ]}
+          formValues={{ total: "138.2" }}
+          onAction={vi.fn()}
+          onFormValueChange={vi.fn()}
+          tables={[]}
+        />
+      </FluentProvider>
+    );
+
+    const input = screen.getByDisplayValue("138.2");
+    expect(input).toBeDisabled();
+  });
 });

@@ -5,11 +5,20 @@ export type FormElement =
       label: string;
       inputType: "text" | "email" | "search" | "tel" | "url" | "password";
       scanner?: boolean | ScannerConfig;
+      disabled?: boolean;
       onChangeActionID?: string;
     }
   | { kind: "select"; field: string; label: string; options: string[] }
   | { kind: "file"; field: string; label: string }
-  | { kind: "relation"; field: string; label: string; table: string; view?: string; fields?: string[] }
+  | {
+      kind: "relation";
+      field: string;
+      label: string;
+      table: string;
+      view?: string;
+      fields?: string[];
+      onChangeActionID?: string;
+    }
   | {
       kind: "excelImport";
       table: string;
@@ -41,6 +50,9 @@ type InputConfig = {
   label?: string;
   type?: string;
   scanner?: boolean | ScannerConfig;
+  // Values a script fills in (via setValue) rather than the person filling the
+  // form: shown, submitted, but not typeable.
+  disabled?: boolean;
   onChange?: FormAction;
 };
 
@@ -61,6 +73,7 @@ type RelationConfig = {
   table: string;
   view?: string;
   fields?: string[];
+  onChange?: FormAction;
 };
 
 type ButtonConfig = {
@@ -120,6 +133,7 @@ export function renderFormScript(script: string): FormRenderResult {
         label: config.label ?? field,
         inputType: normalizeInputType(config.type),
         scanner: normalizeScannerConfig(config.scanner),
+        ...(config.disabled ? { disabled: true } : {}),
         onChangeActionID
       };
     },
@@ -143,13 +157,15 @@ export function renderFormScript(script: string): FormRenderResult {
     relation: (config: RelationConfig): FormElement => {
       const field = formControlField(config);
       const fields = normalizeRelationFields(config.fields);
+      const onChangeActionID = typeof config.onChange === "function" ? registerAction(actions, `change_${field}`, config.onChange) : undefined;
       return {
         kind: "relation",
         field,
         label: config.label ?? field,
         table: String(config.table),
         view: config.view ? String(config.view) : undefined,
-        ...(fields ? { fields } : {})
+        ...(fields ? { fields } : {}),
+        onChangeActionID
       };
     },
     excelImport: (config: ExcelImportConfig): FormElement => normalizeExcelImportConfig(config),

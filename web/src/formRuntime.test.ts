@@ -160,6 +160,41 @@ describe("renderFormScript", () => {
     expect(result.elements).toEqual([{ kind: "html", html: "<strong>Custom note</strong>" }]);
   });
 
+  it("registers relation onChange actions and disabled inputs", () => {
+    const rendered = renderFormScript(`
+      function render(api, root) {
+        root.append(
+          api.relation({
+            field: "contract",
+            table: "contracts",
+            onChange: (api) => api.setValue("total", "1")
+          }),
+          api.input({ field: "total", label: "Total", disabled: true })
+        );
+        return { table: "payments" };
+      }
+    `);
+    expect(rendered.error).toBeUndefined();
+    expect(rendered.elements[0]).toEqual({
+      kind: "relation",
+      field: "contract",
+      label: "contract",
+      table: "contracts",
+      view: undefined,
+      onChangeActionID: "change_contract"
+    });
+    expect(rendered.elements[1]).toEqual({
+      kind: "input",
+      field: "total",
+      label: "Total",
+      inputType: "text",
+      scanner: false,
+      disabled: true,
+      onChangeActionID: undefined
+    });
+    expect(rendered.actions.change_contract).toEqual(expect.any(Function));
+  });
+
   it("renders excel import buttons from api.excelImport", () => {
     const rendered = renderFormScript(`
       function render(api, root) {
