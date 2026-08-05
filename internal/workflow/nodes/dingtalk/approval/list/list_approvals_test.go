@@ -13,16 +13,25 @@ import (
 )
 
 type fakeWorkflowClient struct {
-	request  *dingworkflow.QueryAllProcessInstancesRequest
-	headers  *dingworkflow.QueryAllProcessInstancesHeaders
-	response *dingworkflow.QueryAllProcessInstancesResponse
-	err      error
+	request         *dingworkflow.QueryAllProcessInstancesRequest
+	headers         *dingworkflow.QueryAllProcessInstancesHeaders
+	response        *dingworkflow.QueryAllProcessInstancesResponse
+	premiumRequest  *dingworkflow.PremiumGetProcessInstancesRequest
+	premiumHeaders  *dingworkflow.PremiumGetProcessInstancesHeaders
+	premiumResponse *dingworkflow.PremiumGetProcessInstancesResponse
+	err             error
 }
 
 func (client *fakeWorkflowClient) QueryAllProcessInstancesWithOptions(request *dingworkflow.QueryAllProcessInstancesRequest, headers *dingworkflow.QueryAllProcessInstancesHeaders, _ *util.RuntimeOptions) (*dingworkflow.QueryAllProcessInstancesResponse, error) {
 	client.request = request
 	client.headers = headers
 	return client.response, client.err
+}
+
+func (client *fakeWorkflowClient) PremiumGetProcessInstancesWithOptions(request *dingworkflow.PremiumGetProcessInstancesRequest, headers *dingworkflow.PremiumGetProcessInstancesHeaders, _ *util.RuntimeOptions) (*dingworkflow.PremiumGetProcessInstancesResponse, error) {
+	client.premiumRequest = request
+	client.premiumHeaders = headers
+	return client.premiumResponse, client.err
 }
 
 type fakeAccessTokenClient struct {
@@ -108,6 +117,15 @@ func testClients() (*fakeWorkflowClient, *fakeAccessTokenClient) {
 				},
 			},
 		},
+		premiumResponse: &dingworkflow.PremiumGetProcessInstancesResponse{
+			Body: &dingworkflow.PremiumGetProcessInstancesResponseBody{
+				Result: &dingworkflow.PremiumGetProcessInstancesResponseBodyResult{
+					List:      []*dingworkflow.PremiumGetProcessInstancesResponseBodyResultList{samplePremiumInstance(), nil},
+					NextToken: stringPtr("40"),
+					HasMore:   boolPtr(false),
+				},
+			},
+		},
 	}
 	tokenClient := &fakeAccessTokenClient{
 		response: &oauth2.GetAccessTokenResponse{
@@ -115,6 +133,34 @@ func testClients() (*fakeWorkflowClient, *fakeAccessTokenClient) {
 		},
 	}
 	return workflowClient, tokenClient
+}
+
+// The premium endpoint answers with its own generated types carrying the same
+// fields, and reports the timestamps under the InMills names.
+func samplePremiumInstance() *dingworkflow.PremiumGetProcessInstancesResponseBodyResultList {
+	return &dingworkflow.PremiumGetProcessInstancesResponseBodyResultList{
+		ProcessInstanceId: stringPtr("inst-9"),
+		BusinessId:        stringPtr("BIZ-9"),
+		Title:             stringPtr("Request from Dana"),
+		Status:            stringPtr("COMPLETED"),
+		Result:            stringPtr("refuse"),
+		OriginatorUserid:  stringPtr("dana"),
+		OriginatorDeptId:  stringPtr("-1"),
+		CreateTimeInMills: int64Ptr(1700000000000),
+		FinishTimeInMills: int64Ptr(1700000600000),
+		FormComponentValues: []*dingworkflow.PremiumGetProcessInstancesResponseBodyResultListFormComponentValues{
+			{Id: stringPtr("c1"), Name: stringPtr("Amount"), Value: stringPtr("42.00")},
+			nil,
+		},
+		Tasks: []*dingworkflow.PremiumGetProcessInstancesResponseBodyResultListTasks{
+			{TaskId: int64Ptr(9009), UserId: stringPtr("erin"), Status: stringPtr("COMPLETED"), Result: stringPtr("REFUSE"), FinishTimestamp: int64Ptr(1700000500000)},
+			nil,
+		},
+		OperationRecords: []*dingworkflow.PremiumGetProcessInstancesResponseBodyResultListOperationRecords{
+			{UserId: stringPtr("erin"), OperationType: stringPtr("EXECUTE_TASK_NORMAL"), Result: stringPtr("REFUSE"), Remark: stringPtr("no"), Timestamp: int64Ptr(1700000500000)},
+			nil,
+		},
+	}
 }
 
 func int64Ptr(value int64) *int64 { return &value }
@@ -287,7 +333,7 @@ func TestNodeRejectsBadInput(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), testCase.message) {
 				t.Fatalf("error = %v, want it to mention %q", err, testCase.message)
 			}
-			if workflowClient.request != nil {
+			if workflowClient.request != nil || workflowClient.premiumRequest != nil {
 				t.Fatalf("a rejected input still called DingTalk")
 			}
 		})
@@ -303,5 +349,79 @@ func TestNodeInfoDocumentsBothLanguages(t *testing.T) {
 		if strings.TrimSpace(info.Documentation[language]) == "" {
 			t.Fatalf("documentation for %s is empty", language)
 		}
+	}
+}
+
+func TestNodeUsesThePremiumEndpointForPremiumOrgs(t *testing.T) {
+	workflowClient, tokenClient := testClients()
+	node := NewNodeForTest(workflowClient, tokenClient)
+
+	info := testInfo()
+	info.Variables["edition"] = "Premium"
+
+	output, err := node.Run(context.Background(), map[string]any{
+		"start_time": 1699999999000,
+		"next_token": "20",
+	}, info)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	if workflowClient.request != nil {
+		t.Fatalf("premium orgs must not call the standard endpoint")
+	}
+	request := workflowClient.premiumRequest
+	if request == nil {
+		t.Fatal("the premium endpoint was not called")
+	}
+	if got := derefString(request.ProcessCode); got != "PROC-TEST-1" {
+		t.Fatalf("process code = %q", got)
+	}
+	if got := derefInt64(request.MaxResults); got != maxPageSize {
+		t.Fatalf("max results = %d", got)
+	}
+	if got := derefString(request.NextToken); got != "20" {
+		t.Fatalf("next token = %q", got)
+	}
+	if got := derefString(workflowClient.premiumHeaders.XAcsDingtalkAccessToken); got != "token-1" {
+		t.Fatalf("access token header = %q", got)
+	}
+
+	if output["next_token"] != "40" || output["has_more"] != false || output["count"] != 1 {
+		t.Fatalf("page metadata = %#v", output)
+	}
+	instances := output["instances"].([]map[string]any)
+	instance := instances[0]
+	if instance["instance_id"] != "inst-9" || instance["result"] != "refuse" || instance["title"] != "Request from Dana" {
+		t.Fatalf("instance = %#v", instance)
+	}
+	// The premium payload only fills the InMills timestamps.
+	if instance["create_time"] != int64(1700000000000) || instance["finish_time"] != int64(1700000600000) {
+		t.Fatalf("timestamps = %#v / %#v", instance["create_time"], instance["finish_time"])
+	}
+	if values := instance["values"].(map[string]any); values["Amount"] != "42.00" {
+		t.Fatalf("flattened values = %#v", values)
+	}
+	if tasks := instance["tasks"].([]map[string]any); len(tasks) != 1 || tasks[0]["user_id"] != "erin" {
+		t.Fatalf("tasks = %#v", instance["tasks"])
+	}
+	if records := instance["operation_records"].([]map[string]any); len(records) != 1 || records[0]["remark"] != "no" {
+		t.Fatalf("operation records = %#v", instance["operation_records"])
+	}
+}
+
+func TestNodeRejectsAnUnknownEdition(t *testing.T) {
+	workflowClient, tokenClient := testClients()
+	node := NewNodeForTest(workflowClient, tokenClient)
+
+	_, err := node.Run(context.Background(), map[string]any{
+		"start_time": 1,
+		"edition":    "enterprise",
+	}, testInfo())
+	if err == nil || !strings.Contains(err.Error(), "edition must be") {
+		t.Fatalf("error = %v", err)
+	}
+	if workflowClient.request != nil || workflowClient.premiumRequest != nil {
+		t.Fatalf("an unknown edition still called DingTalk")
 	}
 }

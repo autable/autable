@@ -12,6 +12,20 @@ request per instance.
 - `next_token` — cursor returned by the previous page; omit for the first.
 - `limit` — page size, 1-20 (DingTalk's maximum, also the default).
 - `process_code` — overrides the `process_code` variable.
+- `edition` — overrides the `edition` variable.
+
+## Editions
+
+DingTalk serves the same query from two endpoints, and an org may only call
+the one matching its approval plan. Set the `edition` variable to pick:
+
+- `standard` (default) — `QueryAllProcessInstances`.
+- `premium` — `PremiumGetProcessInstances`, for orgs on the premium approval
+  plan.
+
+Calling the wrong one is not a clean permission error: DingTalk answers with
+an HTTP 500 `system.error`. If a correctly-scoped app gets that, switch the
+edition before looking anywhere else.
 
 ## Outputs
 
