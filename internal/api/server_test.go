@@ -14,9 +14,9 @@ import (
 	"io"
 	"math/big"
 	"mime/multipart"
-	"net/textproto"
 	"net/http"
 	"net/http/httptest"
+	"net/textproto"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -3051,6 +3051,7 @@ func TestWorkflowNodesAPI(t *testing.T) {
 	}
 	expectedTypes := []string{
 		"dingtalk.approval.create",
+		"dingtalk.approval.get",
 		"dingtalk.approval.list",
 		"dingtalk.notable.records.list",
 		"dingtalk.robot.oto.batch_send",

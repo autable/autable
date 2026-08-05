@@ -5,6 +5,7 @@ import (
 	"autable/internal/workflow"
 	"autable/internal/workflow/nodes/autable"
 	dingtalkapprovalcreate "autable/internal/workflow/nodes/dingtalk/approval/create"
+	dingtalkapprovalget "autable/internal/workflow/nodes/dingtalk/approval/get"
 	dingtalkapprovallist "autable/internal/workflow/nodes/dingtalk/approval/list"
 	"autable/internal/workflow/nodes/dingtalk/notable/listrecords"
 	"autable/internal/workflow/nodes/dingtalk/robot"
@@ -46,6 +47,7 @@ func Remote() []workflow.Node {
 		echo.Node{},
 		robot.NewNode(),
 		dingtalkapprovalcreate.NewNode(),
+		dingtalkapprovalget.NewNode(),
 		dingtalkapprovallist.NewNode(),
 		listrecords.NewNode(),
 		batchsendoto.NewNode(),
