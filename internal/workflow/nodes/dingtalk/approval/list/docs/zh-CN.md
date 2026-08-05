@@ -10,18 +10,6 @@
 - `next_token`——上一页返回的游标，第一页不填。
 - `limit`——每页条数，1-20（钉钉上限，也是默认值）。
 - `process_code`——覆盖 `process_code` 变量。
-- `edition`——覆盖 `edition` 变量。
-
-## 版本
-
-同一个查询钉钉开了两个接口，企业只能调对应自己审批版本的那个。用 `edition`
-变量选：
-
-- `standard`（默认）——`QueryAllProcessInstances`。
-- `premium`——`PremiumGetProcessInstances`，审批专业版/高级版的企业用这个。
-
-调错了钉钉不会明确报权限错误，而是返回 HTTP 500 `system.error`。权限都配好了
-还报这个，先换 edition 再查别的。
 
 ## 输出
 
