@@ -181,3 +181,60 @@ func TestNodeRejectsEmptyInstanceID(t *testing.T) {
 		t.Fatalf("expected missing instance id error, got %v", err)
 	}
 }
+
+func TestNodeSendsExtValueForComponentsThatNeedIt(t *testing.T) {
+	workflowClient, tokenClient := testClients()
+	node := NewNodeForTest(workflowClient, tokenClient)
+
+	if _, err := node.Run(context.Background(), map[string]any{
+		"form_values": []any{
+			// A link to another approval shows a title but identifies its
+			// target only through ext_value.
+			map[string]any{
+				"name":      "Linked approval",
+				"value":     []any{"Purchase contract"},
+				"ext_value": map[string]any{"list": []any{map[string]any{"procInstId": "inst-7"}}},
+			},
+			map[string]any{"name": "Amount", "value": 42},
+		},
+	}, testInfo()); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	components := workflowClient.request.FormComponentValues
+	if len(components) != 2 {
+		t.Fatalf("components = %d", len(components))
+	}
+	if got := derefString(components[0].Value); got != `["Purchase contract"]` {
+		t.Fatalf("value = %s", got)
+	}
+	if got := derefString(components[0].ExtValue); got != `{"list":[{"procInstId":"inst-7"}]}` {
+		t.Fatalf("ext_value = %s", got)
+	}
+	// A component that did not ask for one must not gain an empty ext_value,
+	// which DingTalk reads as a cleared field rather than an absent one.
+	if components[1].ExtValue != nil {
+		t.Fatalf("ext_value leaked onto a plain component: %q", *components[1].ExtValue)
+	}
+}
+
+func TestNodeRejectsAnUnserializableExtValue(t *testing.T) {
+	workflowClient, tokenClient := testClients()
+	node := NewNodeForTest(workflowClient, tokenClient)
+
+	_, err := node.Run(context.Background(), map[string]any{
+		"form_values": []any{
+			map[string]any{"name": "Linked approval", "value": "x", "ext_value": make(chan int)},
+		},
+	}, testInfo())
+	if err == nil || !strings.Contains(err.Error(), "ext_value") {
+		t.Fatalf("error = %v, want it to mention ext_value", err)
+	}
+}
+
+func derefString(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
+}

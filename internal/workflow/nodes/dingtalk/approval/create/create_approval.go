@@ -57,7 +57,7 @@ func (node Node) Info() workflow.NodeInfo {
 		Description:   "Starts a DingTalk OA approval instance from a process template, filling the form from the workflow.",
 		Documentation: Documentation(),
 		Inputs: []workflow.Port{
-			{Name: "form_values", Type: "object[]", Description: "Form component values as {name, value} pairs matching the approval template; non-string values are serialized."},
+			{Name: "form_values", Type: "object[]", Description: "Form component values as {name, value} pairs matching the approval template, optionally with ext_value for components that identify their target separately; non-string values are serialized."},
 			{Name: "originator_user_id", Type: "string", Description: "Optional DingTalk userId of the initiator, overrides the originator_user_id variable."},
 			{Name: "dept_id", Type: "int", Description: "Optional department the instance is started in, overrides the dept_id variable; -1 uses the initiator's main department."},
 		},
@@ -179,9 +179,20 @@ func formComponentValues(value any) ([]*dingworkflow.StartProcessInstanceRequest
 		if err != nil {
 			return nil, fmt.Errorf("dingtalk form_values[%d].value: %w", index, err)
 		}
-		values = append(values, (&dingworkflow.StartProcessInstanceRequestFormComponentValues{}).
+		component := (&dingworkflow.StartProcessInstanceRequestFormComponentValues{}).
 			SetName(name).
-			SetValue(text))
+			SetValue(text)
+		// Some components carry their real payload beside the displayed value:
+		// a link to another approval, for instance, shows a title in value and
+		// identifies the target only in ext_value.
+		if raw["ext_value"] != nil {
+			extText, err := formValueText(raw["ext_value"])
+			if err != nil {
+				return nil, fmt.Errorf("dingtalk form_values[%d].ext_value: %w", index, err)
+			}
+			component.SetExtValue(extText)
+		}
+		values = append(values, component)
 	}
 	return values, nil
 }

@@ -22,6 +22,10 @@ Starts a DingTalk OA approval instance through the open platform "start process 
 ### Inputs
 
 - `form_values` (`object[]`): Required `{name, value}` pairs matching the template's form components. Strings pass through, numbers and booleans are printed, objects and arrays (detail tables, multi-selects) are JSON-encoded.
+  - `ext_value` (optional): some components show one thing and mean another — a
+    link to another approval displays a title in `value` while identifying its
+    target only here. Read an existing instance back to see the exact shape a
+    component expects; it is encoded like `value`.
 - `originator_user_id` (`string`): Optional override of the default initiator, useful per record.
 - `dept_id` (`int`): Optional override of the department.
 
