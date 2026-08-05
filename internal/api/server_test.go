@@ -3051,6 +3051,7 @@ func TestWorkflowNodesAPI(t *testing.T) {
 	}
 	expectedTypes := []string{
 		"dingtalk.approval.create",
+		"dingtalk.approval.list",
 		"dingtalk.notable.records.list",
 		"dingtalk.robot.oto.batch_send",
 		"dingtalk.robot.send",
