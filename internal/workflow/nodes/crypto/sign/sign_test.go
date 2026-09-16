@@ -9,6 +9,7 @@ import (
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/pem"
 	"math/big"
 	"strings"
@@ -63,7 +64,7 @@ func TestNodeSignsWithP1363LayoutTheKeyVerifies(t *testing.T) {
 	if output["public_key"] != base64.StdEncoding.EncodeToString(wantPublic) {
 		t.Fatalf("public_key = %v", output["public_key"])
 	}
-	for key, want := range map[string]string{"algorithm": "ecdsa", "hash": "sha256", "format": "p1363", "encoding": "base64"} {
+	for key, want := range map[string]string{"curve": "P-256", "algorithm": "ecdsa", "hash": "sha256", "format": "p1363", "encoding": "base64"} {
 		if output[key] != want {
 			t.Fatalf("output[%q] = %v, want %q", key, output[key], want)
 		}
@@ -114,7 +115,7 @@ func TestNodeRejectsBadInput(t *testing.T) {
 		"unsupported algorithm": {input: map[string]any{"data": "x", "algorithm": "ed25519"}, secret: secret, message: `algorithm "ed25519" is not supported, only ecdsa`},
 		"unsupported hash":      {input: map[string]any{"data": "x", "hash": "sha512"}, secret: secret, message: `hash "sha512" is not supported, only sha256`},
 		"unsupported format":    {input: map[string]any{"data": "x", "format": "der"}, secret: secret, message: `format "der" is not supported, only p1363`},
-		"unsupported encoding":  {input: map[string]any{"data": "x", "encoding": "hex"}, secret: secret, message: `encoding "hex" is not supported, only base64`},
+		"unsupported encoding":  {input: map[string]any{"data": "x", "encoding": "hex"}, secret: secret, message: `encoding "hex" is not supported, only base64 or base58`},
 		"option not a string":   {input: map[string]any{"data": "x", "format": 1}, secret: secret, message: "format must be a string"},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -139,4 +140,84 @@ func TestNodeInfoDocumentsBothLanguages(t *testing.T) {
 			t.Fatalf("documentation for %s is empty", language)
 		}
 	}
+}
+
+// A secp160r1 key pair generated with OpenSSL (node:crypto), as the licensing
+// tools this curve is used with produce it. Test material only.
+const (
+	secp160r1TestKey = "MGECAQAwEAYHKoZIzj0CAQYFK4EEAAgESjBIAgEBBBUAGz2+8KXEI9UyPdGkVGdSaHWWQmqhLAMqAAQRVWwh7NHjIX5lKWnffcvhzSg8SsKxfCFdLs36C2IrroelNax/ZnjF"
+	secp160r1TestPub = "MD4wEAYHKoZIzj0CAQYFK4EEAAgDKgAEEVVsIezR4yF+ZSlp333L4c0oPErCsXwhXS7N+gtiK66HpTWsf2Z4xQ=="
+)
+
+func TestNodeSignsOnSecp160r1WithFixedWidthBase58(t *testing.T) {
+	output, err := NewNode().Run(context.Background(), map[string]any{"data": "PREFIX-1-ABC-20270101", "encoding": "base58"}, infoWithKey(secp160r1TestKey))
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if output["curve"] != "secp160r1" || output["encoding"] != "base58" {
+		t.Fatalf("output = %#v", output)
+	}
+	// The public key derived from the scalar must be byte-for-byte what
+	// OpenSSL wrote next to it, or the client's embedded key will not match.
+	if output["public_key"] != secp160r1TestPub {
+		t.Fatalf("public_key = %v, want the OpenSSL SPKI", output["public_key"])
+	}
+
+	code := output["signature"].(string)
+	if len(code) != 58 {
+		t.Fatalf("a 42-byte signature is 58 base58 digits, got %d: %q", len(code), code)
+	}
+	for _, r := range code {
+		if !strings.ContainsRune(base58Alphabet, r) {
+			t.Fatalf("signature uses a character outside the alphabet: %q", code)
+		}
+	}
+	signature := decodeBase58ForTest(t, code, 42)
+	key, curveName, err := parsePrivateKey(secp160r1TestKey)
+	if err != nil || curveName != "secp160r1" {
+		t.Fatalf("parse: %v (%s)", err, curveName)
+	}
+	digest := sha256.Sum256([]byte("PREFIX-1-ABC-20270101"))
+	if !ecdsa.Verify(&key.PublicKey, digest[:], new(big.Int).SetBytes(signature[:21]), new(big.Int).SetBytes(signature[21:])) {
+		t.Fatal("signature does not verify on secp160r1")
+	}
+}
+
+func TestSecp160r1GeneratorIsOnTheCurve(t *testing.T) {
+	if !secp160r1.params.IsOnCurve(secp160r1.params.Gx, secp160r1.params.Gy) {
+		t.Fatal("secp160r1 base point is not on the curve; a constant is wrong")
+	}
+	if got := (secp160r1.params.N.BitLen() + 7) / 8; got != 21 {
+		t.Fatalf("secp160r1 order is 161 bits, so r and s are 21 bytes each; got %d", got)
+	}
+}
+
+func TestFixedWidthBase58(t *testing.T) {
+	if width := base58Width(42); width != 58 {
+		t.Fatalf("42 bytes need 58 digits, got %d", width)
+	}
+	if width := base58Width(64); width != 88 {
+		t.Fatalf("64 bytes need 88 digits, got %d", width)
+	}
+	zeros, err := encodeBase58Fixed(make([]byte, 42))
+	if err != nil || zeros != strings.Repeat("1", 58) {
+		t.Fatalf("all-zero value = %q, %v", zeros, err)
+	}
+	data, _ := hex.DecodeString("c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1")
+	encoded, err := encodeBase58Fixed(data)
+	if err != nil || encoded != "4MMwZzFfyt3bMfuvj5EKa4XxLjh2wHUDtZD7yy5WqhUQNpEiLJg7vDX4c8" {
+		t.Fatalf("encoded = %q, %v; want the independently computed digits", encoded, err)
+	}
+}
+
+func decodeBase58ForTest(t *testing.T, code string, size int) []byte {
+	t.Helper()
+	value := new(big.Int)
+	for _, r := range code {
+		value.Mul(value, big.NewInt(58))
+		value.Add(value, big.NewInt(int64(strings.IndexRune(base58Alphabet, r))))
+	}
+	out := make([]byte, size)
+	value.FillBytes(out)
+	return out
 }
