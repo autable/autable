@@ -13,4 +13,5 @@ type Service interface {
 	DeleteRow(ctx context.Context, input map[string]any, info workflow.RuntimeInfo) (map[string]any, error)
 	ListRows(ctx context.Context, input map[string]any, info workflow.RuntimeInfo) (map[string]any, error)
 	CreateFields(ctx context.Context, input map[string]any, info workflow.RuntimeInfo) (map[string]any, error)
+	GetUser(ctx context.Context, input map[string]any, info workflow.RuntimeInfo) (map[string]any, error)
 }

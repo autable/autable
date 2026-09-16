@@ -24,6 +24,7 @@ import (
 	rowupdate "autable/internal/workflow/nodes/table/row/update"
 	rowupsert "autable/internal/workflow/nodes/table/row/upsert"
 	"autable/internal/workflow/nodes/time/schedule"
+	userget "autable/internal/workflow/nodes/user/get"
 	webhooktrigger "autable/internal/workflow/nodes/webhook/trigger"
 )
 
@@ -72,5 +73,6 @@ func AutableNodes(service autable.Service) []workflow.Node {
 		rowlist.NewNode(service),
 		rowquery.NewNode(service),
 		field.NewCreateNode(service),
+		userget.NewNode(service),
 	}
 }

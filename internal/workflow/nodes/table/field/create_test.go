@@ -38,6 +38,10 @@ func (runner *fakeTableFieldRunner) ListRows(_ context.Context, input map[string
 	return runner.CreateFields(context.Background(), input, info)
 }
 
+func (runner *fakeTableFieldRunner) GetUser(_ context.Context, input map[string]any, info workflow.RuntimeInfo) (map[string]any, error) {
+	return runner.CreateFields(context.Background(), input, info)
+}
+
 func TestTableFieldNodeCallsRunner(t *testing.T) {
 	runner := &fakeTableFieldRunner{}
 	node := NewCreateNode(runner)

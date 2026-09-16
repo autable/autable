@@ -33,6 +33,10 @@ func (service *fakeAutableService) ListRows(_ context.Context, input map[string]
 	return service.capture("list", input, info)
 }
 
+func (service *fakeAutableService) GetUser(context.Context, map[string]any, workflow.RuntimeInfo) (map[string]any, error) {
+	return nil, nil
+}
+
 func (service *fakeAutableService) CreateFields(_ context.Context, input map[string]any, info workflow.RuntimeInfo) (map[string]any, error) {
 	return service.capture("fields", input, info)
 }

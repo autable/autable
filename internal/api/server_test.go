@@ -3070,6 +3070,7 @@ func TestWorkflowNodesAPI(t *testing.T) {
 		"table.row.upsert",
 		"table.row.update",
 		"time.schedule",
+		"user.get",
 		"webhook.trigger",
 	}
 	if len(nodes) != len(expectedTypes) {
