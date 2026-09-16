@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { FluentProvider, webLightTheme } from "@fluentui/react-components";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -310,6 +310,41 @@ describe("FormPreviewFields", () => {
     await waitFor(() => expect(onFormValueChange).toHaveBeenCalledWith("channels", ""));
     await user.click(screen.getByLabelText("phone"));
     expect(onFormValueChange).toHaveBeenCalledWith("channels", "phone");
+  });
+
+  it("shows a result when it arrives, not the one it mounts with", async () => {
+    const props = {
+      databaseName: "workspace",
+      elements: [],
+      formValues: {},
+      onAction: vi.fn(),
+      onFormValueChange: vi.fn(),
+      tables: []
+    };
+    const { rerender } = render(
+      <FluentProvider theme={webLightTheme}>
+        <FormPreviewFields {...props} result={{ record_id: 1 }} />
+      </FluentProvider>
+    );
+    // A form revisited after a submission mounts with that submission's
+    // result already set; it was shown at the time and must not pop up again.
+    expect(screen.queryByRole("dialog", { name: "Result" })).not.toBeInTheDocument();
+
+    rerender(
+      <FluentProvider theme={webLightTheme}>
+        <FormPreviewFields {...props} result={{ record_id: 2 }} />
+      </FluentProvider>
+    );
+    const dialog = await screen.findByRole("dialog", { name: "Result" });
+    await userEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Result" })).not.toBeInTheDocument());
+
+    rerender(
+      <FluentProvider theme={webLightTheme}>
+        <FormPreviewFields {...props} result={{ record_id: 3 }} />
+      </FluentProvider>
+    );
+    expect(await screen.findByRole("dialog", { name: "Result" })).toBeInTheDocument();
   });
 
   it("renders disabled inputs that scripts fill in", () => {

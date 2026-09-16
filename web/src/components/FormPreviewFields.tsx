@@ -48,7 +48,16 @@ export function FormPreviewFields({
 }: FormPreviewFieldsProps) {
   const { t } = useTranslation();
   const [resultOpen, setResultOpen] = useState(false);
+  // The result outlives this component: it is kept by the form runner, so a
+  // form that is left and revisited mounts with the previous submission's
+  // result still set. Only a result that arrives while mounted opens the
+  // dialog; the one already present on mount has been shown before.
+  const shownResult = useRef(result);
   useEffect(() => {
+    if (result === shownResult.current) {
+      return;
+    }
+    shownResult.current = result;
     if (result !== undefined && result !== null) {
       setResultOpen(true);
     }

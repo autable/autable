@@ -865,13 +865,13 @@ describe("App", () => {
     await screen.findByRole("button", { name: /record-review/ });
     expect(await screen.findByRole("button", { name: "Save" })).toBeDisabled();
     expect(await screen.findByRole("button", { name: "Run" })).toBeDisabled();
-    expect(screen.getByLabelText("Workflow JavaScript")).toBeDisabled();
+    expect(await screen.findByLabelText("Workflow JavaScript")).toBeDisabled();
     expect(screen.getByRole("button", { name: "Edit config review_echo" })).toBeDisabled();
 
     await userEvent.click(await screen.findByRole("button", { name: /^Form$/ }));
     await screen.findByRole("button", { name: /contact-intake/ });
     expect(await screen.findByRole("button", { name: "Save" })).toBeDisabled();
-    expect(screen.getByLabelText("Form JavaScript")).toBeDisabled();
+    expect(await screen.findByLabelText("Form JavaScript")).toBeDisabled();
     expect(screen.getByRole("button", { name: "Create record" })).not.toBeDisabled();
   });
 
@@ -927,6 +927,11 @@ describe("App", () => {
     await userEvent.type(screen.getByRole("textbox", { name: "Name" }), "Margaret Hamilton");
     expect(screen.getByRole("button", { name: "Create record" })).toBeInTheDocument();
     await userEvent.click(await findEnabledButton("Create record"));
+    // Submitting opens the modal result dialog; close it before leaving the
+    // form, as a user would, since the page behind a modal is not reachable.
+    const resultDialog = await findDialog("Result");
+    await userEvent.click(within(resultDialog).getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Result" })).not.toBeInTheDocument());
     await userEvent.click(await screen.findByRole("button", { name: /^Table$/ }));
     await waitFor(() => expect(screen.getAllByText("4 of 4 records").length).toBeGreaterThan(0));
 
