@@ -115,6 +115,10 @@ jobs:
             ai-worker/package-lock.json
       - name: Build frontend for embedding
         shell: bash
+        env:
+          # testing-library truncates the DOM it prints on a failed query at
+          # 7000 characters, which cuts off before any portal-rendered dialog.
+          DEBUG_PRINT_LIMIT: "200000"
         run: |
           npm ci --prefix web
           npm --prefix web test -- --run

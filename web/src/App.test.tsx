@@ -353,14 +353,18 @@ describe("App", () => {
 
     fireEvent.click(await findEnabledButton("Fields"));
     const dialog = await findDialog("Fields");
+    // The grid updates live behind the open dialog. It stays visible, but the
+    // dialog is modal, so the page behind it leaves the accessibility tree a
+    // moment after the dialog takes focus; query it with hidden included.
+    const gridBehindDialog = () => screen.getByRole("grid", { name: "Table records", hidden: true });
     fireEvent.click(within(dialog).getByRole("button", { name: "Hide email", hidden: true }));
 
-    await waitFor(() => expect(screen.getByRole("grid", { name: "Table records" })).toHaveAttribute("aria-colcount", "3"));
+    await waitFor(() => expect(gridBehindDialog()).toHaveAttribute("aria-colcount", "3"));
     expect(getFieldVisibilityStorageValue()).toBe(JSON.stringify(["email"]));
 
     fireEvent.click(within(dialog).getByRole("button", { name: "Show email", hidden: true }));
 
-    await waitFor(() => expect(screen.getByRole("grid", { name: "Table records" })).toHaveAttribute("aria-colcount", "4"));
+    await waitFor(() => expect(gridBehindDialog()).toHaveAttribute("aria-colcount", "4"));
     expect(getFieldVisibilityStorageValue()).toBeNull();
   }, 15_000);
 
