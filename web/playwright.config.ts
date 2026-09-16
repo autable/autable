@@ -9,7 +9,11 @@ export default defineConfig({
   },
   use: {
     baseURL: "http://127.0.0.1:5175",
-    trace: "on-first-retry"
+    // Without retries "on-first-retry" never records anything; keep the
+    // trace and a screenshot for failed tests so a CI-only failure can be
+    // read back with its network responses.
+    trace: "retain-on-failure",
+    screenshot: "only-on-failure"
   },
   webServer: [
     {
