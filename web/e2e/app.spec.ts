@@ -30,8 +30,13 @@ test("does not request protected workspace resources before login", async ({ pag
     }
   });
 
+  // The waiter has to exist before the navigation that triggers the request:
+  // page.goto resolves on load, by which time the response may already have
+  // arrived, and a waiter registered after it would wait for a second one
+  // that never comes.
+  const authResponse = page.waitForResponse((response) => response.url().includes("/api/auth/me"));
   await page.goto("/");
-  await page.waitForResponse((response) => response.url().includes("/api/auth/me"));
+  await authResponse;
   await expect(page.getByRole("button", { name: "Login" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Create DB" })).toBeDisabled();
   await expect(page.getByRole("button", { name: "Refresh metadata" })).toBeDisabled();
