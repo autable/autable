@@ -472,6 +472,7 @@
     "title": "Remote runners",
     "connected": "Connected runners",
     "details": "{{version}} · {{nodes}} nodes · connected {{connectedAt}}",
+    "loading": "Loading runners…",
     "empty": "No runners connected",
     "token": "Runner token",
     "tokenCreatedAt": "Created {{createdAt}}",

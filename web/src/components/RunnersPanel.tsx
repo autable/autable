@@ -71,42 +71,50 @@ export function RunnersPanel({ databaseName }: { databaseName: string }) {
           <DialogContent>
             <div className="runners-panel">
               {error !== "" && <Text role="alert">{error}</Text>}
-              <Text weight="semibold">{t("runners.connected")}</Text>
-              {(runnersInfo?.runners ?? []).length === 0 ? (
-                <Text size={200}>{t("runners.empty")}</Text>
+              {runnersInfo === null && error === "" ? (
+                // Until the first load answers, the panel knows neither the
+                // runners nor who may manage the token, so it claims nothing.
+                <Text size={200}>{t("runners.loading")}</Text>
               ) : (
-                <ul className="runners-list" aria-label={t("runners.connected")}>
-                  {(runnersInfo?.runners ?? []).map((runner) => (
-                    <li key={`${runner.name}-${runner.connected_at}`}>
-                      <Text weight="semibold">{runner.name}</Text>
-                      <Text size={200}>
-                        {t("runners.details", {
-                          version: runner.version,
-                          nodes: runner.node_types.length,
-                          connectedAt: new Date(runner.connected_at).toLocaleString(i18n.language)
-                        })}
-                      </Text>
-                    </li>
-                  ))}
-                </ul>
-              )}
-              <Text weight="semibold">{t("runners.token")}</Text>
-              {canManage ? (
-                <Text size={200}>
-                  {runnersInfo?.token?.exists
-                    ? t("runners.tokenCreatedAt", {
-                        createdAt: new Date(runnersInfo.token.created_at ?? 0).toLocaleString(i18n.language)
-                      })
-                    : t("runners.tokenMissing")}
-                </Text>
-              ) : (
-                <Text size={200}>{t("runners.ownerOnly")}</Text>
-              )}
-              {freshToken !== "" && (
-                <div className="runners-fresh-token">
-                  <Text size={200}>{t("runners.tokenShownOnce")}</Text>
-                  <code aria-label={t("runners.tokenValue")}>{freshToken}</code>
-                </div>
+                <>
+                  <Text weight="semibold">{t("runners.connected")}</Text>
+                  {(runnersInfo?.runners ?? []).length === 0 ? (
+                    <Text size={200}>{t("runners.empty")}</Text>
+                  ) : (
+                    <ul className="runners-list" aria-label={t("runners.connected")}>
+                      {(runnersInfo?.runners ?? []).map((runner) => (
+                        <li key={`${runner.name}-${runner.connected_at}`}>
+                          <Text weight="semibold">{runner.name}</Text>
+                          <Text size={200}>
+                            {t("runners.details", {
+                              version: runner.version,
+                              nodes: runner.node_types.length,
+                              connectedAt: new Date(runner.connected_at).toLocaleString(i18n.language)
+                            })}
+                          </Text>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  <Text weight="semibold">{t("runners.token")}</Text>
+                  {canManage ? (
+                    <Text size={200}>
+                      {runnersInfo?.token?.exists
+                        ? t("runners.tokenCreatedAt", {
+                            createdAt: new Date(runnersInfo.token.created_at ?? 0).toLocaleString(i18n.language)
+                          })
+                        : t("runners.tokenMissing")}
+                    </Text>
+                  ) : (
+                    <Text size={200}>{t("runners.ownerOnly")}</Text>
+                  )}
+                  {freshToken !== "" && (
+                    <div className="runners-fresh-token">
+                      <Text size={200}>{t("runners.tokenShownOnce")}</Text>
+                      <code aria-label={t("runners.tokenValue")}>{freshToken}</code>
+                    </div>
+                  )}
+                </>
               )}
             </div>
           </DialogContent>

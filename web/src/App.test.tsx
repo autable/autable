@@ -273,7 +273,7 @@ describe("App", () => {
     renderApp("/");
     await waitForSignedIn();
     expect(await screen.findByText("No database selected")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "workspace" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "workspace" })).toBeInTheDocument();
     expect(window.location.pathname).toBe("/");
   });
 
@@ -782,7 +782,7 @@ describe("App", () => {
 
     const dialog = await findDialog("Remote runners");
     expect(within(dialog).getByText(/Remote runners · workspace/)).toBeInTheDocument();
-    expect(within(dialog).getByText("intranet")).toBeInTheDocument();
+    expect(await within(dialog).findByText("intranet")).toBeInTheDocument();
     expect(within(dialog).getByText(/v1\.0\.0/)).toBeInTheDocument();
     expect(within(dialog).queryByText(/atr_/)).not.toBeInTheDocument();
 

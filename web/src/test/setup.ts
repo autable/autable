@@ -50,6 +50,38 @@ Object.defineProperty(window, "ResizeObserver", {
   value: ResizeObserverMock
 });
 
+// jsdom does no layout: offsetParent is always null and every bounding rect
+// is 0x0. Fluent's focus management (tabster) reads both to decide whether an
+// element is visible, so without these every control inside a dialog counts as
+// display:none, the dialog focuses its own surface instead of a control, and
+// tabster then marks the dialog itself aria-hidden a tick later. Approximate
+// the browser rules instead: an element has an offsetParent unless it, or an
+// ancestor, is display:none, it is position:fixed, or it is <body>/<html>.
+Object.defineProperty(HTMLElement.prototype, "offsetParent", {
+  configurable: true,
+  get(this: HTMLElement) {
+    if (!this.isConnected || this === document.body || this === document.documentElement) {
+      return null;
+    }
+    for (let element: HTMLElement | null = this; element; element = element.parentElement) {
+      const style = window.getComputedStyle(element);
+      if (style.display === "none") {
+        return null;
+      }
+      if (element === this && style.position === "fixed") {
+        return null;
+      }
+    }
+    return this.parentElement;
+  }
+});
+
+Object.defineProperty(HTMLBodyElement.prototype, "getBoundingClientRect", {
+  configurable: true,
+  writable: true,
+  value: () => new DOMRect(0, 0, window.innerWidth, window.innerHeight)
+});
+
 Object.defineProperty(Element.prototype, "scrollIntoView", {
   writable: true,
   configurable: true,

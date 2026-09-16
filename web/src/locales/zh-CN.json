@@ -472,6 +472,7 @@
     "title": "远程运行器",
     "connected": "已连接的运行器",
     "details": "{{version}} · {{nodes}} 个节点 · 连接于 {{connectedAt}}",
+    "loading": "正在加载运行器…",
     "empty": "暂无运行器连接",
     "token": "运行器令牌",
     "tokenCreatedAt": "创建于 {{createdAt}}",
