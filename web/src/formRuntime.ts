@@ -3,7 +3,7 @@ export type FormElement =
       kind: "input";
       field: string;
       label: string;
-      inputType: "text" | "email" | "search" | "tel" | "url" | "password";
+      inputType: "text" | "email" | "search" | "tel" | "url" | "password" | "date";
       scanner?: boolean | ScannerConfig;
       disabled?: boolean;
       onChangeActionID?: string;
@@ -125,7 +125,8 @@ export type FormActionAPI = {
   show(value: unknown): void;
 };
 
-const inputTypes = new Set<InputType>(["text", "email", "search", "tel", "url", "password"]);
+// "date" renders the native date picker; its value is always YYYY-MM-DD.
+const inputTypes = new Set<InputType>(["text", "email", "search", "tel", "url", "password", "date"]);
 
 export function renderFormScript(script: string): FormRenderResult {
   const elements: FormElement[] = [];

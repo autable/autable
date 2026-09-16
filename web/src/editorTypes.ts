@@ -38,7 +38,7 @@ export function formEditorExtraLibs(): EditorExtraLib[] {
       content: `export {};
 
 declare global {
-  type AutableFormInputType = "text" | "email" | "search" | "tel" | "url" | "password";
+  type AutableFormInputType = "text" | "email" | "search" | "tel" | "url" | "password" | "date";
   type AutableFormScannerConfig = { confirm?: boolean };
 
   type AutableFormElement =

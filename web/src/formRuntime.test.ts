@@ -23,6 +23,25 @@ describe("renderFormScript", () => {
     expect(result.actions.submit).toEqual(expect.any(Function));
   });
 
+  it("renders date inputs with the native date type", () => {
+    const result = renderFormScript(`
+      function render(api, root) {
+        root.append(api.input({ field: "expires", label: "Expires", type: "date" }), api.submit("Save"));
+        return { table: "licenses" };
+      }
+    `);
+
+    expect(result.error).toBeUndefined();
+    expect(result.elements[0]).toEqual({
+      kind: "input",
+      field: "expires",
+      label: "Expires",
+      inputType: "date",
+      scanner: false,
+      onChangeActionID: undefined
+    });
+  });
+
   it("rejects direct scripts without a render function", () => {
     const result = renderFormScript(`root.append(api.submit("Create contact"));`);
 
