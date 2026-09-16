@@ -3050,6 +3050,7 @@ func TestWorkflowNodesAPI(t *testing.T) {
 		t.Fatal(err)
 	}
 	expectedTypes := []string{
+		"crypto.sign",
 		"dingtalk.approval.comment",
 		"dingtalk.approval.create",
 		"dingtalk.approval.get",
