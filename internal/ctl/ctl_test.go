@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -370,4 +371,41 @@ func mustJSON(t *testing.T, value any) string {
 		t.Fatal(err)
 	}
 	return string(data)
+}
+
+func TestSkillInstallWritesVersionedSourceMap(t *testing.T) {
+	env := newTestEnv(t)
+	dir := filepath.Join(env.dir, "skills", "autable")
+	installed := decode[map[string]string](t, env.run(0, "skill", "install", "--dir", dir))
+	data, err := os.ReadFile(installed["path"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	skill := string(data)
+	if !strings.HasPrefix(skill, "---\nname: autable\n") || strings.Contains(skill, "{{") {
+		t.Fatalf("skill is not rendered: %s", skill[:min(200, len(skill))])
+	}
+	if !strings.Contains(skill, "https://github.com/autable/autable/tree/main") {
+		t.Fatalf("a dev build should link the main branch")
+	}
+	if shown := env.run(0, "skill", "show"); shown != skill {
+		t.Fatal("skill show and skill install disagree")
+	}
+	if got := skillSource("0.1.70"); got != "https://github.com/autable/autable/tree/v0.1.70" {
+		t.Fatalf("release source link: %s", got)
+	}
+}
+
+func TestSkillMapPointsAtExistingFiles(t *testing.T) {
+	root := filepath.Join("..", "..")
+	matches := regexp.MustCompile("`((?:internal|web|docs)/[^`<]+)`").FindAllStringSubmatch(skillTemplate, -1)
+	if len(matches) < 10 {
+		t.Fatalf("expected the skill to reference source files, found %d", len(matches))
+	}
+	for _, match := range matches {
+		path := strings.TrimSuffix(match[1], "/")
+		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(path))); err != nil {
+			t.Errorf("skill references %s, which does not exist", path)
+		}
+	}
 }

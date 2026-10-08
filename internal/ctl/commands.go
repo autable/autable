@@ -46,6 +46,8 @@ func init() {
 		"pull":             {"pull [--dir DIR] [--database DB]... [--force]", "write workflow and form scripts into DIR", runPull},
 		"status":           {"status [--dir DIR]", "show scripts changed locally since the last pull/push", runStatus},
 		"push":             {"push [--dir DIR] [--dry-run] [--force]", "save changed and new scripts to the server", runPush},
+		"skill show":       {"skill show", "print the agent skill (rules plus a map of the source)", runSkillShow},
+		"skill install":    {"skill install [--dir DIR]", "write the agent skill to DIR/SKILL.md (default ~/.claude/skills/autable)", runSkillInstall},
 	}
 }
 

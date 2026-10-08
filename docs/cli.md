@@ -116,6 +116,18 @@ the same layout the server uses in its repository, and records in
   `workflow get --script`, merge, then `push --force`.
 - Deleting a file does not delete anything on the server.
 
+### Agent skill
+
+```sh
+autablectl skill install                  # ~/.claude/skills/autable/SKILL.md
+autablectl skill install --dir ./skills/autable
+autablectl skill show                     # print it
+```
+
+The skill is a page of rules for changing a live server plus a map of where
+each behavior lives in the source, linked at the release matching the binary.
+It deliberately does not restate behavior: the source is the reference.
+
 ### Files and raw API access
 
 ```sh
