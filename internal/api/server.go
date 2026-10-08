@@ -58,6 +58,7 @@ type Server struct {
 	workflowRunWorkers map[int64]*workflowRunWorker
 	workflowWorker     context.Context
 	workflowWorkerMu   sync.Mutex
+	cliCodes           cliAuthCodes
 	mux              *http.ServeMux
 }
 
@@ -415,6 +416,9 @@ func (server *Server) routes() {
 	server.mux.HandleFunc("GET /api/auth/oidc/{provider}/callback", server.handleOIDCCallbackRoute)
 	server.mux.HandleFunc("GET /api/auth/me", server.handleMe)
 	server.mux.HandleFunc("POST /api/auth/logout", server.handleLogout)
+	server.mux.HandleFunc("GET "+cliAuthorizeURL, server.handleCLIAuthorizePage)
+	server.mux.HandleFunc("POST "+cliAuthorizeURL, server.handleCLIAuthorize)
+	server.mux.HandleFunc("POST /api/auth/cli/token", server.handleCLIToken)
 	server.mux.HandleFunc("GET /api/ai/auth/status", server.handleAIAuthStatus)
 	server.mux.HandleFunc("POST /api/ai/auth/start", server.handleAIAuthStart)
 	server.mux.HandleFunc("GET /api/ai/options", server.handleAIOptions)
@@ -703,9 +707,8 @@ func (server *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 }
 
 func (server *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
-	cookie, err := r.Cookie(sessionCookieName)
-	if err == nil {
-		_ = server.system.DeleteSession(r.Context(), cookie.Value)
+	if token, err := requestSessionToken(r); err == nil {
+		_ = server.system.DeleteSession(r.Context(), token)
 	}
 	clearSessionCookie(w)
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
@@ -3704,14 +3707,14 @@ func (server *Server) currentUserID(r *http.Request) (string, bool, error) {
 }
 
 func (server *Server) currentUser(r *http.Request) (auth.User, bool, error) {
-	cookie, err := r.Cookie(sessionCookieName)
+	token, err := requestSessionToken(r)
 	if err != nil {
 		if errors.Is(err, http.ErrNoCookie) {
 			return auth.User{}, false, nil
 		}
 		return auth.User{}, false, err
 	}
-	user, _, err := server.system.UserBySessionToken(r.Context(), cookie.Value)
+	user, _, err := server.system.UserBySessionToken(r.Context(), token)
 	if err != nil {
 		return auth.User{}, false, err
 	}

@@ -210,6 +210,59 @@ jobs:
           path: autable-${{ needs.prepare.outputs.version }}-runner-windows-amd64.zip
           if-no-files-found: error
 
+  # autablectl is pure Go (no cgo), so every platform cross-compiles here.
+  build-cli:
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-amd64
+            goos: linux
+            goarch: amd64
+          - target: linux-arm64
+            goos: linux
+            goarch: arm64
+          - target: windows-amd64
+            goos: windows
+            goarch: amd64
+          - target: darwin-arm64
+            goos: darwin
+            goarch: arm64
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.commit }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Build autablectl
+        shell: bash
+        env:
+          CGO_ENABLED: "0"
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          version="${{ needs.prepare.outputs.version }}"
+          commit="$(git rev-parse --short HEAD)"
+          built_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          binary=autablectl
+          if [ "${{ matrix.goos }}" = windows ]; then binary=autablectl.exe; fi
+          mkdir -p release
+          go build             -ldflags "-s -w -X autable/internal/version.Version=${version} -X autable/internal/version.Commit=${commit} -X autable/internal/version.BuiltAt=${built_at}"             -o "release/${binary}"             ./cmd/autablectl
+          archive="autable-${version}-cli-${{ matrix.target }}"
+          if [ "${{ matrix.goos }}" = windows ]; then
+            (cd release && zip -q "../${archive}.zip" "${binary}")
+          else
+            tar -czf "${archive}.tar.gz" -C release "${binary}"
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: autable-${{ needs.prepare.outputs.version }}-cli-${{ matrix.target }}
+          path: autable-${{ needs.prepare.outputs.version }}-cli-${{ matrix.target }}.*
+          if-no-files-found: error
+
   # End-to-end tests run on linux x64 only: the suite drives the real Go
   # backend plus the Vite dev server through Chromium.
   e2e:
@@ -253,6 +306,7 @@ jobs:
       - prepare
       - build
       - build-runner-windows
+      - build-cli
       - docker
       - e2e
     runs-on: ubuntu-latest
