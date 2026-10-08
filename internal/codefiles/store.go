@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 
 	"autable/internal/repository"
+	"autable/internal/scriptpath"
 	"autable/internal/systemdb"
 )
 
@@ -66,7 +66,7 @@ func (store *Store) writeScript(ctx context.Context, kind, databaseName string, 
 		return fmt.Errorf("%s name is required", kind)
 	}
 
-	dir := filepath.Join(store.root, kind, safeSegment(databaseName))
+	dir := filepath.Join(store.root, kind, scriptpath.Segment(databaseName))
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
@@ -107,16 +107,5 @@ func (store *Store) deleteScript(ctx context.Context, kind, databaseName string,
 }
 
 func (store *Store) scriptPath(kind, databaseName string, name string) string {
-	return filepath.Join(store.root, kind, safeSegment(databaseName), safeSegment(name)+".js")
-}
-
-var unsafeSegment = regexp.MustCompile(`[^\pL\pN._-]+`)
-
-func safeSegment(value string) string {
-	segment := unsafeSegment.ReplaceAllString(strings.TrimSpace(value), "-")
-	segment = strings.Trim(segment, ".-")
-	if segment == "" {
-		return "unnamed"
-	}
-	return segment
+	return filepath.Join(store.root, filepath.FromSlash(scriptpath.Relative(kind, databaseName, name)))
 }

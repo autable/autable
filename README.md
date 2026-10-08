@@ -30,6 +30,7 @@ This repository currently contains the backend core primitives:
 - Workflow node metadata API and frontend node catalog for available stateless nodes and trigger nodes.
 - Synchronous JavaScript workflow runs through registered stateless nodes, with each run persisted as `whistory_id_timestamp`.
 - Remote runners: node instances can be bound (in the UI, beside instance variables/secrets) to a named `autable-runner` process that connects outbound over WebSocket and executes remote-capable nodes inside another network; a single resettable system token authorizes runners (see `docs/design/remote-runner.md`).
+- `autablectl`, a command-line client for scripts and coding agents: browser sign-in issues a bearer session token, and commands read and write tables, rows, workflows, and forms on the live server, including a pull/edit/push loop for scripts with conflict detection (see `docs/cli.md`).
 - A `kingdee.purchaseorder.list` node that pages purchase order lines out of Kingdee K3Cloud through a pure-Go WebAPI client (`internal/kingdee`) with request signing matching the official Python SDK.
 - A `table.record.changed` trigger node that accepts an `rhistory_db_table_record_id_timestamp` key and exposes the decoded row change.
 - Workflow JavaScript editing with JSON editors for GitHub Actions-style secrets and variables.
