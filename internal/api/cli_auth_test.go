@@ -25,7 +25,7 @@ func cliAuthorizeForm(port, state, challenge string) url.Values {
 // authorizeCLI posts the browser confirmation and returns the redirect.
 func authorizeCLI(t *testing.T, server *Server, cookie *http.Cookie, form url.Values) *httptest.ResponseRecorder {
 	t.Helper()
-	request := httptest.NewRequest(http.MethodPost, cliAuthorizeURL, strings.NewReader(form.Encode()))
+	request := newTestRequest(http.MethodPost, cliAuthorizeURL, strings.NewReader(form.Encode()))
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	request.Header.Set("Sec-Fetch-Site", "same-origin")
 	if cookie != nil {
@@ -42,14 +42,14 @@ func redeemCLICode(t *testing.T, server *Server, code, verifier string) *httptes
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := httptest.NewRequest(http.MethodPost, "/api/auth/cli/token", bytes.NewReader(body))
+	request := newTestRequest(http.MethodPost, "/api/auth/cli/token", bytes.NewReader(body))
 	recorder := httptest.NewRecorder()
 	server.ServeHTTP(recorder, request)
 	return recorder
 }
 
 func bearerRequest(method, target, token string) *http.Request {
-	request := httptest.NewRequest(method, target, nil)
+	request := newTestRequest(method, target, nil)
 	request.Header.Set("Authorization", "Bearer "+token)
 	return request
 }
@@ -63,7 +63,7 @@ func TestCLILoginIssuesBearerSession(t *testing.T) {
 
 	// Signed out: the browser is sent through the login page and back.
 	page := httptest.NewRecorder()
-	server.ServeHTTP(page, httptest.NewRequest(http.MethodGet, cliAuthorizeURL+"?"+query, nil))
+	server.ServeHTTP(page, newTestRequest(http.MethodGet, cliAuthorizeURL+"?"+query, nil))
 	if page.Code != http.StatusFound {
 		t.Fatalf("expected redirect to login, got %d: %s", page.Code, page.Body.String())
 	}
@@ -73,7 +73,7 @@ func TestCLILoginIssuesBearerSession(t *testing.T) {
 	}
 
 	// Signed in: a confirmation page that cannot be framed.
-	pageRequest := httptest.NewRequest(http.MethodGet, cliAuthorizeURL+"?"+query, nil)
+	pageRequest := newTestRequest(http.MethodGet, cliAuthorizeURL+"?"+query, nil)
 	pageRequest.AddCookie(cookie)
 	page = httptest.NewRecorder()
 	server.ServeHTTP(page, pageRequest)
@@ -161,7 +161,7 @@ func TestCLIAuthorizeRequiresBrowserSession(t *testing.T) {
 	}
 
 	// A bearer token cannot mint further tokens; only a browser can approve.
-	bearer := httptest.NewRequest(http.MethodPost, cliAuthorizeURL, strings.NewReader(form.Encode()))
+	bearer := newTestRequest(http.MethodPost, cliAuthorizeURL, strings.NewReader(form.Encode()))
 	bearer.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	bearer.Header.Set("Authorization", "Bearer "+cookie.Value)
 	recorder := httptest.NewRecorder()
@@ -170,7 +170,7 @@ func TestCLIAuthorizeRequiresBrowserSession(t *testing.T) {
 		t.Fatalf("expected bearer-only authorize 401, got %d", recorder.Code)
 	}
 
-	crossSite := httptest.NewRequest(http.MethodPost, cliAuthorizeURL, strings.NewReader(form.Encode()))
+	crossSite := newTestRequest(http.MethodPost, cliAuthorizeURL, strings.NewReader(form.Encode()))
 	crossSite.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	crossSite.Header.Set("Sec-Fetch-Site", "cross-site")
 	crossSite.AddCookie(cookie)

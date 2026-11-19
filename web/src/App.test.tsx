@@ -9,7 +9,6 @@ const catalogFixture = {
   databases: [
     {
       name: "workspace",
-      permission_level: 2,
       tables: [
         {
           name: "contacts",
@@ -120,7 +119,6 @@ function appDetailFixture(app = appFixture[0]) {
 
 const runnersFixture = {
   token: { exists: true, created_at: 1781600000000 },
-  can_manage: true,
   runners: [{ name: "intranet", version: "v1.0.0", node_types: ["echo", "dingtalk.robot.send"], connected_at: 1781603000000 }],
   remote_node_types: ["dingtalk.robot.send", "echo"]
 };
@@ -169,8 +167,73 @@ const authUserFixture = {
   id: "test-user",
   email: "user@example.com",
   display_name: "Test User",
-  provider: "password"
+  provider: "password",
+  is_admin: true
 };
+
+const memberUserFixture = { ...authUserFixture, is_admin: false };
+
+// What the server returns to a non-admin: data access only, structure is
+// read-only and workflows come without their definitions.
+const memberCatalogFixture = {
+  databases: [
+    {
+      name: "workspace",
+      tables: catalogFixture.databases[0].tables.map((table) => ({
+        ...table,
+        permission_level: 1,
+        fields: table.fields.map((field) => ({ ...field, permission_level: 7 })),
+        views: table.views.map((view) => ({ ...view, permission_level: 1 }))
+      }))
+    }
+  ]
+};
+
+const memberWorkflowFixture = [
+  {
+    id: 1,
+    database_name: "workspace",
+    name: "record-review",
+    enabled: true,
+    script: "",
+    secrets: {},
+    variables: {},
+    runners: {},
+    history_retention_days: null,
+    timeout_seconds: null,
+    permission_level: 1
+  }
+];
+
+const adminOnlyEndpoints = ["/api/databases/workspace/roles", "/api/databases/workspace/runners", "/api/workflow/nodes"];
+
+// memberFetch serves the non-admin view of the workspace and records every
+// request; admin-only endpoints answer 403 like the server does.
+function memberFetch(requests: Array<{ url: string; init?: RequestInit }> = []) {
+  return async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const url = String(input);
+    requests.push({ url, init });
+    if (url === "/api/auth/me") {
+      return jsonResponse(memberUserFixture);
+    }
+    if (url === "/api/metadata") {
+      return jsonResponse(memberCatalogFixture);
+    }
+    if (url === "/api/databases/workspace/workflows" && !init?.method) {
+      return jsonResponse(memberWorkflowFixture);
+    }
+    if (adminOnlyEndpoints.includes(url) || (url.startsWith("/api/workflows/") && !init?.method)) {
+      return jsonResponse({ error: "admin only" }, 403);
+    }
+    if (url === "/api/databases/workspace/apps/orders") {
+      return jsonResponse({ ...appDetailFixture({ ...appFixture[0], permission_level: 1 }), versions: [] });
+    }
+    if (url === "/api/databases/workspace/apps") {
+      return jsonResponse(appFixture.map((app) => ({ ...app, permission_level: 1 })));
+    }
+    return defaultFetch(input, init);
+  };
+}
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status });
@@ -466,7 +529,7 @@ describe("App", () => {
     renderApp();
     await waitFor(() => expect(requests).toContain("/api/auth/me"));
     expect(screen.getByRole("button", { name: "Login" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Create DB" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Create DB" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Refresh metadata" })).toBeDisabled();
     expect(requests).not.toContain("/api/metadata");
     expect(requests.some((url) => url.includes("/rows"))).toBe(false);
@@ -518,33 +581,38 @@ describe("App", () => {
     await waitForDefaultTableReady("1 of 1 records");
   });
 
-  it("hides database permissions for non-owners", async () => {
-    vi.mocked(fetch).mockImplementation(async (input, init) => {
-      const url = String(input);
-      if (url === "/api/metadata") {
-        return jsonResponse({
-          databases: [{ ...catalogFixture.databases[0], permission_level: 0 }]
-        });
-      }
-      return defaultFetch(input, init);
-    });
+  it("hides admin-only actions from non-admins", async () => {
+    const requests: Array<{ url: string; init?: RequestInit }> = [];
+    vi.mocked(fetch).mockImplementation(memberFetch(requests));
 
     renderApp();
-    await waitForSignedIn();
-    await screen.findByRole("button", { name: /Contacts/ });
+    await waitForDefaultTableReady();
+    expect(screen.queryByRole("button", { name: "Create DB" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Permission" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Create Table" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Create View" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Remote runners" })).not.toBeInTheDocument();
+    // No trailing add-field column: just the three data columns.
+    expect(screen.getByRole("grid", { name: "Table records" })).toHaveAttribute("aria-colcount", "3");
+    expect(screen.queryByRole("button", { name: "Field actions name" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Filter" })).not.toBeInTheDocument();
+    // Data access stays: the member can still add rows with their field grants.
+    expect(screen.getByRole("button", { name: "Row" })).toBeEnabled();
+    expect(requests.some((request) => adminOnlyEndpoints.includes(request.url))).toBe(false);
   });
 
-  it("hides collapsed database permissions for non-owners", async () => {
-    vi.mocked(fetch).mockImplementation(async (input, init) => {
-      const url = String(input);
-      if (url === "/api/metadata") {
-        return jsonResponse({
-          databases: [{ ...catalogFixture.databases[0], permission_level: 0 }]
-        });
-      }
-      return defaultFetch(input, init);
-    });
+  it("keeps a non-admin out of the permission view", async () => {
+    vi.mocked(fetch).mockImplementation(memberFetch());
+
+    renderApp("/databases/workspace/permissions");
+    await waitForSignedIn();
+    await screen.findByRole("button", { name: /Contacts/ });
+    expect(screen.queryByRole("button", { name: "Members" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Create Role" })).not.toBeInTheDocument();
+  });
+
+  it("hides collapsed database permissions for non-admins", async () => {
+    vi.mocked(fetch).mockImplementation(memberFetch());
 
     renderApp();
     await waitForSignedIn();
@@ -552,6 +620,20 @@ describe("App", () => {
     await userEvent.click(await findEnabledButton("Collapse sidebar"));
 
     expect(screen.queryByRole("button", { name: "Permission" })).not.toBeInTheDocument();
+  });
+
+  it("shows admin-only actions to admins", async () => {
+    renderApp();
+    await waitForDefaultTableReady();
+    expect(screen.getByRole("button", { name: "Create DB" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Permission" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Create Table" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Create View" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Remote runners" })).toBeInTheDocument();
+    // The trailing add-field column.
+    expect(screen.getByRole("grid", { name: "Table records" })).toHaveAttribute("aria-colcount", "4");
+    expect(screen.getByRole("button", { name: "Field actions name" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Filter" })).toBeInTheDocument();
   });
 
   it("disables row creation outside all records", async () => {
@@ -894,23 +976,38 @@ describe("App", () => {
     expect(screen.getByText("echo @ intranet")).toBeInTheDocument();
   });
 
-  it("renders read-only workflow resources as non-editable", async () => {
+  it("lets non-admins run granted workflows without the editor", async () => {
+    const requests: Array<{ url: string; init?: RequestInit }> = [];
+    const member = memberFetch(requests);
     vi.mocked(fetch).mockImplementation(async (input, init) => {
-      const url = String(input);
-      if (url === "/api/databases/workspace/workflows") {
-        return jsonResponse([{ ...workflowFixture[0], permission_level: 1 }]);
+      if (String(input) === "/api/workflows/1/runs" && init?.method === "POST") {
+        requests.push({ url: String(input), init });
+        return jsonResponse(
+          {
+            history_key: "whistory_00000000000000000001_00000000000000000102",
+            run: { workflow_id: 1, timestamp: 1781604000000, inputs: {}, outputs: {}, steps: [] }
+          },
+          201
+        );
       }
-      return defaultFetch(input, init);
+      return member(input, init);
     });
 
-    renderApp();
-    await waitForDefaultTableReady();
-    await userEvent.click(await screen.findByRole("button", { name: /^Workflow$/ }));
-    await screen.findByRole("button", { name: /record-review/ });
-    expect(await screen.findByRole("button", { name: "Save" })).toBeDisabled();
-    expect(await screen.findByRole("button", { name: "Run" })).toBeDisabled();
-    expect(await screen.findByLabelText("Workflow JavaScript")).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Edit config review_echo" })).toBeDisabled();
+    renderApp("/databases/workspace/workflows");
+    await waitForSignedIn();
+    await userEvent.click(await findEnabledButton("Run record-review"));
+    await waitFor(() =>
+      expect(
+        requests.find((request) => request.url === "/api/workflows/1/runs" && request.init?.method === "POST")?.init?.body
+      ).toBe(JSON.stringify({ inputs: {} }))
+    );
+    expect((await screen.findAllByText("Ran workflow record-review")).length).toBeGreaterThan(0);
+    expect(screen.queryByLabelText("Workflow JavaScript")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Create Workflow" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "workflow actions 1" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Workflow nodes" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "History" })).not.toBeInTheDocument();
+    expect(requests.some((request) => request.url === "/api/workflows/1/runs" && !request.init?.method)).toBe(false);
   });
 
   it("runs workflows with only the explicit inputs JSON", async () => {
@@ -1026,31 +1123,22 @@ describe("App", () => {
     expect((await screen.findAllByText("Rolled back Orders to version 1")).length).toBeGreaterThan(0);
   });
 
-  it("shows read-only app users the open link but no actions", async () => {
-    const readOnlyApp = { ...appFixture[0], permission_level: 1 };
-    vi.mocked(fetch).mockImplementation(async (input, init) => {
-      const url = String(input);
-      if (url === "/api/metadata") {
-        return jsonResponse({ databases: [{ ...catalogFixture.databases[0], permission_level: 0 }] });
-      }
-      if (url === "/api/databases/workspace/apps") {
-        return jsonResponse([readOnlyApp]);
-      }
-      if (url === "/api/databases/workspace/apps/orders") {
-        return jsonResponse(appDetailFixture(readOnlyApp));
-      }
-      return defaultFetch(input, init);
-    });
+  it("shows non-admins the open link but no app management", async () => {
+    vi.mocked(fetch).mockImplementation(memberFetch());
 
-    renderApp("/databases/workspace/apps/orders");
-    const versionTable = await screen.findByRole("table", { name: "Versions" });
-    expect(screen.getByRole("link", { name: "Open Orders" })).toBeInTheDocument();
-    expect(within(versionTable).queryByRole("button")).not.toBeInTheDocument();
-    expect(within(versionTable).queryByRole("link")).not.toBeInTheDocument();
+    renderApp("/databases/workspace/apps");
+    const appTable = await screen.findByRole("table", { name: "Apps" });
+    expect(within(appTable).getByRole("link", { name: "Open Orders" })).toHaveAttribute("href", "/apps/workspace/orders/");
+    expect(screen.queryByText(/autablectl/)).not.toBeInTheDocument();
+
+    await userEvent.click(within(appTable).getByRole("button", { name: "Orders" }));
+    expect(await screen.findByRole("link", { name: "Open Orders" })).toBeInTheDocument();
+    expect(await screen.findByText("orders in workspace")).toBeInTheDocument();
+    expect(screen.queryByRole("table", { name: "Versions" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Delete app" })).not.toBeInTheDocument();
   });
 
-  it("deletes an app as the database owner after confirmation", async () => {
+  it("deletes an app as an admin after confirmation", async () => {
     let deleted = false;
     vi.mocked(fetch).mockImplementation(async (input, init) => {
       const url = String(input);
@@ -1089,7 +1177,6 @@ describe("App", () => {
           databases: [
             {
               name: "workspace",
-              permission_level: 0,
               tables: [
                 {
                   name: "contacts",

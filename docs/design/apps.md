@@ -10,7 +10,7 @@ through raw HTML, which is harder to maintain than an ordinary frontend.
 
 An app is an ordinary frontend project: React, Vue, plain TypeScript, any
 libraries. A coding agent writes it on a developer machine, `autablectl`
-builds and uploads it, and autable serves it from the same origin as its
+builds it and uploads it with an admin account, and autable serves it from the same origin as its
 API. Data access goes through the existing HTTP API with the signed-in
 user's own permissions, so an app can never see more than its user can.
 
@@ -51,7 +51,7 @@ source/...           the project source, without node_modules or build output
 
 The source travels with every version so whoever maintains an app next
 can pick it up: `autablectl app pull` downloads the source of any version
-(app writers only), and rolling back the build also identifies the
+(admins only), and rolling back the build also identifies the
 matching source. Unknown manifest fields are ignored, so newer CLI
 releases can add fields without breaking older servers.
 
@@ -100,15 +100,15 @@ enforces this at every entry point:
 | Opening the app | `410` page: the app needs to be rebuilt with a newer SDK |
 | API calls carrying `X-Autable-SDK` | `410` JSON error, so a tab left open across an upgrade stops instead of misbehaving |
 
-The web UI marks unsupported versions so owners see which apps need work
+The web UI marks unsupported versions so admins see which apps need work
 before or after an upgrade.
 
 ## URLs and serving
 
 | URL | Who | Serves |
 |---|---|---|
-| `/apps/{database}/{name}/` | app readers | the published version |
-| `/apps/{database}/{name}/@{version}/` | app writers | any version (preview before publishing) |
+| `/apps/{database}/{name}/` | users who may open the app, and admins | the published version |
+| `/apps/{database}/{name}/@{version}/` | admins | any version (preview before publishing) |
 
 - Requests without a session redirect to `/login?redirect=…`.
 - Paths not found in `dist/` fall back to `dist/index.html` (client-side
@@ -123,32 +123,44 @@ before or after an upgrade.
 
 ## Permissions
 
-Scopes mirror the former form scopes:
+An app is code, so only admins (`auth.admins` in the config file) write
+it: they create apps by pushing the first version, push, preview, publish,
+roll back, list versions, download source, and delete. Developers who are
+not admins build apps elsewhere and an admin deploys them; review happens
+outside autable. See [permissions](../permissions.md).
 
-| Scope | Resource | Read | Write |
-|---|---|---|---|
-| `app_set` | database name | open every app in the database | push, publish and roll back every app; create apps |
-| `app` | app id | open the app | push, publish and roll back the app |
+Everyone else can only be allowed to open apps. Both scopes have a single
+level, `1` = open:
 
-The database owner can do everything, including deleting apps. The user
-who creates an app gets `app` Write on it. Data access inside an app is
-checked per request against the user's own table, field, view and record
-grants, exactly as in the autable UI.
+| Scope | Resource | Level 1 |
+|---|---|---|
+| `app_set` | database name | list and open the published version of every app in the database |
+| `app` | app id | list and open the published version of the app |
+
+A grant request with a level above 1 for either scope is rejected with
+`400`. Data access inside an app is checked per request against the user's
+own table, field, view, record and file grants, exactly as in the autable
+UI: an app runs in the user's browser and can never see more than its user.
+
+Migration 6 → 7 clamps existing `app` and `app_set` grants to level 1, so
+users who could push or publish before can only open apps afterwards.
 
 ## API
 
 ```
 GET    /api/apps/sdk                                    {version, min_major, files}
-GET    /api/databases/{db}/apps                         apps visible to the user
-GET    /api/databases/{db}/apps/{name}                  app with its versions
-POST   /api/databases/{db}/apps/{name}/versions         body: bundle; ?message=&publish=1
-POST   /api/databases/{db}/apps/{name}/publish          {"version": N}
-GET    /api/databases/{db}/apps/{name}/versions/{v}/source   source as tar.gz
-DELETE /api/databases/{db}/apps/{name}                  owner only
+GET    /api/databases/{db}/apps                         apps the user may open
+GET    /api/databases/{db}/apps/{name}                  app with its versions (empty for non-admins)
+POST   /api/databases/{db}/apps/{name}/versions         admins; body: bundle; ?message=&publish=1
+POST   /api/databases/{db}/apps/{name}/publish          admins; {"version": N}
+GET    /api/databases/{db}/apps/{name}/versions/{v}/source   admins; source as tar.gz
+DELETE /api/databases/{db}/apps/{name}                  admins
 ```
 
-Uploading to a name that does not exist creates the app (needs the create
-permission). The manifest's `database` and `name` must match the URL.
+`GET /api/databases/{db}/apps/{name}` works for anyone who may open the
+app, but only admins get the `versions` list. Uploading to a name that does
+not exist creates the app. The manifest's `database` and `name` must match
+the URL.
 
 ## Command line
 
@@ -163,6 +175,10 @@ autablectl app publish DATABASE NAME VERSION
 autablectl app rollback DATABASE NAME    publish the newest version below the current one
 autablectl app pull DATABASE NAME DIR [--version N]
 ```
+
+`push`, `publish`, `rollback` and `pull` need an admin account. `list` shows the apps the signed-in user may
+open, and `versions` prints the app with an empty version list unless the
+user is an admin.
 
 `push` runs `npm run build` (unless `--no-build`), packs `dist/` and the
 source, and prints the new version and its preview URL. Source files are

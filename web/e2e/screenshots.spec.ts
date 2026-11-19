@@ -31,9 +31,11 @@ async function api(page: Page, method: string, path: string, body?: unknown) {
   );
 }
 
-async function registerUser(page: Page) {
+// The screenshots show the full admin UI, so they are taken as the shared
+// e2e admin (see start-backend.mjs): registered on first use, else logged in.
+async function signInAdmin(page: Page) {
   sequence += 1;
-  const email = `shot-${Date.now()}-${sequence}@example.com`;
+  const email = "e2e-admin@example.com";
   await page.goto("/");
   await page.getByRole("button", { name: "Login" }).click();
   const dialog = page.getByRole("dialog");
@@ -41,7 +43,14 @@ async function registerUser(page: Page) {
   await dialog.getByLabel("Email").fill(email);
   await dialog.getByLabel("Display name").fill(email);
   await dialog.getByLabel("Password").fill("correct horse");
+  const registered = page.waitForResponse((response) => response.url().endsWith("/api/auth/register"));
   await dialog.getByRole("button", { name: "Register" }).click();
+  if ((await registered).status() === 409) {
+    await dialog.getByRole("tab", { name: "Login" }).click();
+    await dialog.getByLabel("Email").fill(email);
+    await dialog.getByLabel("Password").fill("correct horse");
+    await dialog.getByRole("button", { name: "Login" }).click();
+  }
   await page.getByRole("button", { name: email }).waitFor();
   return { email };
 }
@@ -93,7 +102,7 @@ test("capture workspace screenshots", async ({ page }) => {
   await shot(page, "01-login-dialog");
   await page.keyboard.press("Escape");
 
-  const { email } = await registerUser(page);
+  await signInAdmin(page);
   const suffix = `${Date.now()}-${sequence}`;
   const databaseName = `shots${suffix}`;
   const tableName = "contacts";

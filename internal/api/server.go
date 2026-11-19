@@ -1,7 +1,6 @@
 package api
 
 import (
-	"bytes"
 	"context"
 	"crypto/subtle"
 	"encoding/json"
@@ -13,7 +12,6 @@ import (
 	"net/http"
 	"net/url"
 	"path"
-	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -36,28 +34,28 @@ import (
 )
 
 type Server struct {
-	catalogMu        sync.RWMutex
-	catalog          metadata.Catalog
-	metadataPath     string
-	openDatabase     func(context.Context, string) error
-	codeFiles        codeFileStore
-	appBuilds        appBuildCache
-	repositorySync   repositorySyncer
-	system           *systemdb.DB
-	tables           *table.Service
-	history          history.Store
-	runner           *workflow.Runner
-	runnerHub        *runnerhub.Hub
-	files            FileStore
-	fileUploadLimit  int64
-	auth             config.AuthConfig
-	publicURL        string
+	catalogMu          sync.RWMutex
+	catalog            metadata.Catalog
+	metadataPath       string
+	openDatabase       func(context.Context, string) error
+	codeFiles          codeFileStore
+	appBuilds          appBuildCache
+	repositorySync     repositorySyncer
+	system             *systemdb.DB
+	tables             *table.Service
+	history            history.Store
+	runner             *workflow.Runner
+	runnerHub          *runnerhub.Hub
+	files              FileStore
+	fileUploadLimit    int64
+	auth               config.AuthConfig
+	publicURL          string
 	workflowWorkers    map[string]*workflowEventWorker
 	workflowRunWorkers map[int64]*workflowRunWorker
 	workflowWorker     context.Context
 	workflowWorkerMu   sync.Mutex
 	cliCodes           cliAuthCodes
-	mux              *http.ServeMux
+	mux                *http.ServeMux
 }
 
 type codeFileStore interface {
@@ -152,6 +150,13 @@ type userResponse struct {
 	Provider    string `json:"provider"`
 }
 
+// currentUserResponse describes the signed-in user to itself, including
+// whether the user is one of the configured admins.
+type currentUserResponse struct {
+	userResponse
+	IsAdmin bool `json:"is_admin"`
+}
+
 type oidcProviderResponse struct {
 	Name      string   `json:"name"`
 	IssuerURL string   `json:"issuer_url"`
@@ -192,12 +197,12 @@ const (
 )
 
 type workflowDefinitionResponse struct {
-	ID              int64             `json:"id"`
-	DatabaseName    string            `json:"database_name"`
-	Name            string            `json:"name"`
-	Script          string            `json:"script"`
-	Enabled         bool              `json:"enabled"`
-	CreatorID       string            `json:"creator_id,omitempty"`
+	ID                   int64             `json:"id"`
+	DatabaseName         string            `json:"database_name"`
+	Name                 string            `json:"name"`
+	Script               string            `json:"script"`
+	Enabled              bool              `json:"enabled"`
+	CreatorID            string            `json:"creator_id,omitempty"`
 	Secrets              map[string]int    `json:"secrets"`
 	Variables            map[string]string `json:"variables"`
 	Runners              map[string]string `json:"runners"`
@@ -272,11 +277,15 @@ type roleMembersRequest struct {
 }
 
 const (
-	sessionCookieName   = "autable_session"
-	oidcStateCookieName    = "autable_oidc_state"
-	oidcRedirectCookieName = "autable_oidc_redirect"
-	sessionTTL             = 14 * 24 * time.Hour
-	oidcStateTTL           = 10 * time.Minute
+	sessionCookieName = "autable_session"
+	// secureSessionCookieName is used when server.public_url is https: the
+	// __Host- prefix makes browsers insist on Secure, Path=/ and no Domain,
+	// so no other host or plain-http page can plant or overwrite it.
+	secureSessionCookieName = "__Host-autable_session"
+	oidcStateCookieName     = "autable_oidc_state"
+	oidcRedirectCookieName  = "autable_oidc_redirect"
+	sessionTTL              = 14 * 24 * time.Hour
+	oidcStateTTL            = 10 * time.Minute
 )
 
 func NewServer(catalog metadata.Catalog, system *systemdb.DB, tables *table.Service, historyStore history.Store) *Server {
@@ -392,6 +401,9 @@ func (server *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if strings.HasPrefix(r.URL.Path, "/api/") && !checkAppSDKHeader(w, r) {
 		return
 	}
+	if strings.HasPrefix(r.URL.Path, "/api/") && !server.checkSameOrigin(w, r) {
+		return
+	}
 	server.mux.ServeHTTP(w, r)
 }
 
@@ -479,7 +491,14 @@ func (server *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	user, err = server.system.UpsertUserByEmail(r.Context(), user)
+	// Registration never touches an existing account: replacing its
+	// password would hand the account — possibly an admin's — to whoever
+	// registers its email next.
+	user, err = server.system.RegisterUser(r.Context(), user)
+	if errors.Is(err, systemdb.ErrEmailTaken) {
+		writeError(w, http.StatusConflict, err)
+		return
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -489,8 +508,8 @@ func (server *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	setSessionCookie(w, session)
-	writeJSON(w, http.StatusCreated, toUserResponse(user))
+	server.setSessionCookie(w, session)
+	writeJSON(w, http.StatusCreated, server.currentUserResponse(user))
 }
 
 func (server *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
@@ -513,8 +532,8 @@ func (server *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	setSessionCookie(w, session)
-	writeJSON(w, http.StatusOK, toUserResponse(user))
+	server.setSessionCookie(w, session)
+	writeJSON(w, http.StatusOK, server.currentUserResponse(user))
 }
 
 func (server *Server) handleOIDCStartRoute(w http.ResponseWriter, r *http.Request) {
@@ -649,7 +668,7 @@ func (server *Server) handleOIDCCallback(w http.ResponseWriter, r *http.Request,
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	setSessionCookie(w, session)
+	server.setSessionCookie(w, session)
 	target := "/"
 	if cookie, err := r.Cookie(oidcRedirectCookieName); err == nil {
 		if decoded, err := url.QueryUnescape(cookie.Value); err == nil {
@@ -681,14 +700,14 @@ func (server *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, errors.New("not authenticated"))
 		return
 	}
-	writeJSON(w, http.StatusOK, toUserResponse(user))
+	writeJSON(w, http.StatusOK, server.currentUserResponse(user))
 }
 
 func (server *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
-	if token, err := requestSessionToken(r); err == nil {
+	if token, err := server.requestSessionToken(r); err == nil {
 		_ = server.system.DeleteSession(r.Context(), token)
 	}
-	clearSessionCookie(w)
+	server.clearSessionCookie(w)
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
@@ -736,6 +755,9 @@ func (server *Server) handleCreateDatabase(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return
 	}
+	if !server.requireAdmin(w, r, actorID) {
+		return
+	}
 	var request createDatabaseRequest
 	if err := readJSON(r, &request); err != nil {
 		writeError(w, http.StatusBadRequest, err)
@@ -746,10 +768,6 @@ func (server *Server) handleCreateDatabase(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	if err := server.system.SaveDatabaseOwner(r.Context(), database.Name, actorID); err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
 	server.notifyRepositoryChange(r.Context(), actorID, "metadata.database.create", "created database "+database.Name, server.metadataPath)
 	writeJSON(w, http.StatusCreated, database)
 }
@@ -757,6 +775,9 @@ func (server *Server) handleCreateDatabase(w http.ResponseWriter, r *http.Reques
 func (server *Server) handleSaveGrant(w http.ResponseWriter, r *http.Request) {
 	actorID, ok := server.requireUserID(w, r)
 	if !ok {
+		return
+	}
+	if !server.requireAdmin(w, r, actorID) {
 		return
 	}
 	var grant permission.Grant
@@ -774,9 +795,6 @@ func (server *Server) handleSaveGrant(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, err)
 			return
 		}
-	}
-	if !server.requireDatabaseOwner(w, r, actorID, dbName) {
-		return
 	}
 	if err := server.deleteConflictingGrants(r.Context(), grant); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
@@ -899,43 +917,43 @@ func (server *Server) handleCreateFields(w http.ResponseWriter, r *http.Request,
 }
 
 func (server *Server) createTableRowAs(ctx context.Context, actorID string, dbName string, tableName string, values map[string]any) (table.Row, error) {
-	perms, isOwner, err := server.tablePermissions(ctx, actorID, dbName)
+	perms, isAdmin, err := server.tablePermissions(ctx, actorID, dbName)
 	if err != nil {
 		return table.Row{}, err
 	}
-	return server.tables.CreateRow(ctx, server.catalogSnapshot(), perms, actorID, isOwner, dbName, tableName, values)
+	return server.tables.CreateRow(ctx, server.catalogSnapshot(), perms, actorID, isAdmin, dbName, tableName, values)
 }
 
 func (server *Server) updateTableRowAs(ctx context.Context, actorID string, dbName string, tableName string, recordID int64, values map[string]any) (table.Row, error) {
-	perms, isOwner, err := server.tablePermissions(ctx, actorID, dbName)
+	perms, isAdmin, err := server.tablePermissions(ctx, actorID, dbName)
 	if err != nil {
 		return table.Row{}, err
 	}
-	return server.tables.UpdateRow(ctx, server.catalogSnapshot(), perms, actorID, isOwner, dbName, tableName, recordID, values)
+	return server.tables.UpdateRow(ctx, server.catalogSnapshot(), perms, actorID, isAdmin, dbName, tableName, recordID, values)
 }
 
 func (server *Server) deleteTableRowAs(ctx context.Context, actorID string, dbName string, tableName string, recordID int64) (table.Row, error) {
-	perms, isOwner, err := server.tablePermissions(ctx, actorID, dbName)
+	perms, isAdmin, err := server.tablePermissions(ctx, actorID, dbName)
 	if err != nil {
 		return table.Row{}, err
 	}
-	return server.tables.DeleteRow(ctx, server.catalogSnapshot(), perms, actorID, isOwner, dbName, tableName, recordID)
+	return server.tables.DeleteRow(ctx, server.catalogSnapshot(), perms, actorID, isAdmin, dbName, tableName, recordID)
 }
 
 func (server *Server) listTableRowsAs(ctx context.Context, actorID string, dbName string, tableName string, options table.RowListOptions) ([]table.Row, error) {
-	perms, isOwner, err := server.tablePermissions(ctx, actorID, dbName)
+	perms, isAdmin, err := server.tablePermissions(ctx, actorID, dbName)
 	if err != nil {
 		return nil, err
 	}
-	return server.tables.RowsWithOptions(ctx, server.catalogSnapshot(), perms, actorID, isOwner, dbName, tableName, options)
+	return server.tables.RowsWithOptions(ctx, server.catalogSnapshot(), perms, actorID, isAdmin, dbName, tableName, options)
 }
 
 func (server *Server) listTableRowsPageAs(ctx context.Context, actorID string, dbName string, tableName string, options table.RowListOptions) ([]table.Row, int64, error) {
-	perms, isOwner, err := server.tablePermissions(ctx, actorID, dbName)
+	perms, isAdmin, err := server.tablePermissions(ctx, actorID, dbName)
 	if err != nil {
 		return nil, 0, err
 	}
-	return server.tables.RowsPageWithOptions(ctx, server.catalogSnapshot(), perms, actorID, isOwner, dbName, tableName, options)
+	return server.tables.RowsPageWithOptions(ctx, server.catalogSnapshot(), perms, actorID, isAdmin, dbName, tableName, options)
 }
 
 // actorQueryIdentity is the value $current_user resolves to in view
@@ -950,42 +968,42 @@ func (server *Server) actorQueryIdentity(ctx context.Context, actorID string) st
 }
 
 func (server *Server) upsertTableRowAs(ctx context.Context, actorID string, dbName string, tableName string, matchField string, values map[string]any) (table.Row, string, error) {
-	perms, isOwner, err := server.tablePermissions(ctx, actorID, dbName)
+	perms, isAdmin, err := server.tablePermissions(ctx, actorID, dbName)
 	if err != nil {
 		return table.Row{}, "", err
 	}
-	return server.upsertTableRow(ctx, server.catalogSnapshot(), perms, actorID, isOwner, dbName, tableName, matchField, values)
+	return server.upsertTableRow(ctx, server.catalogSnapshot(), perms, actorID, isAdmin, dbName, tableName, matchField, values)
 }
 
 func (server *Server) createTableFieldsAs(ctx context.Context, actorID string, dbName string, tableName string, fields []metadata.Field) (workflowFieldMutation, error) {
-	perms, isOwner, err := server.tablePermissions(ctx, actorID, dbName)
+	perms, isAdmin, err := server.tablePermissions(ctx, actorID, dbName)
 	if err != nil {
 		return workflowFieldMutation{}, err
 	}
-	resource := dbName + "." + tableName
-	if !isOwner {
-		if !perms.CanAddFields(actorID, resource) {
+	if !isAdmin {
+		// Schema is admin-only. Anyone else (every workflow subject
+		// included) may only confirm fields that already exist, so
+		// idempotent "ensure fields" calls keep working once an admin has
+		// added them.
+		tableMeta, ok := server.catalogSnapshot().Table(dbName, tableName)
+		if !ok {
+			return workflowFieldMutation{}, fmt.Errorf("database %q table %q not found", dbName, tableName)
+		}
+		if !canSeeTableMetadata(perms, actorID, dbName, tableMeta) {
 			return workflowFieldMutation{}, table.ErrPermissionDenied
 		}
-		for _, field := range fields {
-			if field.Type == "formula" {
-				return workflowFieldMutation{}, fmt.Errorf("%w: formula fields require database owner", table.ErrPermissionDenied)
-			}
-		}
 	}
-	return server.addTableFields(ctx, dbName, tableName, fields)
+	return server.addTableFields(ctx, dbName, tableName, fields, isAdmin)
 }
 
-func (server *Server) tablePermissions(ctx context.Context, actorID string, dbName string) (permission.Set, bool, error) {
+// tablePermissions returns the actor's effective grants and whether the
+// actor is an admin, who bypasses every data check.
+func (server *Server) tablePermissions(ctx context.Context, actorID string, _ string) (permission.Set, bool, error) {
 	perms, err := server.system.EffectiveGrantsForSubject(ctx, actorID)
 	if err != nil {
 		return permission.Set{}, false, err
 	}
-	isOwner, err := server.system.IsDatabaseOwner(ctx, actorID, dbName)
-	if err != nil {
-		return permission.Set{}, false, err
-	}
-	return perms, isOwner, nil
+	return perms, server.isAdmin(ctx, actorID), nil
 }
 
 func writeTableMutationError(w http.ResponseWriter, err error) {
@@ -1122,16 +1140,12 @@ func (server *Server) handleRowHistory(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	isOwner, err := server.system.IsDatabaseOwner(r.Context(), actorID, dbName)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
+	isAdmin := server.isAdmin(r.Context(), actorID)
 	resource := dbName + "." + tableName
 	// Row history is row-level: the record must be inside the actor's row
 	// set, and historical values are redacted to readable fields — the
 	// same double gate as live reads.
-	if !isOwner {
+	if !isAdmin {
 		inRowSet, err := server.tables.RowInActorRowSet(r.Context(), server.catalogSnapshot(), perms, actorID, false, dbName, tableName, recordID)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err)
@@ -1154,8 +1168,8 @@ func (server *Server) handleRowHistory(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, err)
 			return
 		}
-		change.Values = readableHistoryValues(change.Values, perms, actorID, isOwner, resource)
-		change.Diff = readableHistoryDiff(change.Diff, perms, actorID, isOwner, resource)
+		change.Values = readableHistoryValues(change.Values, perms, actorID, isAdmin, resource)
+		change.Diff = readableHistoryDiff(change.Diff, perms, actorID, isAdmin, resource)
 		changes = append(changes, rowHistoryResponse{HistoryKey: entry.Key, RowChange: change})
 	}
 	writeJSON(w, http.StatusOK, changes)
@@ -1166,15 +1180,21 @@ func (server *Server) handleSaveWorkflow(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
+	if !server.requireAdmin(w, r, actorID) {
+		return
+	}
 	var workflow systemdb.WorkflowDefinition
 	if err := readJSON(r, &workflow); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	if workflow.ID == 0 && !server.requireDatabaseOrSetWrite(w, r, actorID, workflow.DatabaseName, permission.ScopeWorkflowSet) {
-		return
-	}
-	if workflow.ID != 0 && !server.requireResourceWrite(w, r, actorID, permission.ScopeWorkflow, workflow.ID) {
+	server.saveWorkflowRequest(w, r, actorID, workflow)
+}
+
+// saveWorkflowRequest creates or updates a workflow for an admin.
+func (server *Server) saveWorkflowRequest(w http.ResponseWriter, r *http.Request, actorID string, workflow systemdb.WorkflowDefinition) {
+	if workflow.ID == 0 && !server.databaseExists(workflow.DatabaseName) {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("database %q not found", workflow.DatabaseName))
 		return
 	}
 	if workflow.ID != 0 && !server.requireExistingWorkflowDatabase(w, r, workflow.ID, workflow.DatabaseName) {
@@ -1200,12 +1220,7 @@ func (server *Server) handleSaveWorkflow(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	if workflow.ID == 0 {
-		if !server.grantResourceOwner(w, r, actorID, permission.ScopeWorkflow, saved.ID) {
-			return
-		}
-	}
-	saved = server.workflowWithPermissionLevel(r.Context(), actorID, saved)
+	saved.PermissionLevel = resourcePermissionLevel(true)
 	writeJSON(w, http.StatusCreated, workflowResponseFromDefinition(saved))
 }
 
@@ -1223,26 +1238,11 @@ func (server *Server) handleGetDatabaseResource(w http.ResponseWriter, r *http.R
 	case "runners":
 		server.handleDatabaseRunners(w, r, actorID, dbName)
 	case "workflows":
-		workflows, err := server.system.Workflows(r.Context(), dbName)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, err)
-			return
-		}
-		workflows, err = server.workflowDefinitionsWithFileScripts(r.Context(), workflows)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, err)
-			return
-		}
-		filtered, err := server.filterReadableWorkflows(r.Context(), actorID, workflows)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, err)
-			return
-		}
-		writeJSON(w, http.StatusOK, workflowResponsesFromDefinitions(filtered))
+		server.handleListWorkflows(w, r, actorID, dbName)
 	case "apps":
 		server.handleListApps(w, r, actorID, dbName)
 	case "roles":
-		if !server.requireDatabaseOwner(w, r, actorID, dbName) {
+		if !server.requireAdmin(w, r, actorID) {
 			return
 		}
 		roles, err := server.system.Roles(r.Context(), dbName)
@@ -1271,7 +1271,7 @@ func (server *Server) handlePostDatabaseResource(w http.ResponseWriter, r *http.
 	case "runners":
 		server.handleResetDatabaseRunnerToken(w, r, actorID, dbName)
 	case "tables":
-		if !server.requireDatabaseOwner(w, r, actorID, dbName) {
+		if !server.requireAdmin(w, r, actorID) {
 			return
 		}
 		var tableMeta metadata.Table
@@ -1286,50 +1286,18 @@ func (server *Server) handlePostDatabaseResource(w http.ResponseWriter, r *http.
 		server.notifyRepositoryChange(r.Context(), actorID, "metadata.table.create", "created table "+dbName+"/"+tableMeta.Name, server.metadataPath)
 		writeJSON(w, http.StatusCreated, tableMeta)
 	case "workflows":
+		if !server.requireAdmin(w, r, actorID) {
+			return
+		}
 		var workflow systemdb.WorkflowDefinition
 		if err := readJSON(r, &workflow); err != nil {
 			writeError(w, http.StatusBadRequest, err)
 			return
 		}
-		if workflow.ID == 0 && !server.requireDatabaseOrSetWrite(w, r, actorID, dbName, permission.ScopeWorkflowSet) {
-			return
-		}
-		if workflow.ID != 0 && !server.requireResourceWrite(w, r, actorID, permission.ScopeWorkflow, workflow.ID) {
-			return
-		}
-		if workflow.ID != 0 && !server.requireExistingWorkflowDatabase(w, r, workflow.ID, dbName) {
-			return
-		}
 		workflow.DatabaseName = dbName
-		if workflow.ID == 0 {
-			workflow.CreatorID = actorID
-		}
-		if err := server.validateRunnerBindings(r.Context(), workflow); err != nil {
-			writeError(w, http.StatusBadRequest, err)
-			return
-		}
-		if workflow.HistoryRetentionDays != nil && *workflow.HistoryRetentionDays < 0 {
-			writeError(w, http.StatusBadRequest, fmt.Errorf("history_retention_days must be at least 0, got %d", *workflow.HistoryRetentionDays))
-			return
-		}
-		if workflow.TimeoutSeconds != nil && *workflow.TimeoutSeconds <= 0 {
-			writeError(w, http.StatusBadRequest, fmt.Errorf("timeout_seconds must be greater than 0, got %d", *workflow.TimeoutSeconds))
-			return
-		}
-		saved, err := server.saveWorkflowDefinition(r.Context(), actorID, workflow)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, err)
-			return
-		}
-		if workflow.ID == 0 {
-			if !server.grantResourceOwner(w, r, actorID, permission.ScopeWorkflow, saved.ID) {
-				return
-			}
-		}
-		saved = server.workflowWithPermissionLevel(r.Context(), actorID, saved)
-		writeJSON(w, http.StatusCreated, workflowResponseFromDefinition(saved))
+		server.saveWorkflowRequest(w, r, actorID, workflow)
 	case "roles":
-		if !server.requireDatabaseOwner(w, r, actorID, dbName) {
+		if !server.requireAdmin(w, r, actorID) {
 			return
 		}
 		var role systemdb.RoleDefinition
@@ -1364,7 +1332,7 @@ func (server *Server) handleRoleAction(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !server.requireDatabaseOwner(w, r, actorID, dbName) {
+	if !server.requireAdmin(w, r, actorID) {
 		return
 	}
 	var role systemdb.RoleDefinition
@@ -1414,21 +1382,7 @@ func (server *Server) handleMoveFieldPosition(w http.ResponseWriter, r *http.Req
 	if !ok {
 		return
 	}
-	if _, ok := server.requireAuthorized(w, r, actorID, accessRequest{
-		Action:   accessWriteFieldSet,
-		Database: dbName,
-		Table:    tableName,
-	}); !ok {
-		return
-	}
-	perms, err := server.system.EffectiveGrantsForSubject(r.Context(), actorID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	isOwner, err := server.system.IsDatabaseOwner(r.Context(), actorID, dbName)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
+	if !server.requireAdmin(w, r, actorID) {
 		return
 	}
 	var request fieldPositionRequest
@@ -1442,7 +1396,7 @@ func (server *Server) handleMoveFieldPosition(w http.ResponseWriter, r *http.Req
 		return
 	}
 	server.notifyRepositoryChange(r.Context(), actorID, "metadata.field.move", "moved field "+dbName+"/"+tableName+"/"+fieldName, server.metadataPath)
-	writeJSON(w, http.StatusOK, visibleTableMetadata(perms, actorID, dbName, isOwner, tableMeta))
+	writeJSON(w, http.StatusOK, visibleTableMetadata(permission.Set{}, actorID, dbName, true, tableMeta))
 }
 
 func (server *Server) handleUpdateTableMetadata(w http.ResponseWriter, r *http.Request, dbName, tableName string) {
@@ -1450,27 +1404,18 @@ func (server *Server) handleUpdateTableMetadata(w http.ResponseWriter, r *http.R
 	if !ok {
 		return
 	}
+	// Fields (formulas included) and views are structure, and views are the
+	// row-level permission boundary: admin-only.
+	if !server.requireAdmin(w, r, actorID) {
+		return
+	}
 	var tableMeta metadata.Table
 	if err := readJSON(r, &tableMeta); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	existingTable, ok := server.catalogSnapshot().Table(dbName, tableName)
-	if !ok {
+	if _, ok := server.catalogSnapshot().Table(dbName, tableName); !ok {
 		writeError(w, http.StatusBadRequest, fmt.Errorf("table %s.%s not found", dbName, tableName))
-		return
-	}
-	perms, err := server.system.EffectiveGrantsForSubject(r.Context(), actorID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	isOwner, err := server.system.IsDatabaseOwner(r.Context(), actorID, dbName)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	if tableMeta.Fields != nil && !server.authorizeFieldMetadataPatch(w, actorID, isOwner, dbName, tableName, perms, existingTable, tableMeta.Fields) {
 		return
 	}
 	if tableMeta.Views != nil {
@@ -1485,9 +1430,6 @@ func (server *Server) handleUpdateTableMetadata(w http.ResponseWriter, r *http.R
 		}
 		tableMeta.Views = views
 	}
-	if tableMeta.Views != nil && !server.authorizeViewMetadataPatch(w, actorID, isOwner, dbName, tableName, perms, existingTable, tableMeta.Views) {
-		return
-	}
 	if tableMeta.Name == "" {
 		tableMeta.Name = tableName
 	}
@@ -1497,90 +1439,7 @@ func (server *Server) handleUpdateTableMetadata(w http.ResponseWriter, r *http.R
 		return
 	}
 	server.notifyRepositoryChange(r.Context(), actorID, "metadata.table.update", "updated table metadata "+dbName+"/"+tableName, server.metadataPath)
-	writeJSON(w, http.StatusOK, visibleTableMetadata(perms, actorID, dbName, isOwner, updated))
-}
-
-// authorizeFieldMetadataPatch enforces the metadata layer: field_add for
-// new fields, per-field field_modify for definition changes, and owner-only
-// for anything involving formulas or deletion. Formulas evaluate over the
-// whole row server-side, so letting anyone else define them would bypass
-// field read permissions.
-func (server *Server) authorizeFieldMetadataPatch(w http.ResponseWriter, actorID string, isOwner bool, dbName, tableName string, perms permission.Set, existing metadata.Table, fields []metadata.Field) bool {
-	if isOwner {
-		return true
-	}
-	resource := dbName + "." + tableName
-	for _, field := range fields {
-		existingField, ok := existing.Field(field.Name)
-		switch {
-		case !ok:
-			if field.Type == "formula" {
-				writeError(w, http.StatusForbidden, fmt.Errorf("formula field %q requires database owner", field.Name))
-				return false
-			}
-			if !perms.CanAddFields(actorID, resource) {
-				writeError(w, http.StatusForbidden, fmt.Errorf("adding field %q requires the field_add permission", field.Name))
-				return false
-			}
-		case existingField.Deleted != field.Deleted:
-			writeError(w, http.StatusForbidden, fmt.Errorf("delete field %q requires database owner", field.Name))
-			return false
-		case fieldDefinitionChanged(existingField, field):
-			if existingField.Type == "formula" || field.Type == "formula" {
-				writeError(w, http.StatusForbidden, fmt.Errorf("formula field %q requires database owner", field.Name))
-				return false
-			}
-			if !perms.CanModifyField(actorID, resource, field.Name) {
-				writeError(w, http.StatusForbidden, fmt.Errorf("modifying field %q requires the field_modify permission", field.Name))
-				return false
-			}
-		}
-	}
-	return true
-}
-
-func fieldDefinitionChanged(existing, incoming metadata.Field) bool {
-	return existing.Type != incoming.Type ||
-		existing.ValueType != incoming.ValueType ||
-		existing.Formula != incoming.Formula ||
-		existing.RelationTable != incoming.RelationTable ||
-		!slices.Equal(existing.Options, incoming.Options)
-}
-
-// authorizeViewMetadataPatch: view definitions are the row-level permission
-// boundary, so changing them is database-owner-only. Unchanged views pass so
-// non-owners with field rights can still PUT the full table metadata.
-func (server *Server) authorizeViewMetadataPatch(w http.ResponseWriter, _ string, isOwner bool, _, _ string, _ permission.Set, existing metadata.Table, views []metadata.View) bool {
-	if isOwner || viewDefinitionsEqual(existing.Views, views) {
-		return true
-	}
-	writeError(w, http.StatusForbidden, errors.New("changing views requires database owner"))
-	return false
-}
-
-// viewDefinitionsEqual compares view definitions ignoring the response-only
-// permission level annotation the frontend echoes back.
-func viewDefinitionsEqual(existing, incoming []metadata.View) bool {
-	normalize := func(views []metadata.View) []metadata.View {
-		next := make([]metadata.View, len(views))
-		for i, view := range views {
-			view.PermissionLevel = 0
-			if view.Sorts == nil {
-				view.Sorts = []metadata.ViewSort{}
-			}
-			next[i] = view
-		}
-		return next
-	}
-	left, err := json.Marshal(normalize(existing))
-	if err != nil {
-		return false
-	}
-	right, err := json.Marshal(normalize(incoming))
-	if err != nil {
-		return false
-	}
-	return bytes.Equal(left, right)
+	writeJSON(w, http.StatusOK, visibleTableMetadata(permission.Set{}, actorID, dbName, true, updated))
 }
 
 func (server *Server) handleWorkflowRunsRoute(w http.ResponseWriter, r *http.Request) {
@@ -1612,7 +1471,7 @@ func (server *Server) handleGetWorkflow(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		return
 	}
-	if !server.requireResourceRead(w, r, actorID, permission.ScopeWorkflow, id) {
+	if !server.requireAdmin(w, r, actorID) {
 		return
 	}
 	workflow, err := server.system.Workflow(r.Context(), id)
@@ -1625,7 +1484,7 @@ func (server *Server) handleGetWorkflow(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	workflow = server.workflowWithPermissionLevel(r.Context(), actorID, workflow)
+	workflow.PermissionLevel = resourcePermissionLevel(true)
 	writeJSON(w, http.StatusOK, workflowResponseFromDefinition(workflow))
 }
 
@@ -1639,7 +1498,16 @@ func (server *Server) handleRunWorkflow(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		return
 	}
-	if _, ok := server.requireAuthorized(w, r, actorID, accessRequest{Action: accessWriteWorkflow, WorkflowID: id}); !ok {
+	// Running is the one workflow capability that can be granted. The run
+	// executes as the workflow's own subject, not as the caller.
+	perms, err := server.system.EffectiveGrantsForSubject(r.Context(), actorID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	isAdmin := server.isAdmin(r.Context(), actorID)
+	if !canRunWorkflow(perms, actorID, isAdmin, id) {
+		writeError(w, http.StatusForbidden, table.ErrPermissionDenied)
 		return
 	}
 	var request workflowRunRequest
@@ -1650,6 +1518,12 @@ func (server *Server) handleRunWorkflow(w http.ResponseWriter, r *http.Request) 
 	workflowDefinition, err := server.system.Workflow(r.Context(), id)
 	if err != nil {
 		writeError(w, http.StatusNotFound, err)
+		return
+	}
+	if !isAdmin && !workflowDefinition.Enabled {
+		// Disabling is the admin's switch; a run grant does not bypass it.
+		// Admins keep running disabled workflows from the editor to test.
+		writeError(w, http.StatusConflict, errors.New("workflow is disabled"))
 		return
 	}
 	workflowDefinition, err = server.workflowDefinitionWithFileScript(r.Context(), workflowDefinition)
@@ -1676,6 +1550,11 @@ func (server *Server) handleRunWorkflow(w http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		status = http.StatusBadRequest
 	}
+	if !isAdmin {
+		// Steps carry every node's input and output, unfiltered; run
+		// history is admin-only, so callers only get the run's result.
+		run.Steps = []history.StepRecord{}
+	}
 	writeJSON(w, status, workflowRunResponse{HistoryKey: key, Run: run})
 }
 
@@ -1688,7 +1567,8 @@ func (server *Server) handleWorkflowRuns(w http.ResponseWriter, r *http.Request,
 	if !ok {
 		return
 	}
-	if !server.requireResourceRead(w, r, actorID, permission.ScopeWorkflow, workflowID) {
+	// Run history holds the unfiltered data the workflow processed.
+	if !server.requireAdmin(w, r, actorID) {
 		return
 	}
 	keys, err := server.history.GetPrefixKeysLimit(r.Context(), history.WorkflowPrefix(workflowID), workflowRunListLimit(r))
@@ -1725,7 +1605,8 @@ func (server *Server) handleWorkflowRun(w http.ResponseWriter, r *http.Request, 
 	if !ok {
 		return
 	}
-	if !server.requireResourceRead(w, r, actorID, permission.ScopeWorkflow, workflowID) {
+	// Run history holds the unfiltered data the workflow processed.
+	if !server.requireAdmin(w, r, actorID) {
 		return
 	}
 	parsedWorkflowID, _, err := history.ParseWorkflowKey(historyKey)
@@ -2155,7 +2036,7 @@ func (server *Server) workflowTriggerEventForSubject(ctx context.Context, subjec
 }
 
 func (server *Server) readableRowChangeForSubject(ctx context.Context, subjectID string, change history.RowChange) (history.RowChange, bool) {
-	perms, isOwner, err := server.tablePermissions(ctx, subjectID, change.Database)
+	perms, isAdmin, err := server.tablePermissions(ctx, subjectID, change.Database)
 	if err != nil {
 		return history.RowChange{}, false
 	}
@@ -2166,7 +2047,7 @@ func (server *Server) readableRowChangeForSubject(ctx context.Context, subjectID
 	resource := change.Database + "." + change.Table
 	readable := map[string]struct{}{}
 	for _, field := range tableMeta.ActiveFields() {
-		if isOwner || perms.FieldLevel(subjectID, resource, field.Name) >= permission.Read {
+		if isAdmin || perms.FieldLevel(subjectID, resource, field.Name) >= permission.Read {
 			readable[field.Name] = struct{}{}
 		}
 	}
@@ -2234,7 +2115,7 @@ func (server *Server) handleDeleteWorkflow(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return
 	}
-	if _, ok := server.requireAuthorized(w, r, actorID, accessRequest{Action: accessDeleteWorkflow, WorkflowID: id}); !ok {
+	if !server.requireAdmin(w, r, actorID) {
 		return
 	}
 	workflow, err := server.system.Workflow(r.Context(), id)
@@ -2279,8 +2160,11 @@ type workflowWebhookRequest struct {
 // credential; no session is involved.
 func (server *Server) handleWorkflowWebhook(w http.ResponseWriter, r *http.Request, dbName string, workflowID int64) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxWebhookBodyBytes)
+	// Webhook senders often omit or mislabel the content type; the token in
+	// the body is the credential, so the JSON content-type rule of readJSON
+	// does not apply.
 	var request workflowWebhookRequest
-	if err := readJSON(r, &request); err != nil {
+	if err := decodeJSON(r, &request); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
@@ -2344,7 +2228,17 @@ func (server *Server) handleWorkflowWebhook(w http.ResponseWriter, r *http.Reque
 	writeJSON(w, http.StatusOK, map[string]any{"accepted": true})
 }
 
+// readJSON decodes a JSON request body, which must be labelled
+// application/json unless the request is bearer-authenticated (CSRF
+// defense, see csrf.go). The status for a wrong content type is 415.
 func readJSON(r *http.Request, target any) error {
+	if err := requireJSONContentType(r); err != nil {
+		return err
+	}
+	return decodeJSON(r, target)
+}
+
+func decodeJSON(r *http.Request, target any) error {
 	defer r.Body.Close()
 	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()
@@ -2358,6 +2252,9 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 }
 
 func writeError(w http.ResponseWriter, status int, err error) {
+	if errors.Is(err, errJSONContentType) {
+		status = http.StatusUnsupportedMediaType
+	}
 	writeJSON(w, status, map[string]string{"error": err.Error()})
 }
 
@@ -2370,22 +2267,13 @@ func (server *Server) catalogSnapshot() metadata.Catalog {
 func (server *Server) visibleCatalog(ctx context.Context, actorID string, perms permission.Set) (metadata.Catalog, error) {
 	catalog := server.catalogSnapshot()
 	visible := metadata.Catalog{Databases: []metadata.Database{}}
+	isAdmin := server.isAdmin(ctx, actorID)
 	for _, database := range catalog.Databases {
-		isOwner, err := server.system.IsDatabaseOwner(ctx, actorID, database.Name)
-		if err != nil {
-			return metadata.Catalog{}, err
-		}
-		dbLevel := permission.None
-		if isOwner {
-			dbLevel = permission.Write
-		}
-		workflowSetLevel := perms.ResourceLevel(actorID, permission.ScopeWorkflowSet, database.Name)
-		appSetLevel := perms.ResourceLevel(actorID, permission.ScopeAppSet, database.Name)
-		dbVisible := isOwner
+		dbVisible := isAdmin
 		tables := make([]metadata.Table, 0, len(database.Tables))
 		for _, tableMeta := range database.Tables {
-			if isOwner || canSeeTableMetadata(perms, actorID, database.Name, tableMeta) {
-				tables = append(tables, visibleTableMetadata(perms, actorID, database.Name, isOwner, tableMeta))
+			if isAdmin || canSeeTableMetadata(perms, actorID, database.Name, tableMeta) {
+				tables = append(tables, visibleTableMetadata(perms, actorID, database.Name, isAdmin, tableMeta))
 				dbVisible = true
 			}
 		}
@@ -2397,9 +2285,6 @@ func (server *Server) visibleCatalog(ctx context.Context, actorID string, perms 
 			dbVisible = resourceVisible
 		}
 		if dbVisible {
-			database.PermissionLevel = int(dbLevel)
-			database.WorkflowPermissionLevel = int(maxPermissionLevel(dbLevel, workflowSetLevel))
-			database.AppPermissionLevel = int(maxPermissionLevel(dbLevel, appSetLevel))
 			database.Tables = tables
 			visible.Databases = append(visible.Databases, database)
 		}
@@ -2407,49 +2292,42 @@ func (server *Server) visibleCatalog(ctx context.Context, actorID string, perms 
 	return visible, nil
 }
 
-func visibleTableMetadata(perms permission.Set, actorID, dbName string, isOwner bool, tableMeta metadata.Table) metadata.Table {
+// visibleTableMetadata annotates a table for the actor. Admins see every
+// field and view with full levels; anyone else sees only readable fields
+// and readable views whose definitions reference readable fields only.
+func visibleTableMetadata(perms permission.Set, actorID, dbName string, isAdmin bool, tableMeta metadata.Table) metadata.Table {
 	resource := dbName + "." + tableMeta.Name
-	dbLevel := permission.None
-	if isOwner {
-		dbLevel = permission.Write
-	}
-	// Field grant levels are bitmasks; collapse them to the legacy 0/1/2
-	// scale for the table-level UI hints (2 = may add fields).
-	fieldSetHint := permission.None
-	if perms.CanAddFields(actorID, resource) {
-		fieldSetHint = permission.Write
-	} else if perms.FieldSetLevel(actorID, resource) != permission.None {
-		fieldSetHint = permission.Read
-	}
-	// View management is owner-only; view grants only confer read, so the
-	// view-set hint is clamped to read for non-owners.
-	viewSetLevel := perms.ResourceLevel(actorID, permission.ScopeViewSet, resource)
-	viewSetHint := minPermissionLevel(viewSetLevel, permission.Read)
 	annotated := tableMeta
-	annotated.PermissionLevel = int(maxPermissionLevel(dbLevel, maxPermissionLevel(fieldSetHint, viewSetHint)))
-	annotated.DatabasePermissionLevel = int(dbLevel)
-	annotated.FieldPermissionLevel = int(maxPermissionLevel(dbLevel, fieldSetHint))
-	annotated.ViewPermissionLevel = int(dbLevel)
-	if dbLevel >= permission.Write {
-		annotated.Fields = annotateFieldPermissionLevels(perms, actorID, resource, dbLevel, annotated.Fields)
+	if isAdmin {
+		annotated.PermissionLevel = int(permission.Write)
+		annotated.Fields = make([]metadata.Field, 0, len(tableMeta.Fields))
+		for _, field := range tableMeta.Fields {
+			field.PermissionLevel = int(permission.FieldAll)
+			annotated.Fields = append(annotated.Fields, field)
+		}
 		// The built-in unfiltered view is served as an ordinary view entry
 		// so clients need no special casing.
-		annotated.Views = annotateViewPermissionLevels(perms, actorID, resource, dbLevel,
-			append([]metadata.View{{Name: metadata.AllViewName, Sorts: []metadata.ViewSort{}}}, annotated.Views...))
+		views := append([]metadata.View{{Name: metadata.AllViewName, Sorts: []metadata.ViewSort{}}}, tableMeta.Views...)
+		annotated.Views = make([]metadata.View, 0, len(views))
+		for _, view := range views {
+			view.PermissionLevel = int(permission.Write)
+			annotated.Views = append(annotated.Views, view)
+		}
 		return annotated
 	}
-	visible := annotated
-	visible.Fields = make([]metadata.Field, 0, len(tableMeta.Fields))
+	annotated.PermissionLevel = int(permission.Read)
+	annotated.Fields = make([]metadata.Field, 0, len(tableMeta.Fields))
 	for _, field := range tableMeta.ActiveFields() {
 		fieldLevel := perms.FieldLevel(actorID, resource, field.Name)
 		if fieldLevel >= permission.Read {
 			field.PermissionLevel = int(fieldLevel)
-			visible.Fields = append(visible.Fields, field)
+			annotated.Fields = append(annotated.Fields, field)
 		}
 	}
-	visible.Views = make([]metadata.View, 0, len(tableMeta.Views)+1)
+	viewSetLevel := perms.ResourceLevel(actorID, permission.ScopeViewSet, resource)
+	annotated.Views = make([]metadata.View, 0, len(tableMeta.Views)+1)
 	if perms.CanReadView(actorID, resource, metadata.AllViewName) {
-		visible.Views = append(visible.Views, metadata.View{Name: metadata.AllViewName, Sorts: []metadata.ViewSort{}, PermissionLevel: int(permission.Read)})
+		annotated.Views = append(annotated.Views, metadata.View{Name: metadata.AllViewName, Sorts: []metadata.ViewSort{}, PermissionLevel: int(permission.Read)})
 	}
 	for _, view := range tableMeta.Views {
 		viewLevel := maxPermissionLevel(viewSetLevel, perms.ViewLevel(actorID, resource, view.Name))
@@ -2461,41 +2339,11 @@ func visibleTableMetadata(perms permission.Set, actorID, dbName string, isOwner 
 			continue
 		}
 		if viewFieldsReadable(perms, actorID, resource, resolved.Query, resolved.Sorts) {
-			view.PermissionLevel = int(minPermissionLevel(viewLevel, permission.Read))
-			visible.Views = append(visible.Views, view)
+			view.PermissionLevel = int(permission.Read)
+			annotated.Views = append(annotated.Views, view)
 		}
 	}
-	return visible
-}
-
-func annotateFieldPermissionLevels(perms permission.Set, actorID, resource string, dbLevel permission.Level, fields []metadata.Field) []metadata.Field {
-	annotated := make([]metadata.Field, 0, len(fields))
-	for _, field := range fields {
-		level := perms.FieldLevel(actorID, resource, field.Name)
-		if dbLevel >= permission.Write {
-			level = permission.FieldAll
-		}
-		field.PermissionLevel = int(level)
-		annotated = append(annotated, field)
-	}
 	return annotated
-}
-
-func annotateViewPermissionLevels(perms permission.Set, actorID, resource string, dbLevel permission.Level, views []metadata.View) []metadata.View {
-	annotated := make([]metadata.View, 0, len(views))
-	for _, view := range views {
-		level := minPermissionLevel(perms.ViewLevel(actorID, resource, view.Name), permission.Read)
-		view.PermissionLevel = int(maxPermissionLevel(dbLevel, level))
-		annotated = append(annotated, view)
-	}
-	return annotated
-}
-
-func minPermissionLevel(left, right permission.Level) permission.Level {
-	if left < right {
-		return left
-	}
-	return right
 }
 
 func maxPermissionLevel(left, right permission.Level) permission.Level {
@@ -2574,8 +2422,7 @@ func (server *Server) hasVisibleDatabaseResource(ctx context.Context, actorID st
 		return false, err
 	}
 	for _, workflow := range workflows {
-		if perms.CanReadResource(actorID, permission.ScopeWorkflowSet, dbName) ||
-			perms.CanReadResource(actorID, permission.ScopeWorkflow, resourceID(workflow.ID)) {
+		if canRunWorkflow(perms, actorID, false, workflow.ID) {
 			return true, nil
 		}
 	}
@@ -2584,8 +2431,7 @@ func (server *Server) hasVisibleDatabaseResource(ctx context.Context, actorID st
 		return false, err
 	}
 	for _, app := range apps {
-		if perms.CanReadResource(actorID, permission.ScopeAppSet, dbName) ||
-			perms.CanReadResource(actorID, permission.ScopeApp, resourceID(app.ID)) {
+		if canOpenApp(perms, actorID, false, app) {
 			return true, nil
 		}
 	}
@@ -2605,24 +2451,15 @@ func (server *Server) requireUserID(w http.ResponseWriter, r *http.Request) (str
 	return actorID, true
 }
 
-func (server *Server) requireResourceRead(w http.ResponseWriter, r *http.Request, actorID string, scope permission.Scope, id int64) bool {
-	return server.requireResourceLevel(w, r, actorID, scope, id, permission.Read)
-}
-
-func (server *Server) requireDatabaseOwner(w http.ResponseWriter, r *http.Request, actorID string, dbName string) bool {
-	_, ok := server.requireAuthorized(w, r, actorID, accessRequest{Action: accessManageDatabase, Database: dbName})
-	return ok
-}
-
 func (server *Server) grantDatabaseName(ctx context.Context, grant permission.Grant) (string, error) {
 	switch grant.Scope {
-	case permission.ScopeFieldSet, permission.ScopeField, permission.ScopeRecord, permission.ScopeViewSet, permission.ScopeView, permission.ScopeFile, permission.ScopeFieldAdd, permission.ScopeFieldModify:
+	case permission.ScopeFieldSet, permission.ScopeField, permission.ScopeRecord, permission.ScopeViewSet, permission.ScopeView, permission.ScopeFile:
 		dbName, _, ok := strings.Cut(grant.Resource, ".")
 		if !ok || dbName == "" {
 			return "", fmt.Errorf("grant resource %q must be db.table", grant.Resource)
 		}
 		return dbName, nil
-	case permission.ScopeWorkflowSet, permission.ScopeAppSet:
+	case permission.ScopeAppSet:
 		if grant.Resource == "" {
 			return "", fmt.Errorf("grant %s resource is required", grant.Scope)
 		}
@@ -2687,26 +2524,6 @@ func (server *Server) deleteConflictingGrants(ctx context.Context, grant permiss
 		return server.system.DeleteGrant(ctx, grant.SubjectID, permission.ScopeView, grant.Resource)
 	case permission.ScopeView:
 		return server.system.DeleteGrant(ctx, grant.SubjectID, permission.ScopeViewSet, grant.Resource)
-	case permission.ScopeWorkflowSet:
-		workflows, err := server.system.Workflows(ctx, grant.Resource)
-		if err != nil {
-			return err
-		}
-		for _, workflow := range workflows {
-			if err := server.system.DeleteGrant(ctx, grant.SubjectID, permission.ScopeWorkflow, resourceID(workflow.ID)); err != nil {
-				return err
-			}
-		}
-	case permission.ScopeWorkflow:
-		id, err := parseGrantResourceID(grant.Resource)
-		if err != nil {
-			return err
-		}
-		workflow, err := server.system.Workflow(ctx, id)
-		if err != nil {
-			return err
-		}
-		return server.system.DeleteGrant(ctx, grant.SubjectID, permission.ScopeWorkflowSet, workflow.DatabaseName)
 	case permission.ScopeAppSet:
 		apps, err := server.system.Apps(ctx, grant.Resource)
 		if err != nil {
@@ -2736,8 +2553,6 @@ func (server *Server) validateExclusiveGrants(ctx context.Context, grants []perm
 	fields := map[string]struct{}{}
 	viewSets := map[string]struct{}{}
 	views := map[string]struct{}{}
-	workflowSets := map[string]struct{}{}
-	workflows := map[string]struct{}{}
 	appSets := map[string]struct{}{}
 	apps := map[string]struct{}{}
 	for _, grant := range grants {
@@ -2753,18 +2568,6 @@ func (server *Server) validateExclusiveGrants(ctx context.Context, grants []perm
 			viewSets[grant.Resource] = struct{}{}
 		case permission.ScopeView:
 			views[grant.Resource] = struct{}{}
-		case permission.ScopeWorkflowSet:
-			workflowSets[grant.Resource] = struct{}{}
-		case permission.ScopeWorkflow:
-			id, err := parseGrantResourceID(grant.Resource)
-			if err != nil {
-				return err
-			}
-			workflow, err := server.system.Workflow(ctx, id)
-			if err != nil {
-				return err
-			}
-			workflows[workflow.DatabaseName] = struct{}{}
 		case permission.ScopeAppSet:
 			appSets[grant.Resource] = struct{}{}
 		case permission.ScopeApp:
@@ -2784,9 +2587,6 @@ func (server *Server) validateExclusiveGrants(ctx context.Context, grants []perm
 	}
 	if overlapKey(viewSets, views) != "" {
 		return errors.New("view set and view grants are mutually exclusive")
-	}
-	if overlapKey(workflowSets, workflows) != "" {
-		return errors.New("workflow set and workflow grants are mutually exclusive")
 	}
 	if overlapKey(appSets, apps) != "" {
 		return errors.New("app set and app grants are mutually exclusive")
@@ -2850,10 +2650,18 @@ func (server *Server) validateGrantResource(ctx context.Context, dbName string, 
 			return fmt.Errorf("field grant level must be a bitmask between 0 and %d, got %d", permission.FieldAll, grant.Level)
 		}
 	case permission.ScopeView, permission.ScopeViewSet:
-		// Views are the row-level boundary and only the owner defines
-		// them; a view grant can only confer read.
+		// Views are the row-level boundary and only admins define them; a
+		// view grant can only confer read.
 		if grant.Level < permission.None || grant.Level > permission.Read {
 			return fmt.Errorf("view grants are read-only, got level %d", grant.Level)
+		}
+	case permission.ScopeWorkflow:
+		if grant.Level < permission.None || grant.Level > permission.Run {
+			return fmt.Errorf("workflow grants only have level %d (run), got level %d", permission.Run, grant.Level)
+		}
+	case permission.ScopeApp, permission.ScopeAppSet:
+		if grant.Level < permission.None || grant.Level > permission.Open {
+			return fmt.Errorf("app grants only have level %d (open), got level %d", permission.Open, grant.Level)
 		}
 	default:
 		if grant.Level < permission.None || grant.Level > permission.Write {
@@ -2946,43 +2754,6 @@ func (server *Server) validateGrantResource(ctx context.Context, dbName string, 
 		if _, ok := server.catalogSnapshot().Table(dbName, tableName); !ok {
 			return fmt.Errorf("table %s.%s not found", dbName, tableName)
 		}
-	case permission.ScopeFieldAdd:
-		if grant.Field != "" {
-			return errors.New("field add grant cannot include field")
-		}
-		_, tableName, ok := strings.Cut(grant.Resource, ".")
-		if !ok || tableName == "" {
-			return fmt.Errorf("grant resource %q must be db.table", grant.Resource)
-		}
-		if _, ok := server.catalogSnapshot().Table(dbName, tableName); !ok {
-			return fmt.Errorf("table %s.%s not found", dbName, tableName)
-		}
-	case permission.ScopeFieldModify:
-		_, tableName, ok := strings.Cut(grant.Resource, ".")
-		if !ok || tableName == "" {
-			return fmt.Errorf("grant resource %q must be db.table", grant.Resource)
-		}
-		tableMeta, ok := server.catalogSnapshot().Table(dbName, tableName)
-		if !ok {
-			return fmt.Errorf("table %s.%s not found", dbName, tableName)
-		}
-		if grant.Field == "" {
-			return errors.New("field modify grant requires field")
-		}
-		field, ok := tableMeta.Field(grant.Field)
-		if !ok || field.Deleted || strings.HasPrefix(field.Name, "ct_") {
-			return fmt.Errorf("field %s.%s.%s not found", dbName, tableName, grant.Field)
-		}
-		if field.Type == "formula" {
-			return errors.New("formula fields are managed by the database owner only")
-		}
-	case permission.ScopeWorkflowSet:
-		if grant.Resource != dbName {
-			return fmt.Errorf("workflow set grant resource must be %q", dbName)
-		}
-		if grant.Field != "" {
-			return errors.New("workflow set grant cannot include field")
-		}
 	case permission.ScopeAppSet:
 		if grant.Resource != dbName {
 			return fmt.Errorf("app set grant resource must be %q", dbName)
@@ -3028,10 +2799,6 @@ func appByGrantResource(ctx context.Context, system *systemdb.DB, resource strin
 	return system.App(ctx, id)
 }
 
-func (server *Server) requireResourceWrite(w http.ResponseWriter, r *http.Request, actorID string, scope permission.Scope, id int64) bool {
-	return server.requireResourceLevel(w, r, actorID, scope, id, permission.Write)
-}
-
 func (server *Server) requireExistingWorkflowDatabase(w http.ResponseWriter, r *http.Request, id int64, dbName string) bool {
 	if dbName == "" {
 		writeError(w, http.StatusBadRequest, errors.New("database_name is required"))
@@ -3049,118 +2816,88 @@ func (server *Server) requireExistingWorkflowDatabase(w http.ResponseWriter, r *
 	return true
 }
 
-func (server *Server) requireResourceLevel(w http.ResponseWriter, r *http.Request, actorID string, scope permission.Scope, id int64, level permission.Level) bool {
-	action := accessReadWorkflow
-	switch scope {
-	case permission.ScopeWorkflow:
-		if level >= permission.Write {
-			action = accessWriteWorkflow
-		}
-	case permission.ScopeApp:
-		action = accessReadApp
-		if level >= permission.Write {
-			action = accessWriteApp
-		}
-	default:
-		writeError(w, http.StatusBadRequest, fmt.Errorf("unsupported resource scope %q", scope))
-		return false
-	}
-	_, ok := server.requireAuthorized(w, r, actorID, accessRequest{
-		Action:     action,
-		WorkflowID: id,
-		AppID:      id,
-	})
-	return ok
-}
-
-func (server *Server) filterReadableWorkflows(ctx context.Context, actorID string, workflows []systemdb.WorkflowDefinition) ([]systemdb.WorkflowDefinition, error) {
-	perms, err := server.system.EffectiveGrantsForSubject(ctx, actorID)
+// handleListWorkflows lists the workflows of a database: admins get every
+// definition; anyone else only the enabled workflows they may run, reduced
+// to id and name — scripts, secrets, variables and settings are admin-only.
+func (server *Server) handleListWorkflows(w http.ResponseWriter, r *http.Request, actorID, dbName string) {
+	workflows, err := server.system.Workflows(r.Context(), dbName)
 	if err != nil {
-		return nil, err
+		writeError(w, http.StatusInternalServerError, err)
+		return
 	}
-	filtered := make([]systemdb.WorkflowDefinition, 0, len(workflows))
-	for _, workflow := range workflows {
-		isOwner, err := server.system.IsDatabaseOwner(ctx, actorID, workflow.DatabaseName)
+	if server.isAdmin(r.Context(), actorID) {
+		workflows, err = server.workflowDefinitionsWithFileScripts(r.Context(), workflows)
 		if err != nil {
-			return nil, err
+			writeError(w, http.StatusInternalServerError, err)
+			return
 		}
-		if isOwner ||
-			perms.ResourceLevel(actorID, permission.ScopeWorkflowSet, workflow.DatabaseName) >= permission.Read ||
-			perms.CanReadResource(actorID, permission.ScopeWorkflow, resourceID(workflow.ID)) {
-			workflow.PermissionLevel = server.workflowPermissionLevel(ctx, perms, actorID, workflow)
-			filtered = append(filtered, workflow)
+		for index := range workflows {
+			workflows[index].PermissionLevel = resourcePermissionLevel(true)
 		}
+		writeJSON(w, http.StatusOK, workflowResponsesFromDefinitions(workflows))
+		return
 	}
-	return filtered, nil
+	perms, err := server.system.EffectiveGrantsForSubject(r.Context(), actorID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	runnable := make([]systemdb.WorkflowDefinition, 0, len(workflows))
+	for _, workflow := range workflows {
+		if !workflow.Enabled || !canRunWorkflow(perms, actorID, false, workflow.ID) {
+			continue
+		}
+		runnable = append(runnable, systemdb.WorkflowDefinition{
+			ID:              workflow.ID,
+			DatabaseName:    workflow.DatabaseName,
+			Name:            workflow.Name,
+			Enabled:         workflow.Enabled,
+			Secrets:         map[string]string{},
+			Variables:       map[string]string{},
+			Runners:         map[string]string{},
+			PermissionLevel: resourcePermissionLevel(false),
+			CreatedAt:       workflow.CreatedAt,
+			UpdatedAt:       workflow.UpdatedAt,
+		})
+	}
+	writeJSON(w, http.StatusOK, workflowResponsesFromDefinitions(runnable))
 }
 
-func (server *Server) filterReadableApps(ctx context.Context, actorID string, apps []systemdb.AppDefinition) ([]systemdb.AppDefinition, error) {
+// filterOpenableApps keeps the apps the actor may open and annotates them
+// with the actor's level.
+func (server *Server) filterOpenableApps(ctx context.Context, actorID string, apps []systemdb.AppDefinition) ([]systemdb.AppDefinition, error) {
 	perms, err := server.system.EffectiveGrantsForSubject(ctx, actorID)
 	if err != nil {
 		return nil, err
 	}
+	isAdmin := server.isAdmin(ctx, actorID)
 	filtered := make([]systemdb.AppDefinition, 0, len(apps))
 	for _, app := range apps {
-		isOwner, err := server.system.IsDatabaseOwner(ctx, actorID, app.DatabaseName)
-		if err != nil {
-			return nil, err
-		}
-		if isOwner ||
-			perms.ResourceLevel(actorID, permission.ScopeAppSet, app.DatabaseName) >= permission.Read ||
-			perms.CanReadResource(actorID, permission.ScopeApp, resourceID(app.ID)) {
-			app.PermissionLevel = server.appPermissionLevel(ctx, perms, actorID, app)
+		if canOpenApp(perms, actorID, isAdmin, app) {
+			app.PermissionLevel = resourcePermissionLevel(isAdmin)
 			filtered = append(filtered, app)
 		}
 	}
 	return filtered, nil
 }
 
-func (server *Server) workflowWithPermissionLevel(ctx context.Context, actorID string, workflow systemdb.WorkflowDefinition) systemdb.WorkflowDefinition {
-	perms, err := server.system.EffectiveGrantsForSubject(ctx, actorID)
-	if err != nil {
-		return workflow
-	}
-	workflow.PermissionLevel = server.workflowPermissionLevel(ctx, perms, actorID, workflow)
-	return workflow
-}
-
-func (server *Server) workflowPermissionLevel(ctx context.Context, perms permission.Set, actorID string, workflow systemdb.WorkflowDefinition) permission.Level {
-	if server.isDatabaseOwner(ctx, actorID, workflow.DatabaseName) {
-		return permission.Write
-	}
-	return maxPermissionLevel(
-		perms.ResourceLevel(actorID, permission.ScopeWorkflowSet, workflow.DatabaseName),
-		perms.ResourceLevel(actorID, permission.ScopeWorkflow, resourceID(workflow.ID)),
-	)
-}
-
-func (server *Server) appPermissionLevel(ctx context.Context, perms permission.Set, actorID string, app systemdb.AppDefinition) permission.Level {
-	if server.isDatabaseOwner(ctx, actorID, app.DatabaseName) {
-		return permission.Write
-	}
-	return maxPermissionLevel(
-		perms.ResourceLevel(actorID, permission.ScopeAppSet, app.DatabaseName),
-		perms.ResourceLevel(actorID, permission.ScopeApp, resourceID(app.ID)),
-	)
-}
-
-func readableHistoryValues(values map[string]any, perms permission.Set, actorID string, isDatabaseOwner bool, resource string) map[string]any {
+func readableHistoryValues(values map[string]any, perms permission.Set, actorID string, isAdmin bool, resource string) map[string]any {
 	readable := make(map[string]any, len(values))
 	for fieldName, value := range values {
-		if isDatabaseOwner || perms.CanReadField(actorID, resource, fieldName) {
+		if isAdmin || perms.CanReadField(actorID, resource, fieldName) {
 			readable[fieldName] = value
 		}
 	}
 	return readable
 }
 
-func readableHistoryDiff(diff history.RowDiff, perms permission.Set, actorID string, isDatabaseOwner bool, resource string) history.RowDiff {
+func readableHistoryDiff(diff history.RowDiff, perms permission.Set, actorID string, isAdmin bool, resource string) history.RowDiff {
 	if diff == nil {
 		return nil
 	}
 	readable := make(history.RowDiff, len(diff))
 	for fieldName, fieldDiff := range diff {
-		if isDatabaseOwner || perms.CanReadField(actorID, resource, fieldName) {
+		if isAdmin || perms.CanReadField(actorID, resource, fieldName) {
 			readable[fieldName] = fieldDiff
 		}
 	}
@@ -3245,12 +2982,12 @@ func workflowResponsesFromDefinitions(workflows []systemdb.WorkflowDefinition) [
 
 func workflowResponseFromDefinition(workflow systemdb.WorkflowDefinition) workflowDefinitionResponse {
 	return workflowDefinitionResponse{
-		ID:              workflow.ID,
-		DatabaseName:    workflow.DatabaseName,
-		Name:            workflow.Name,
-		Script:          workflow.Script,
-		Enabled:         workflow.Enabled,
-		CreatorID:       workflow.CreatorID,
+		ID:                   workflow.ID,
+		DatabaseName:         workflow.DatabaseName,
+		Name:                 workflow.Name,
+		Script:               workflow.Script,
+		Enabled:              workflow.Enabled,
+		CreatorID:            workflow.CreatorID,
 		Secrets:              secretLengths(workflow.Secrets),
 		Variables:            workflow.Variables,
 		Runners:              workflow.Runners,
@@ -3319,19 +3056,6 @@ func secretLengths(secrets map[string]string) map[string]int {
 	return lengths
 }
 
-func (server *Server) grantResourceOwner(w http.ResponseWriter, r *http.Request, actorID string, scope permission.Scope, id int64) bool {
-	if err := server.system.SaveGrant(r.Context(), permission.Grant{
-		SubjectID: actorID,
-		Scope:     scope,
-		Resource:  resourceID(id),
-		Level:     permission.Write,
-	}); err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return false
-	}
-	return true
-}
-
 func resourceID(id int64) string {
 	return strconv.FormatInt(id, 10)
 }
@@ -3353,7 +3077,7 @@ func (server *Server) currentUserID(r *http.Request) (string, bool, error) {
 }
 
 func (server *Server) currentUser(r *http.Request) (auth.User, bool, error) {
-	token, err := requestSessionToken(r)
+	token, err := server.requestSessionToken(r)
 	if err != nil {
 		if errors.Is(err, http.ErrNoCookie) {
 			return auth.User{}, false, nil
@@ -3367,23 +3091,39 @@ func (server *Server) currentUser(r *http.Request) (auth.User, bool, error) {
 	return user, true, nil
 }
 
-func setSessionCookie(w http.ResponseWriter, session auth.Session) {
+// secureCookies reports whether the deployment is served over https, in
+// which case the session cookie is Secure and __Host- prefixed. Over plain
+// http (local development, e2e) browsers would refuse such a cookie.
+func (server *Server) secureCookies() bool {
+	return strings.HasPrefix(strings.ToLower(server.publicURL), "https://")
+}
+
+func (server *Server) sessionCookieName() string {
+	if server.secureCookies() {
+		return secureSessionCookieName
+	}
+	return sessionCookieName
+}
+
+func (server *Server) setSessionCookie(w http.ResponseWriter, session auth.Session) {
 	http.SetCookie(w, &http.Cookie{
-		Name:     sessionCookieName,
+		Name:     server.sessionCookieName(),
 		Value:    session.Token,
 		Path:     "/",
 		HttpOnly: true,
+		Secure:   server.secureCookies(),
 		SameSite: http.SameSiteLaxMode,
 		Expires:  session.ExpiresAt,
 	})
 }
 
-func clearSessionCookie(w http.ResponseWriter) {
+func (server *Server) clearSessionCookie(w http.ResponseWriter) {
 	http.SetCookie(w, &http.Cookie{
-		Name:     sessionCookieName,
+		Name:     server.sessionCookieName(),
 		Value:    "",
 		Path:     "/",
 		HttpOnly: true,
+		Secure:   server.secureCookies(),
 		SameSite: http.SameSiteLaxMode,
 		Expires:  time.Unix(0, 0).UTC(),
 		MaxAge:   -1,
@@ -3538,6 +3278,10 @@ func oidcClaims(ctx context.Context, provider *oidc.Provider, token *oauth2.Toke
 		return oidcEmailClaims{}, errors.New("oidc email is required")
 	}
 	return claims, nil
+}
+
+func (server *Server) currentUserResponse(user auth.User) currentUserResponse {
+	return currentUserResponse{userResponse: toUserResponse(user), IsAdmin: server.auth.IsAdmin(user.Email)}
 }
 
 func toUserResponse(user auth.User) userResponse {
@@ -3735,7 +3479,7 @@ func (server *Server) canViewFile(ctx context.Context, actorID string, record sy
 	if !server.canAccessTableFiles(ctx, actorID, record.DatabaseName, record.TableName) {
 		return false
 	}
-	if server.isDatabaseOwner(ctx, actorID, record.DatabaseName) {
+	if server.isAdmin(ctx, actorID) {
 		return true
 	}
 	perms, err := server.system.EffectiveGrantsForSubject(ctx, actorID)
@@ -3747,13 +3491,13 @@ func (server *Server) canViewFile(ctx context.Context, actorID string, record sy
 }
 
 // canAccessTableFiles reports whether the actor may work with files of the
-// given table: the database owner always may, everyone else needs a
-// file-scope grant on the table.
+// given table: admins always may, everyone else needs a file-scope grant
+// on the table.
 func (server *Server) canAccessTableFiles(ctx context.Context, actorID string, dbName string, tableName string) bool {
 	if dbName == "" {
 		return false
 	}
-	if server.isDatabaseOwner(ctx, actorID, dbName) {
+	if server.isAdmin(ctx, actorID) {
 		return true
 	}
 	perms, err := server.system.EffectiveGrantsForSubject(ctx, actorID)

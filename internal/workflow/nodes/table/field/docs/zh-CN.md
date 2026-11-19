@@ -1,6 +1,8 @@
 ## 创建表字段
 
-通过后端 metadata API 给表补齐缺失字段。已存在字段会返回到 `existing`，因此可以在每批同步前安全调用。
+确认表上存在这些字段。已存在字段会返回到 `existing`，因此可以在每批同步前安全调用。
+
+表结构只有管理员能改，而 workflow 永远不以管理员身份运行：字段缺失或已被软删除时，运行会以 `permission denied: adding fields requires an admin` 失败。请先由管理员添加字段，之后这个节点只做确认。workflow 还需要对该表有授权。
 
 ### 输入
 

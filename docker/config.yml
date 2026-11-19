@@ -25,6 +25,11 @@ backup:
     secret_access_key: "replace-me"
     force_path_style: true
 auth:
+  # Global administrators, matched by email (case-insensitive). Only
+  # admins create databases and change schema, views, permissions,
+  # workflows, and apps. Configure at least one before starting.
+  admins:
+    - "admin@example.com"
   password:
     enabled: true
   oidc:

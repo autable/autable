@@ -8,6 +8,8 @@ import { appBundle } from "./appBundle";
 type User = { id: string; email: string };
 
 let sequence = 0;
+// The only global admin in the e2e config (see start-backend.mjs).
+const adminEmail = "e2e-admin@example.com";
 
 test.describe.configure({ mode: "serial" });
 
@@ -17,6 +19,18 @@ async function register(page: Page): Promise<User> {
   const response = await page.request.post("/api/auth/register", {
     data: { email, password: "correct horse", display_name: email }
   });
+  expect(response.ok(), await response.text()).toBe(true);
+  return (await response.json()) as User;
+}
+
+// signInAdmin signs in as the shared admin: the backend keeps its data for
+// the whole run, so the first call registers the account and later ones log in.
+async function signInAdmin(page: Page): Promise<User> {
+  const credentials = { email: adminEmail, password: "correct horse" };
+  let response = await page.request.post("/api/auth/register", { data: { ...credentials, display_name: adminEmail } });
+  if (response.status() === 409) {
+    response = await page.request.post("/api/auth/login", { data: credentials });
+  }
   expect(response.ok(), await response.text()).toBe(true);
   return (await response.json()) as User;
 }
@@ -69,7 +83,7 @@ async function expectAppPage(page: Page, url: string, heading: string) {
 
 test("lists, publishes, opens and rolls back an uploaded app", async ({ page }) => {
   await page.goto("/");
-  await register(page);
+  await signInAdmin(page);
   const database = await createDatabase(page);
 
   await page.goto(`/databases/${database}/apps`);
@@ -132,18 +146,18 @@ test("lists, publishes, opens and rolls back an uploaded app", async ({ page }) 
   await expect(versions.getByRole("row", { name: "v2" }).getByRole("button", { name: "Publish version 2" })).toBeVisible();
   await expectAppPage(page, `/apps/${database}/orders/`, "Orders v1");
 
-  // The database owner can delete the app.
+  // An admin can delete the app.
   await page.getByRole("button", { name: "Delete app" }).click();
   await page.getByRole("dialog", { name: "Delete app" }).getByRole("button", { name: "Delete" }).click();
   await expect(page).toHaveURL(`/databases/${database}/apps`);
   await expect(page.getByText("No apps yet")).toBeVisible();
 });
 
-test("app readers can open an app but not manage it", async ({ page }) => {
+test("app openers can open an app but not manage it", async ({ page }) => {
   await page.goto("/");
   const reader = await register(page);
   await logout(page);
-  await register(page);
+  await signInAdmin(page);
   const database = await createDatabase(page);
   const uploaded = await upload(page, database, "stock-check", "Stock check", "Stock check v1", "?publish=1");
   await upload(page, database, "stock-check", "Stock check", "Stock check v2");
@@ -158,16 +172,14 @@ test("app readers can open an app but not manage it", async ({ page }) => {
   await logout(page);
   await login(page, reader.email);
   await page.goto(`/databases/${database}/apps/stock-check`);
-  const versions = page.getByRole("table", { name: "Versions" });
-  await expect(versions.getByRole("row", { name: "v1" }).getByText("Published", { exact: true })).toBeVisible();
   await expect(page.getByRole("link", { name: "Open Stock check" })).toBeVisible();
-  await expect(versions.getByRole("button")).toHaveCount(0);
-  await expect(versions.getByRole("link")).toHaveCount(0);
+  // Versions, previews, sources, publishing and deletion are admin-only.
+  await expect(page.getByRole("table", { name: "Versions" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Delete app" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Permission", exact: true })).toHaveCount(0);
 
   await expectAppPage(page, `/apps/${database}/stock-check/`, "Stock check v1");
-  // Previews of unpublished versions are for writers only.
+  // Previews of unpublished versions are for admins only.
   const preview = await page.request.get(`/apps/${database}/stock-check/@2/`);
   expect(preview.status()).toBe(403);
   const publish = await page.request.post(`/api/databases/${database}/apps/stock-check/publish`, { data: { version: 2 } });
@@ -176,7 +188,7 @@ test("app readers can open an app but not manage it", async ({ page }) => {
 
 test("signed-out visitors are sent to login before an app opens", async ({ page }) => {
   await page.goto("/");
-  const owner = await register(page);
+  const admin = await signInAdmin(page);
   const database = await createDatabase(page);
   await upload(page, database, "orders", "Orders", "Orders after login", "?publish=1");
   await logout(page);
@@ -184,7 +196,7 @@ test("signed-out visitors are sent to login before an app opens", async ({ page 
   await page.goto(`/apps/${database}/orders/`);
   await expect(page).toHaveURL(new RegExp(`/login\\?redirect=${encodeURIComponent(`/apps/${database}/orders/`)}`));
   const dialog = page.getByRole("dialog");
-  await dialog.getByLabel("Email").fill(owner.email);
+  await dialog.getByLabel("Email").fill(admin.email);
   await dialog.getByLabel("Password").fill("correct horse");
   await dialog.getByRole("button", { name: "Login" }).click();
   await expect(page.getByRole("heading", { name: "Orders after login" })).toBeVisible();

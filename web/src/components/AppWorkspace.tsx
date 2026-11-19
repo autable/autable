@@ -39,10 +39,12 @@ type AppWorkspaceProps = {
   apps: AppDefinition[];
   appsReady: boolean;
   busy: boolean;
-  canDelete: boolean;
   currentUser: AuthUser | null;
   databaseName: string;
   detail: AppDetail | null;
+  // Publishing, rollback, previews, sources and deletion are admin-only;
+  // everyone else can only open the apps they are granted.
+  isAdmin: boolean;
   onDelete: () => void;
   onPublish: (version: number) => void;
   onSelectApp: (name: string) => void;
@@ -54,10 +56,10 @@ export function AppWorkspace(props: AppWorkspaceProps) {
     return props.detail ? (
       <AppDetailView
         busy={props.busy}
-        canDelete={props.canDelete}
         currentUser={props.currentUser}
         databaseName={props.databaseName}
         detail={props.detail}
+        isAdmin={props.isAdmin}
         onDelete={props.onDelete}
         onPublish={props.onPublish}
       />
@@ -68,7 +70,14 @@ export function AppWorkspace(props: AppWorkspaceProps) {
   if (!props.appsReady) {
     return <AppLoading />;
   }
-  return <AppListView apps={props.apps} databaseName={props.databaseName} onSelectApp={props.onSelectApp} />;
+  return (
+    <AppListView
+      apps={props.apps}
+      databaseName={props.databaseName}
+      isAdmin={props.isAdmin}
+      onSelectApp={props.onSelectApp}
+    />
+  );
 }
 
 function AppLoading() {
@@ -83,10 +92,12 @@ function AppLoading() {
 function AppListView({
   apps,
   databaseName,
+  isAdmin,
   onSelectApp
 }: {
   apps: AppDefinition[];
   databaseName: string;
+  isAdmin: boolean;
   onSelectApp: (name: string) => void;
 }) {
   const { t } = useTranslation();
@@ -103,7 +114,7 @@ function AppListView({
           <Text size={200} align="center">
             {t("app.emptyDescription")}
           </Text>
-          <AppCommandHelp databaseName={databaseName} />
+          {isAdmin && <AppCommandHelp databaseName={databaseName} />}
         </div>
       </div>
     );
@@ -150,10 +161,12 @@ function AppListView({
           </TableBody>
         </Table>
       </div>
-      <div className="app-card app-help-card">
-        <Text weight="semibold">{t("app.howToTitle")}</Text>
-        <AppCommandHelp databaseName={databaseName} />
-      </div>
+      {isAdmin && (
+        <div className="app-card app-help-card">
+          <Text weight="semibold">{t("app.howToTitle")}</Text>
+          <AppCommandHelp databaseName={databaseName} />
+        </div>
+      )}
     </div>
   );
 }
@@ -214,25 +227,24 @@ type PendingAction = { kind: "rollback"; version: number } | { kind: "delete" } 
 
 function AppDetailView({
   busy,
-  canDelete,
   currentUser,
   databaseName,
   detail,
+  isAdmin,
   onDelete,
   onPublish
 }: {
   busy: boolean;
-  canDelete: boolean;
   currentUser: AuthUser | null;
   databaseName: string;
   detail: AppDetail;
+  isAdmin: boolean;
   onDelete: () => void;
   onPublish: (version: number) => void;
 }) {
   const { t } = useTranslation();
   const [pending, setPending] = useState<PendingAction>(null);
   const { app, sdk } = detail;
-  const canWrite = (app.permission_level ?? 0) >= 2;
   const versions = [...detail.versions].sort((left, right) => right.version - left.version);
 
   function requestPublish(version: AppVersion) {
@@ -261,7 +273,7 @@ function AppDetailView({
         </div>
         <div className="app-header-actions">
           <PublishedBadge version={app.published_version} />
-          {canDelete && (
+          {isAdmin && (
             <Button icon={<DeleteRegular />} disabled={busy} onClick={() => setPending({ kind: "delete" })}>
               {t("app.deleteApp")}
             </Button>
@@ -269,6 +281,7 @@ function AppDetailView({
           <OpenAppButton app={app} primary />
         </div>
       </div>
+      {isAdmin && (
       <div className="app-card app-versions-card">
         <div className="app-card-heading">
           <Text weight="semibold">{t("app.versions")}</Text>
@@ -286,7 +299,7 @@ function AppDetailView({
                 <TableHeaderCell>{t("app.uploadedBy")}</TableHeaderCell>
                 <TableHeaderCell>{t("app.uploadedAt")}</TableHeaderCell>
                 <TableHeaderCell>{t("app.size")}</TableHeaderCell>
-                {canWrite && <TableHeaderCell className="app-actions-cell">{t("app.actions")}</TableHeaderCell>}
+                {isAdmin && <TableHeaderCell className="app-actions-cell">{t("app.actions")}</TableHeaderCell>}
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -327,7 +340,7 @@ function AppDetailView({
                     </TableCell>
                     <TableCell className="app-nowrap">{formatTime(version.created_at)}</TableCell>
                     <TableCell className="app-nowrap">{formatSize(version.size)}</TableCell>
-                    {canWrite && (
+                    {isAdmin && (
                       <TableCell className="app-actions-cell">
                         <span className="app-row-actions">
                           <Tooltip content={t("app.previewVersion", { version: version.version })} relationship="label">
@@ -373,6 +386,7 @@ function AppDetailView({
           </Table>
         )}
       </div>
+      )}
       <Dialog open={pending !== null} onOpenChange={(_, data) => !data.open && setPending(null)}>
         <DialogSurface aria-label={pending?.kind === "delete" ? t("app.deleteTitle") : t("app.rollbackTitle")}>
           <DialogBody>

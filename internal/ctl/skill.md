@@ -17,6 +17,12 @@ you are talking to:
 - Change the live server only through `autablectl`. The git repository autable
   pushes metadata and workflow scripts to is a one-way backup; editing it
   changes nothing.
+- autable is admin-gated. Only admins (emails listed under `auth.admins` in
+  the server config) change code or structure: databases, tables, fields,
+  views, permissions, workflows, and apps. Everyone else reads and writes data
+  within their grants, opens apps, and runs workflows. `autablectl whoami`
+  shows whether you are signed in as an admin; if you are not, a 403 on these
+  commands is final — hand the change to an admin instead of working around it.
 - Discover before you write: `autablectl meta [DB [TABLE]]` for tables, fields
   (types, enum `options`, `deleted`), and views; `autablectl nodes` for every
   workflow node with its inputs, outputs, instance variables, secrets, and

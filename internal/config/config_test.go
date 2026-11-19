@@ -19,6 +19,8 @@ repository:
   remote_url: https://example.com/autable/repository.git
   remote_branch: main
 auth:
+  admins:
+    - Admin@Example.com
   password:
     enabled: true
   oidc:
@@ -55,6 +57,44 @@ debug:
 	}
 	if cfg.Debug.PprofAddress != "127.0.0.1:6060" {
 		t.Fatalf("unexpected debug config: %#v", cfg.Debug)
+	}
+	if len(cfg.Auth.Admins) != 1 || cfg.Auth.Admins[0] != "Admin@Example.com" {
+		t.Fatalf("unexpected admins: %#v", cfg.Auth.Admins)
+	}
+}
+
+func TestAuthConfigIsAdminMatchesEmailCaseInsensitively(t *testing.T) {
+	auth := AuthConfig{Admins: []string{" Admin@Example.com "}}
+	for _, email := range []string{"admin@example.com", "ADMIN@EXAMPLE.COM", " admin@example.com"} {
+		if !auth.IsAdmin(email) {
+			t.Fatalf("expected %q to be an admin", email)
+		}
+	}
+	for _, email := range []string{"", "other@example.com", "workflow:1", "admin@example.co"} {
+		if auth.IsAdmin(email) {
+			t.Fatalf("expected %q not to be an admin", email)
+		}
+	}
+	if (AuthConfig{}).IsAdmin("admin@example.com") {
+		t.Fatal("expected no admins without configuration")
+	}
+}
+
+func TestValidateRejectsAdminsThatAreNotEmails(t *testing.T) {
+	cfg := Config{
+		Data:       DataConfig{Path: "./data"},
+		Repository: RepositoryConfig{Path: "./repo", RemoteURL: "https://example.com/repo.git", RemoteBranch: "main"},
+		Auth: AuthConfig{
+			Admins:   []string{"admin@example.com", " "},
+			Password: PasswordAuthConfig{Enabled: true},
+		},
+	}
+	if err := cfg.Validate(); err == nil || err.Error() != `auth.admins[1] must be an email address, got " "` {
+		t.Fatalf("expected admin validation error, got %v", err)
+	}
+	cfg.Auth.Admins = []string{"admin@example.com"}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("unexpected validation error: %v", err)
 	}
 }
 

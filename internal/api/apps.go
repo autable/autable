@@ -21,6 +21,7 @@ import (
 	"autable/internal/appsdk"
 	"autable/internal/permission"
 	"autable/internal/systemdb"
+	"autable/internal/table"
 
 	"gorm.io/gorm"
 )
@@ -90,7 +91,7 @@ func (server *Server) handleListApps(w http.ResponseWriter, r *http.Request, act
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	filtered, err := server.filterReadableApps(r.Context(), actorID, apps)
+	filtered, err := server.filterOpenableApps(r.Context(), actorID, apps)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -102,9 +103,15 @@ func (server *Server) handleListApps(w http.ResponseWriter, r *http.Request, act
 	writeJSON(w, http.StatusOK, responses)
 }
 
-// appFromPath loads the app named in the URL and checks the actor holds
-// level on it. It writes the error response itself.
-func (server *Server) appFromPath(w http.ResponseWriter, r *http.Request, actorID string, level permission.Level) (systemdb.AppDefinition, bool) {
+// appFromPath loads the app named in the URL for an actor who may open it
+// (adminOnly false) or manage it (adminOnly true). It writes the error
+// response itself.
+func (server *Server) appFromPath(w http.ResponseWriter, r *http.Request, actorID string, adminOnly bool) (systemdb.AppDefinition, bool) {
+	isAdmin := server.isAdmin(r.Context(), actorID)
+	if adminOnly && !isAdmin {
+		writeError(w, http.StatusForbidden, errAdminRequired)
+		return systemdb.AppDefinition{}, false
+	}
 	app, err := server.system.AppByName(r.Context(), r.PathValue("database"), r.PathValue("name"))
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		writeError(w, http.StatusNotFound, errors.New("app not found"))
@@ -114,15 +121,18 @@ func (server *Server) appFromPath(w http.ResponseWriter, r *http.Request, actorI
 		writeError(w, http.StatusInternalServerError, err)
 		return systemdb.AppDefinition{}, false
 	}
-	if !server.requireResourceLevel(w, r, actorID, permission.ScopeApp, app.ID, level) {
-		return systemdb.AppDefinition{}, false
+	if !isAdmin {
+		perms, err := server.system.EffectiveGrantsForSubject(r.Context(), actorID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return systemdb.AppDefinition{}, false
+		}
+		if !canOpenApp(perms, actorID, false, app) {
+			writeError(w, http.StatusForbidden, table.ErrPermissionDenied)
+			return systemdb.AppDefinition{}, false
+		}
 	}
-	perms, err := server.system.EffectiveGrantsForSubject(r.Context(), actorID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return systemdb.AppDefinition{}, false
-	}
-	app.PermissionLevel = server.appPermissionLevel(r.Context(), perms, actorID, app)
+	app.PermissionLevel = resourcePermissionLevel(isAdmin)
 	return app, true
 }
 
@@ -131,14 +141,20 @@ func (server *Server) handleGetApp(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	app, ok := server.appFromPath(w, r, actorID, permission.Read)
+	app, ok := server.appFromPath(w, r, actorID, false)
 	if !ok {
 		return
 	}
-	versions, err := server.system.AppVersions(r.Context(), app.ID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
+	// Versions (messages, uploaders, preview links) are for admins; openers
+	// only need the app and its published URL.
+	versions := []systemdb.AppVersion{}
+	if app.PermissionLevel >= permission.Write {
+		var err error
+		versions, err = server.system.AppVersions(r.Context(), app.ID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
 	}
 	writeJSON(w, http.StatusOK, appDetailResponse{
 		App:      appResponse{AppDefinition: app, URL: appURL(app)},
@@ -163,6 +179,9 @@ func appVersionResponses(app systemdb.AppDefinition, versions []systemdb.AppVers
 func (server *Server) handleUploadAppVersion(w http.ResponseWriter, r *http.Request) {
 	actorID, ok := server.requireUserID(w, r)
 	if !ok {
+		return
+	}
+	if !server.requireAdmin(w, r, actorID) {
 		return
 	}
 	dbName, name := r.PathValue("database"), r.PathValue("name")
@@ -202,9 +221,6 @@ func (server *Server) handleUploadAppVersion(w http.ResponseWriter, r *http.Requ
 			writeError(w, http.StatusNotFound, fmt.Errorf("database %q not found", dbName))
 			return
 		}
-		if !server.requireDatabaseOrSetWrite(w, r, actorID, dbName, permission.ScopeAppSet) {
-			return
-		}
 		app, err = server.system.CreateApp(r.Context(), systemdb.AppDefinition{DatabaseName: dbName, Name: name, Title: bundle.Manifest.Title, CreatorID: actorID})
 		if err != nil {
 			// A concurrent first upload may have created it; let the
@@ -212,17 +228,10 @@ func (server *Server) handleUploadAppVersion(w http.ResponseWriter, r *http.Requ
 			writeError(w, http.StatusConflict, fmt.Errorf("create app %s: %w", name, err))
 			return
 		}
-		if !server.grantResourceOwner(w, r, actorID, permission.ScopeApp, app.ID) {
-			return
-		}
 		created = true
 	case err != nil:
 		writeError(w, http.StatusInternalServerError, err)
 		return
-	default:
-		if !server.requireResourceWrite(w, r, actorID, permission.ScopeApp, app.ID) {
-			return
-		}
 	}
 	publish := r.URL.Query().Get("publish") == "1" || r.URL.Query().Get("publish") == "true"
 	app, version, err := server.system.AddAppVersion(r.Context(), app.ID, bundle.Manifest.Title, systemdb.AppVersion{
@@ -238,12 +247,7 @@ func (server *Server) handleUploadAppVersion(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	perms, err := server.system.EffectiveGrantsForSubject(r.Context(), actorID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	app.PermissionLevel = server.appPermissionLevel(r.Context(), perms, actorID, app)
+	app.PermissionLevel = resourcePermissionLevel(true)
 	status := http.StatusOK
 	if created {
 		status = http.StatusCreated
@@ -270,7 +274,7 @@ func (server *Server) handlePublishApp(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	app, ok := server.appFromPath(w, r, actorID, permission.Write)
+	app, ok := server.appFromPath(w, r, actorID, true)
 	if !ok {
 		return
 	}
@@ -308,7 +312,7 @@ func (server *Server) handleAppSource(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	app, ok := server.appFromPath(w, r, actorID, permission.Write)
+	app, ok := server.appFromPath(w, r, actorID, true)
 	if !ok {
 		return
 	}
@@ -341,6 +345,9 @@ func (server *Server) handleDeleteApp(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if !server.requireAdmin(w, r, actorID) {
+		return
+	}
 	app, err := server.system.AppByName(r.Context(), r.PathValue("database"), r.PathValue("name"))
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		writeError(w, http.StatusNotFound, errors.New("app not found"))
@@ -348,9 +355,6 @@ func (server *Server) handleDeleteApp(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	if _, ok := server.requireAuthorized(w, r, actorID, accessRequest{Action: accessDeleteApp, AppID: app.ID}); !ok {
 		return
 	}
 	if err := server.system.DeleteApp(r.Context(), app.ID); err != nil {
@@ -410,7 +414,9 @@ func (server *Server) handleServeApp(w http.ResponseWriter, r *http.Request) {
 	rest := r.PathValue("rest")
 	version := app.PublishedVersion
 	base := appURL(app)
-	level := permission.Read
+	// The published version is for everyone who may open the app; any
+	// numbered version (preview before publishing) is for admins.
+	adminOnly := false
 	if strings.HasPrefix(rest, "@") {
 		segment, remainder, _ := strings.Cut(rest, "/")
 		parsed, err := strconv.ParseInt(strings.TrimPrefix(segment, "@"), 10, 64)
@@ -422,7 +428,7 @@ func (server *Server) handleServeApp(w http.ResponseWriter, r *http.Request) {
 			redirectToTrailingSlash(w, r)
 			return
 		}
-		version, rest, level = parsed, remainder, permission.Write
+		version, rest, adminOnly = parsed, remainder, true
 		base = appPreviewURL(app, version)
 	}
 	perms, err := server.system.EffectiveGrantsForSubject(r.Context(), actorID)
@@ -430,8 +436,13 @@ func (server *Server) handleServeApp(w http.ResponseWriter, r *http.Request) {
 		writeAppPage(w, http.StatusInternalServerError, "Error", err.Error())
 		return
 	}
-	if server.appPermissionLevel(r.Context(), perms, actorID, app) < level {
-		writeAppPage(w, http.StatusForbidden, "No access", "You do not have permission to open this app. Ask its owner for access.")
+	isAdmin := server.isAdmin(r.Context(), actorID)
+	if adminOnly && !isAdmin {
+		writeAppPage(w, http.StatusForbidden, "No access", "Only admins can preview app versions.")
+		return
+	}
+	if !canOpenApp(perms, actorID, isAdmin, app) {
+		writeAppPage(w, http.StatusForbidden, "No access", "You do not have permission to open this app. Ask an admin for access.")
 		return
 	}
 	if version == 0 {

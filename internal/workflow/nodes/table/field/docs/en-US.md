@@ -1,6 +1,8 @@
 ## Create table fields
 
-Adds missing fields to a table through the server metadata API. Existing fields are returned as `existing`, so this node is safe to call before every sync batch.
+Ensures fields exist on a table. Existing fields are returned as `existing`, so this node is safe to call before every sync batch.
+
+Schema changes are admin-only and a workflow never runs as an admin: when a field is missing or soft-deleted, the run fails with `permission denied: adding fields requires an admin`. Have an admin add the fields first; afterwards the call only confirms them. The workflow also needs a grant on the table.
 
 ### Inputs
 

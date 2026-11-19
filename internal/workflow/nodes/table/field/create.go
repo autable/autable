@@ -19,7 +19,7 @@ func (node CreateNode) Info() workflow.NodeInfo {
 	return workflow.NodeInfo{
 		Type:          "table.field.create",
 		DisplayName:   "Create table fields",
-		Description:   "Adds missing fields to a table through the server metadata API using the workflow creator permissions.",
+		Description:   "Ensures fields exist on a table. Creating or restoring fields is admin-only, so for a workflow it confirms fields an admin has added.",
 		Documentation: Documentation(),
 		Inputs: []workflow.Port{
 			{Name: "database", Type: "string", Description: "Optional database name. Defaults to the workflow database."},

@@ -15,7 +15,7 @@ import { useTranslation } from "react-i18next";
 import { fetchRunners, resetRunnerToken, type RunnersResponse } from "../api";
 
 // Runners are database-scoped: the panel manages the current database's
-// runner token and lists the runners connected with it.
+// runner token and lists the runners connected with it. Only admins reach it.
 export function RunnersPanel({ databaseName }: { databaseName: string }) {
   const { t, i18n } = useTranslation();
   const [open, setOpen] = useState(false);
@@ -41,8 +41,6 @@ export function RunnersPanel({ databaseName }: { databaseName: string }) {
       setError(resetError instanceof Error ? resetError.message : t("runners.resetFailed"));
     }
   }
-
-  const canManage = runnersInfo?.can_manage ?? false;
 
   return (
     <Dialog
@@ -73,7 +71,7 @@ export function RunnersPanel({ databaseName }: { databaseName: string }) {
               {error !== "" && <Text role="alert">{error}</Text>}
               {runnersInfo === null && error === "" ? (
                 // Until the first load answers, the panel knows neither the
-                // runners nor who may manage the token, so it claims nothing.
+                // runners nor the token state, so it claims nothing.
                 <Text size={200}>{t("runners.loading")}</Text>
               ) : (
                 <>
@@ -97,17 +95,13 @@ export function RunnersPanel({ databaseName }: { databaseName: string }) {
                     </ul>
                   )}
                   <Text weight="semibold">{t("runners.token")}</Text>
-                  {canManage ? (
-                    <Text size={200}>
-                      {runnersInfo?.token?.exists
-                        ? t("runners.tokenCreatedAt", {
-                            createdAt: new Date(runnersInfo.token.created_at ?? 0).toLocaleString(i18n.language)
-                          })
-                        : t("runners.tokenMissing")}
-                    </Text>
-                  ) : (
-                    <Text size={200}>{t("runners.ownerOnly")}</Text>
-                  )}
+                  <Text size={200}>
+                    {runnersInfo?.token?.exists
+                      ? t("runners.tokenCreatedAt", {
+                          createdAt: new Date(runnersInfo.token.created_at ?? 0).toLocaleString(i18n.language)
+                        })
+                      : t("runners.tokenMissing")}
+                  </Text>
                   {freshToken !== "" && (
                     <div className="runners-fresh-token">
                       <Text size={200}>{t("runners.tokenShownOnce")}</Text>
@@ -119,9 +113,9 @@ export function RunnersPanel({ databaseName }: { databaseName: string }) {
             </div>
           </DialogContent>
           <DialogActions>
-            {canManage && (
+            {runnersInfo !== null && (
               <Button appearance="primary" icon={<KeyResetRegular />} onClick={() => void reset()}>
-                {runnersInfo?.token?.exists ? t("runners.reset") : t("runners.generate")}
+                {runnersInfo.token?.exists ? t("runners.reset") : t("runners.generate")}
               </Button>
             )}
             <DialogTrigger disableButtonEnhancement>

@@ -264,7 +264,7 @@ func workflowRecordIDInput(input map[string]any) (int64, error) {
 	}
 }
 
-func (server *Server) upsertTableRow(ctx context.Context, catalog metadata.Catalog, perms permission.Set, actorID string, isDatabaseOwner bool, dbName string, tableName string, matchField string, values map[string]any) (table.Row, string, error) {
+func (server *Server) upsertTableRow(ctx context.Context, catalog metadata.Catalog, perms permission.Set, actorID string, isAdmin bool, dbName string, tableName string, matchField string, values map[string]any) (table.Row, string, error) {
 	tableMeta, ok := catalog.Table(dbName, tableName)
 	if !ok {
 		return table.Row{}, "", fmt.Errorf("table %s.%s not found", dbName, tableName)
@@ -280,7 +280,7 @@ func (server *Server) upsertTableRow(ctx context.Context, catalog metadata.Catal
 	// The match runs inside the actor's row set (the view boundary): rows
 	// the actor cannot see behave as absent, so upsert can neither update
 	// nor probe them.
-	rows, err := server.tables.RowsWithOptions(ctx, catalog, perms, actorID, isDatabaseOwner, dbName, tableName, table.RowListOptions{
+	rows, err := server.tables.RowsWithOptions(ctx, catalog, perms, actorID, isAdmin, dbName, tableName, table.RowListOptions{
 		Query: &metadata.ViewQuery{
 			Combinator: "and",
 			Rules:      []metadata.ViewQueryRule{{Field: matchField, Operator: "=", Value: matchValue}},
@@ -299,10 +299,10 @@ func (server *Server) upsertTableRow(ctx context.Context, catalog metadata.Catal
 		if !changed {
 			return row, "noop", nil
 		}
-		updated, err := server.tables.UpdateRow(ctx, catalog, perms, actorID, isDatabaseOwner, dbName, tableName, row.RecordID, values)
+		updated, err := server.tables.UpdateRow(ctx, catalog, perms, actorID, isAdmin, dbName, tableName, row.RecordID, values)
 		return updated, "update", err
 	}
-	created, err := server.tables.CreateRow(ctx, catalog, perms, actorID, isDatabaseOwner, dbName, tableName, values)
+	created, err := server.tables.CreateRow(ctx, catalog, perms, actorID, isAdmin, dbName, tableName, values)
 	return created, "create", err
 }
 

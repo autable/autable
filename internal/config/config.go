@@ -97,6 +97,10 @@ type FilesConfig struct {
 }
 
 type AuthConfig struct {
+	// Admins lists the email addresses of the global administrators, the
+	// only people who may change code or structure (databases, schema,
+	// views, permissions, workflows, apps). Matched case-insensitively.
+	Admins   []string           `yaml:"admins"`
 	Password PasswordAuthConfig `yaml:"password"`
 	OIDC     OIDCConfig         `yaml:"oidc"`
 }
@@ -166,6 +170,11 @@ func (cfg Config) Validate() error {
 	if !cfg.Auth.Password.Enabled && !cfg.Auth.OIDC.Enabled {
 		return errors.New("at least one auth method is required")
 	}
+	for i, admin := range cfg.Auth.Admins {
+		if !strings.Contains(strings.TrimSpace(admin), "@") {
+			return fmt.Errorf("auth.admins[%d] must be an email address, got %q", i, admin)
+		}
+	}
 	if !cfg.Auth.OIDC.Enabled {
 		return nil
 	}
@@ -201,6 +210,20 @@ func validatePublicURL(rawURL string) error {
 		return errors.New("server.public_url must be an absolute URL")
 	}
 	return nil
+}
+
+// IsAdmin reports whether email belongs to a configured administrator.
+func (auth AuthConfig) IsAdmin(email string) bool {
+	email = strings.TrimSpace(email)
+	if email == "" {
+		return false
+	}
+	for _, admin := range auth.Admins {
+		if strings.EqualFold(strings.TrimSpace(admin), email) {
+			return true
+		}
+	}
+	return false
 }
 
 func (cfg Config) SystemDBPath() string {

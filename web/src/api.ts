@@ -48,18 +48,13 @@ export type TableMetadata = {
   display_name: string;
   fields: Field[];
   views: TableView[];
+  // 2 for admins, 1 for a table a non-admin can see.
   permission_level?: 0 | 1 | 2;
-  database_permission_level?: 0 | 1 | 2;
-  field_permission_level?: 0 | 1 | 2;
-  view_permission_level?: 0 | 1 | 2;
 };
 
 export type DatabaseMetadata = {
   name: string;
   tables: TableMetadata[];
-  permission_level?: 0 | 1 | 2;
-  workflow_permission_level?: 0 | 1 | 2;
-  app_permission_level?: 0 | 1 | 2;
 };
 
 export type Catalog = {
@@ -139,8 +134,7 @@ export type RunnerStatus = {
 };
 
 export type RunnersResponse = {
-  token?: { exists: boolean; created_at?: number } | null;
-  can_manage: boolean;
+  token: { exists: boolean; created_at?: number };
   runners: RunnerStatus[];
   remote_node_types: string[];
 };
@@ -201,20 +195,18 @@ export type PermissionGrant = {
   scope:
     | "field_set"
     | "field"
-    | "field_add"
-    | "field_modify"
     | "record"
     | "view_set"
     | "view"
-    | "workflow_set"
     | "workflow"
     | "app_set"
     | "app"
     | "file";
   resource: string;
   field: string;
-  // 0/1/2 for most scopes; field and field_set use the bitmask
-  // 1 = read, 2 = update, 4 = create.
+  // 0/1/2 for most data scopes; field and field_set use the bitmask
+  // 1 = read, 2 = update, 4 = create. workflow is 0 = none / 1 = run;
+  // app and app_set are 0 = none / 1 = open.
   level: number;
 };
 
@@ -241,6 +233,9 @@ export type AuthUser = {
   email: string;
   display_name: string;
   provider: string;
+  // Global admins write code and structure; everyone else only gets data
+  // access through grants.
+  is_admin?: boolean;
 };
 
 export type RowRecord = {

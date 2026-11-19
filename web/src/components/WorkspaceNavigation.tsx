@@ -68,6 +68,9 @@ type WorkspaceNavigationProps = {
   onToggleCollapsed: () => void;
   currentUser: AuthUser | null;
   database: DatabaseMetadata;
+  // Admins write structure and code; everyone else only uses data, apps
+  // and workflows they are granted.
+  isAdmin: boolean;
   newDatabaseName: string;
   newRoleName: string;
   newTableName: string;
@@ -107,6 +110,7 @@ export function WorkspaceNavigation({
   onToggleCollapsed,
   currentUser,
   database,
+  isAdmin,
   newDatabaseName,
   newRoleName,
   newTableName,
@@ -139,7 +143,6 @@ export function WorkspaceNavigation({
   workflows
 }: WorkspaceNavigationProps) {
   const { t } = useTranslation();
-  const isAuthenticated = Boolean(currentUser);
   return (
     <>
       {collapsed ? (
@@ -147,6 +150,7 @@ export function WorkspaceNavigation({
           catalog={catalog}
           currentUser={currentUser}
           database={database}
+          isAdmin={isAdmin}
           onLogout={onLogout}
           onOpenLogin={onOpenLogin}
           onSelectDatabaseSection={onSelectDatabaseSection}
@@ -173,16 +177,17 @@ export function WorkspaceNavigation({
             <Text size={200} weight="semibold">
               {t("nav.databases")}
             </Text>
-            <CreateNamePopover
-              ariaLabel={t("nav.createDb")}
-              buttonLabel={t("nav.createDb")}
-              disabled={!isAuthenticated}
-              inputLabel={t("nav.newDatabaseName")}
-              name={newDatabaseName}
-              onNameChange={onNewDatabaseNameChange}
-              onSave={onCreateDatabase}
-              placeholder={t("nav.placeholderDatabase")}
-            />
+            {isAdmin && (
+              <CreateNamePopover
+                ariaLabel={t("nav.createDb")}
+                buttonLabel={t("nav.createDb")}
+                inputLabel={t("nav.newDatabaseName")}
+                name={newDatabaseName}
+                onNameChange={onNewDatabaseNameChange}
+                onSave={onCreateDatabase}
+                placeholder={t("nav.placeholderDatabase")}
+              />
+            )}
           </div>
           <Nav
             className="database-nav"
@@ -211,7 +216,7 @@ export function WorkspaceNavigation({
                   <NavSubItem value={`${item.name}:table`}>{t("common.table")}</NavSubItem>
                   <NavSubItem value={`${item.name}:workflow`}>{t("common.workflow")}</NavSubItem>
                   <NavSubItem value={`${item.name}:app`}>{t("common.app")}</NavSubItem>
-                  {(item.permission_level ?? 0) >= 2 && (
+                  {isAdmin && (
                     <NavSubItem value={`${item.name}:permission`}>{t("common.permission")}</NavSubItem>
                   )}
                 </NavSubItemGroup>
@@ -246,6 +251,7 @@ export function WorkspaceNavigation({
             <>
               <TableNav
                 database={database}
+                isAdmin={isAdmin}
                 onCreateTable={onCreateTable}
                 onNewTableNameChange={onNewTableNameChange}
                 onSelectTableView={onSelectTableView}
@@ -259,7 +265,7 @@ export function WorkspaceNavigation({
           {view === "workflow" && (
             <ResourceNav
               ariaLabel={t("nav.workflowList")}
-              canCreate={(database.workflow_permission_level ?? 2) >= 2}
+              canManage={isAdmin}
               createLabel={t("nav.createWorkflow")}
               databaseName={database.name}
               items={workflows.map((item) => ({ id: item.id ?? 0, name: item.name, enabled: item.enabled ?? true }))}
@@ -305,7 +311,7 @@ export function WorkspaceNavigation({
                 <CreateNamePopover
                   ariaLabel={t("nav.createRole")}
                   buttonLabel={t("nav.createRole")}
-                  disabled={!database.name || (database.permission_level ?? 2) < 2}
+                  disabled={!database.name}
                   inputLabel={t("nav.newRoleName")}
                   name={newRoleName}
                   onNameChange={onNewRoleNameChange}
@@ -327,9 +333,11 @@ export function WorkspaceNavigation({
               </Nav>
             </>
           )}
-          <div className="runners-entry-slot">
-            <RunnersPanel databaseName={database.name} />
-          </div>
+          {isAdmin && (
+            <div className="runners-entry-slot">
+              <RunnersPanel databaseName={database.name} />
+            </div>
+          )}
         </NavDrawerBody>
       </NavDrawer>
     </>
@@ -340,6 +348,7 @@ function PrimaryRail({
   catalog,
   currentUser,
   database,
+  isAdmin,
   onLogout,
   onOpenLogin,
   onSelectDatabaseSection,
@@ -349,6 +358,7 @@ function PrimaryRail({
   catalog: Catalog;
   currentUser: AuthUser | null;
   database: DatabaseMetadata;
+  isAdmin: boolean;
   onLogout: () => void;
   onOpenLogin: () => void;
   onSelectDatabaseSection: (databaseName: string, view: WorkspaceView) => void;
@@ -363,7 +373,7 @@ function PrimaryRail({
     { key: "app" as WorkspaceView, label: t("common.app"), icon: <AppsRegular /> }
   ];
   const visibleSections =
-    (database.permission_level ?? 0) >= 2
+    isAdmin
       ? [...sections, { key: "permission" as WorkspaceView, label: t("common.permission"), icon: <PeopleRegular /> }]
       : sections;
   return (
@@ -470,7 +480,8 @@ function AccountMenu({
 
 function ResourceNav(props: {
   ariaLabel: string;
-  canCreate: boolean;
+  // Create, rename and delete are admin-only; others can only select.
+  canManage: boolean;
   createLabel: string;
   databaseName: string;
   items: Array<{ id: number; name: string; enabled: boolean }>;
@@ -492,16 +503,18 @@ function ResourceNav(props: {
     <>
       <div className="list-heading">
         <Text size={200} weight="semibold">{props.title}</Text>
-        <CreateNamePopover
-          ariaLabel={props.createLabel}
-          buttonLabel={props.createLabel}
-          disabled={!props.databaseName || !props.canCreate}
-          inputLabel={t("nav.newWorkflowName")}
-          name={props.newName}
-          onNameChange={props.onNewNameChange}
-          onSave={props.onCreate}
-          placeholder={props.placeholder}
-        />
+        {props.canManage && (
+          <CreateNamePopover
+            ariaLabel={props.createLabel}
+            buttonLabel={props.createLabel}
+            disabled={!props.databaseName}
+            inputLabel={t("nav.newWorkflowName")}
+            name={props.newName}
+            onNameChange={props.onNewNameChange}
+            onSave={props.onCreate}
+            placeholder={props.placeholder}
+          />
+        )}
       </div>
       <Nav
         className="resource-nav"
@@ -516,6 +529,7 @@ function ResourceNav(props: {
                 <CircleFilled className={item.enabled ? "enabled-dot" : "disabled-dot"} />
                 <span>{item.name}</span>
               </span>
+              {props.canManage && (
               <Menu>
                 <MenuTrigger disableButtonEnhancement>
                   <span
@@ -552,6 +566,7 @@ function ResourceNav(props: {
                   </MenuList>
                 </MenuPopover>
               </Menu>
+              )}
             </span>
           </NavItem>
         ))}
@@ -573,6 +588,7 @@ function ResourceNav(props: {
 
 function TableNav(props: {
   database: DatabaseMetadata;
+  isAdmin: boolean;
   newTableName: string;
   onCreateTable: () => void;
   onNewTableNameChange: (value: string) => void;
@@ -593,16 +609,18 @@ function TableNav(props: {
     <>
       <div className="list-heading">
         <Text size={200} weight="semibold">{t("nav.tables")}</Text>
-        <CreateNamePopover
-          ariaLabel={t("nav.createTable")}
-          buttonLabel={t("nav.createTable")}
-          disabled={!props.database.name || (props.database.permission_level ?? 2) < 2}
-          inputLabel={t("nav.newTableName")}
-          name={props.newTableName}
-          onNameChange={props.onNewTableNameChange}
-          onSave={props.onCreateTable}
-          placeholder={t("nav.placeholderTable")}
-        />
+        {props.isAdmin && (
+          <CreateNamePopover
+            ariaLabel={t("nav.createTable")}
+            buttonLabel={t("nav.createTable")}
+            disabled={!props.database.name}
+            inputLabel={t("nav.newTableName")}
+            name={props.newTableName}
+            onNameChange={props.onNewTableNameChange}
+            onSave={props.onCreateTable}
+            placeholder={t("nav.placeholderTable")}
+          />
+        )}
       </div>
       <Nav
         className="resource-nav"
@@ -636,7 +654,7 @@ function TableNav(props: {
                   {viewDef.display_name || (viewDef.name === "all" ? t("common.allRecords") : viewDef.name)}
                 </NavSubItem>
               ))}
-              {(item.view_permission_level ?? item.permission_level ?? 2) >= 2 && (
+              {props.isAdmin && (
                 <div className="nav-create-subitem">
                   <CreateNamePopover
                     ariaLabel={t("nav.createView")}

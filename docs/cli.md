@@ -2,8 +2,9 @@
 
 `autablectl` is the command-line client for a running autable server. It talks
 to the same HTTP API as the web UI, with the permissions of the user who signed
-it in, so scripts and coding agents can read and change live tables and
-workflows, and build hosted apps, instead of editing a repository checkout
+it in, so scripts and coding agents can read and change live tables and, with
+an admin account, deploy workflows and hosted apps, instead of editing a
+repository checkout
 (the git repository autable pushes to is a backup; edits made there are never
 pulled back).
 
@@ -38,6 +39,30 @@ the code, together with a PKCE verifier only it knows, for a session token.
 
 Any session token works as `Authorization: Bearer <token>` against the API, so
 other HTTP clients can use the same token.
+
+## Permissions
+
+The CLI can do exactly what the signed-in user can do; the server checks every
+request (see [permissions.md](permissions.md)). autable is admin-gated: code and
+structure are written only by admins, the email addresses listed under
+`auth.admins` in the server config.
+
+- Any user, within their grants: read metadata, read and write rows, read row
+  history, upload and download files, list and run the workflows they may run,
+  list and open the apps they may open.
+- Admins only: schema changes (`fields add` succeeds for anyone else only when
+  every listed field already exists with the same type), editing workflows
+  (`workflow set`, `push`), workflow run history (`workflow runs`,
+  `workflow run-log`), and pushing, publishing, rolling back, or pulling apps.
+- Workflow definitions (script, secrets, variables, runners) are returned only
+  to admins; other users see a workflow's id and name. For them `workflow get`
+  gets the server's `403`, and `workflow get --script` and `pull` stop with an
+  error saying scripts are admin-only instead of writing empty files. A
+  non-admin's `workflow run` prints the run without its steps.
+
+`autablectl whoami` prints the signed-in user, including whether it is an
+admin. When a non-admin runs an admin-only command, the CLI prints the server's
+`403` message and exits `1`.
 
 ## Commands
 
@@ -106,7 +131,8 @@ uses in its repository, and records in
   script and sends the current settings back unchanged; secrets are never sent
   or overwritten.
 - A new file `workflow/<database>/<name>.js` creates a workflow named
-  `<name>`. The directory must match a database you can read.
+  `<name>`. The directory must match an existing database. Pushing, like any
+  workflow change, needs an admin account.
 - If the object changed on the server since the last pull (someone edited it
   in the web UI, or `workflow set` ran), `push` refuses with a conflict. `pull`
   never overwrites local edits, so: inspect the server version with
@@ -117,7 +143,9 @@ uses in its repository, and records in
 
 An app is an ordinary frontend project that autable hosts at
 `/apps/<database>/<name>/` and that uses the HTTP API with the permissions of
-whoever opens it. See [design/apps.md](design/apps.md).
+whoever opens it. See [design/apps.md](design/apps.md). `init`, `sdk`, and
+`dev` work for any user; `push`, `publish`, `rollback`, and `pull` need an admin
+account.
 
 ```sh
 autablectl app init ./orders --database sales --name orders --title "Orders"

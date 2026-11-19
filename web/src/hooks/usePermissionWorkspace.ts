@@ -20,10 +20,12 @@ import { compactRoleGrants } from "../permissionState";
 type UsePermissionWorkspaceOptions = {
   currentUserID?: string;
   database: DatabaseMetadata;
+  // Roles and grants are admin-only; non-admins never load them.
+  isAdmin: boolean;
   onStatus: Notify;
 };
 
-export function usePermissionWorkspace({ currentUserID, database, onStatus }: UsePermissionWorkspaceOptions) {
+export function usePermissionWorkspace({ currentUserID, database, isAdmin, onStatus }: UsePermissionWorkspaceOptions) {
   const { t } = useTranslation();
   const [roles, setRoles] = useState<RoleDefinition[]>([]);
   const [selectedRoleName, setSelectedRoleName] = useState("");
@@ -77,7 +79,7 @@ export function usePermissionWorkspace({ currentUserID, database, onStatus }: Us
 
   useEffect(() => {
     let cancelled = false;
-    if (!database.name || !currentUserID) {
+    if (!database.name || !currentUserID || !isAdmin) {
       clearRoles();
       return () => {
         cancelled = true;
@@ -101,7 +103,7 @@ export function usePermissionWorkspace({ currentUserID, database, onStatus }: Us
       applyRoles(nextRoles);
       setRolesReady(true);
     }
-  }, [currentUserID, database.name]);
+  }, [currentUserID, database.name, isAdmin]);
 
   function applyRoles(nextRoles: RoleDefinition[]) {
     setRoles(nextRoles);
@@ -114,7 +116,7 @@ export function usePermissionWorkspace({ currentUserID, database, onStatus }: Us
   }
 
   async function refreshRoles(dbName = database.name) {
-    if (!currentUserID || !dbName) {
+    if (!currentUserID || !isAdmin || !dbName) {
       clearRoles();
       return [];
     }

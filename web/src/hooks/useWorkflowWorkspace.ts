@@ -24,6 +24,9 @@ import {
 type UseWorkflowWorkspaceOptions = {
   currentUserID?: string;
   databaseName: string;
+  // Non-admins only see the workflows they may run, without definitions,
+  // node catalog or run history.
+  isAdmin: boolean;
   tableName: string;
   onStatus: Notify;
 };
@@ -33,6 +36,7 @@ const workflowEvaluationDelayMs = 5000;
 export function useWorkflowWorkspace({
   currentUserID,
   databaseName,
+  isAdmin,
   tableName,
   onStatus
 }: UseWorkflowWorkspaceOptions) {
@@ -99,18 +103,21 @@ export function useWorkflowWorkspace({
 
     async function loadResources(dbName: string) {
       setResourcesReady(false);
-      const [nextWorkflows, nextWorkflowNodes] = await Promise.all([listWorkflows(dbName), loadWorkflowNodes()]);
+      const [nextWorkflows, nextWorkflowNodes] = await Promise.all([
+        listWorkflows(dbName),
+        isAdmin ? loadWorkflowNodes() : Promise.resolve([])
+      ]);
       if (cancelled) {
         return;
       }
       applyResources(nextWorkflows, nextWorkflowNodes);
       setResourcesReady(true);
     }
-  }, [currentUserID, databaseName]);
+  }, [currentUserID, databaseName, isAdmin]);
 
   useEffect(() => {
     let cancelled = false;
-    if (!currentUserID || !selectedWorkflow?.id) {
+    if (!currentUserID || !isAdmin || !selectedWorkflow?.id) {
       setWorkflowRuns([]);
       setSelectedWorkflowRunKey("");
       return () => {
@@ -132,11 +139,11 @@ export function useWorkflowWorkspace({
     return () => {
       cancelled = true;
     };
-  }, [currentUserID, selectedWorkflow?.id]);
+  }, [currentUserID, isAdmin, selectedWorkflow?.id]);
 
   useEffect(() => {
     let cancelled = false;
-    if (!currentUserID || !selectedWorkflow?.id || !selectedWorkflowRunKey || !selectedWorkflowRun?.summary) {
+    if (!currentUserID || !isAdmin || !selectedWorkflow?.id || !selectedWorkflowRunKey || !selectedWorkflowRun?.summary) {
       return () => {
         cancelled = true;
       };
@@ -158,7 +165,7 @@ export function useWorkflowWorkspace({
     return () => {
       cancelled = true;
     };
-  }, [currentUserID, selectedWorkflow?.id, selectedWorkflowRunKey, selectedWorkflowRun?.summary]);
+  }, [currentUserID, isAdmin, selectedWorkflow?.id, selectedWorkflowRunKey, selectedWorkflowRun?.summary]);
 
   async function loadWorkflowRuns(workflowID: number, preferredRunKey = "") {
     const runs = await listWorkflowRuns(workflowID);
@@ -177,7 +184,7 @@ export function useWorkflowWorkspace({
   }
 
   async function refreshWorkflowRuns(preferredRunKey = "", workflowID = selectedWorkflow?.id ?? 0) {
-    if (!currentUserID || !workflowID) {
+    if (!currentUserID || !isAdmin || !workflowID) {
       setWorkflowRuns([]);
       setSelectedWorkflowRunKey("");
       return [];
@@ -207,7 +214,7 @@ export function useWorkflowWorkspace({
     }
     const [nextWorkflows, nextWorkflowNodes] = await Promise.all([
       listWorkflows(nextDatabaseName),
-      loadWorkflowNodes()
+      isAdmin ? loadWorkflowNodes() : Promise.resolve([])
     ]);
     applyResources(nextWorkflows, nextWorkflowNodes);
     setResourcesReady(true);
@@ -278,6 +285,27 @@ export function useWorkflowWorkspace({
         return response;
       }
       onStatus(t("status.workflowRunSaved", { key: response.history_key }));
+      return response;
+    } catch (error) {
+      onStatus(error instanceof Error ? error.message : t("status.workflowRunFailed"), "error");
+      return undefined;
+    }
+  }
+
+  // runGrantedWorkflow is the non-admin run action: it starts the workflow
+  // with empty inputs and only reports the outcome, since run history is
+  // admin-only.
+  async function runGrantedWorkflow(workflow: WorkflowDefinition) {
+    if (!workflow.id) {
+      return undefined;
+    }
+    try {
+      const response = await runWorkflow(workflow.id, {});
+      if (response.run.error) {
+        onStatus(t("status.workflowFailed", { error: response.run.error }), "error");
+        return response;
+      }
+      onStatus(t("status.workflowRan", { name: workflow.name }), "success");
       return response;
     } catch (error) {
       onStatus(error instanceof Error ? error.message : t("status.workflowRunFailed"), "error");
@@ -425,6 +453,7 @@ export function useWorkflowWorkspace({
     persistWorkflow,
     renameSelectedWorkflow,
     refreshResources,
+    runGrantedWorkflow,
     refreshWorkflowRuns,
     setNewWorkflowName,
     setSelectedWorkflowHistoryRetention,

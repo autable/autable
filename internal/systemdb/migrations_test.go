@@ -30,6 +30,15 @@ type preRunnersWorkflowModel struct {
 
 func (preRunnersWorkflowModel) TableName() string { return "workflow_models" }
 
+// databaseOwnerModel is the database ownership table as shipped from the
+// 0.1.18 release until autable became admin-gated (schema version 7).
+type databaseOwnerModel struct {
+	DatabaseName string `gorm:"primaryKey;not null"`
+	OwnerID      string `gorm:"primaryKey;not null"`
+	CreatedAt    int64  `gorm:"autoCreateTime:milli"`
+	UpdatedAt    int64  `gorm:"autoUpdateTime:milli"`
+}
+
 // createOldDatabase builds a database with historical GORM models plus one
 // saved workflow, exactly as the 0.1.18 release would have left it.
 func createOldDatabase(t *testing.T, path string, models ...any) {
@@ -38,7 +47,7 @@ func createOldDatabase(t *testing.T, path string, models ...any) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := orm.AutoMigrate(append([]any{&userModel{}, &permissionGrantModel{}}, models...)...); err != nil {
+	if err := orm.AutoMigrate(append([]any{&userModel{}, &permissionGrantModel{}, &databaseOwnerModel{}}, models...)...); err != nil {
 		t.Fatal(err)
 	}
 	workflow := preRunnersWorkflowModel{
@@ -270,8 +279,10 @@ func TestMigrateRewritesLegacyFieldGrantLevels(t *testing.T) {
 	if levels["view|active"] != permission.Read {
 		t.Fatalf("expected view level collapsed to read, got %#v", levels)
 	}
-	if levels["field_add|"] != permission.Write {
-		t.Fatalf("expected seeded field_add grant for full field_set holders, got %#v", levels)
+	// 3 → 4 seeded field_add for full field_set holders; 6 → 7 removed the
+	// scope again when structure became admin-only.
+	if _, ok := levels["field_add|"]; ok {
+		t.Fatalf("expected no field_add grant after the full upgrade, got %#v", levels)
 	}
 }
 
@@ -303,7 +314,7 @@ func TestMigrateDropsFormsAndTheirGrants(t *testing.T) {
 		t.Fatal(err)
 	}
 	migrations = previous
-	if err := orm.AutoMigrate(&userModel{}, &permissionGrantModel{}, &workflowModel{}, &formModel{}); err != nil {
+	if err := orm.AutoMigrate(&userModel{}, &permissionGrantModel{}, &databaseOwnerModel{}, &workflowModel{}, &formModel{}); err != nil {
 		t.Fatal(err)
 	}
 	if err := orm.Create(&formModel{DatabaseName: "db", Name: "intake", Script: "function render() {}", CreatorID: "u1"}).Error; err != nil {
@@ -312,7 +323,7 @@ func TestMigrateDropsFormsAndTheirGrants(t *testing.T) {
 	grants := []permissionGrantModel{
 		{SubjectID: "u1", Scope: "form", Resource: "1", Level: permission.Write},
 		{SubjectID: "u2", Scope: "form_set", Resource: "db", Level: permission.Read},
-		{SubjectID: "u2", Scope: permission.ScopeWorkflowSet, Resource: "db", Level: permission.Read},
+		{SubjectID: "u2", Scope: permission.ScopeFieldSet, Resource: "db.contacts", Level: permission.FieldRead},
 	}
 	if err := orm.Create(&grants).Error; err != nil {
 		t.Fatal(err)
@@ -336,10 +347,151 @@ func TestMigrateDropsFormsAndTheirGrants(t *testing.T) {
 	if err := upgraded.orm.Order("id").Find(&remaining).Error; err != nil {
 		t.Fatal(err)
 	}
-	if len(remaining) != 1 || remaining[0].Scope != permission.ScopeWorkflowSet {
-		t.Fatalf("expected only the workflow grant to survive, got %#v", remaining)
+	if len(remaining) != 1 || remaining[0].Scope != permission.ScopeFieldSet {
+		t.Fatalf("expected only the field set grant to survive, got %#v", remaining)
 	}
 	if _, err := upgraded.CreateApp(ctx, AppDefinition{DatabaseName: "db", Name: "intake"}); err != nil {
 		t.Fatalf("expected apps table after upgrade, got %v", err)
+	}
+}
+
+func TestMigrateRemovesOwnershipAndStructureGrants(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "system.sqlite")
+
+	// A version-6 database: the version-6 models, including database owners.
+	previous := migrations
+	migrations = migrations[:6]
+	orm, err := gorm.Open(sqlite.Open(path), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	db := &DB{orm: orm}
+	if err := db.runSchemaMigrations(ctx); err != nil {
+		t.Fatal(err)
+	}
+	migrations = previous
+	if err := orm.AutoMigrate(
+		&userModel{},
+		&sessionModel{},
+		&permissionGrantModel{},
+		&databaseOwnerModel{},
+		&workflowModel{},
+		&appModel{},
+		&appVersionModel{},
+		&roleModel{},
+		&roleMemberModel{},
+		&runnerTokenModel{},
+		&fileModel{},
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := orm.Create(&userModel{ID: "u1", Email: "u1@example.com", DisplayName: "u1", Provider: "password", ProviderName: "password", Subject: "u1@example.com"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := orm.Create(&[]databaseOwnerModel{{DatabaseName: "db", OwnerID: "u1"}, {DatabaseName: "other", OwnerID: "u2"}}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := orm.Create(&workflowModel{DatabaseName: "db", Name: "sync", Script: "function instances() {}", Enabled: true, CreatorID: "u1", SecretsJSON: "{}", VariablesJSON: "{}", RunnersJSON: "{}"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := orm.Create(&appModel{DatabaseName: "db", Name: "intake", Title: "Intake", CreatorID: "u1"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := orm.Create(&roleModel{DatabaseName: "db", Name: "sync"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := orm.Create(&roleMemberModel{DatabaseName: "db", RoleName: "sync", SubjectType: "workflow", SubjectID: "workflow:1"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	grants := []permissionGrantModel{
+		// Structure grants that no longer exist.
+		{SubjectID: "u2", Scope: "field_add", Resource: "db.contacts", Level: permission.Write},
+		{SubjectID: "u2", Scope: "field_modify", Resource: "db.contacts", Field: "email", Level: permission.Write},
+		{SubjectID: "u2", Scope: "workflow_set", Resource: "db", Level: permission.Read},
+		{SubjectID: "workflow:1", Scope: "field_add", Resource: "db.contacts", Level: permission.Write},
+		// Old workflow grants meant view or edit, not run.
+		{SubjectID: "u2", Scope: permission.ScopeWorkflow, Resource: "1", Level: permission.Write},
+		{SubjectID: "u3", Scope: permission.ScopeWorkflow, Resource: "1", Level: permission.Read},
+		// App grants keep only their open level.
+		{SubjectID: "u2", Scope: permission.ScopeApp, Resource: "1", Level: permission.Write},
+		{SubjectID: "u3", Scope: permission.ScopeApp, Resource: "1", Level: permission.Read},
+		{SubjectID: "u4", Scope: permission.ScopeAppSet, Resource: "db", Level: permission.Write},
+		// Data grants survive untouched, including workflow and role subjects.
+		{SubjectID: "u2", Scope: permission.ScopeField, Resource: "db.contacts", Field: "email", Level: permission.FieldRead | permission.FieldUpdate},
+		{SubjectID: "u2", Scope: permission.ScopeView, Resource: "db.contacts", Field: "all", Level: permission.Read},
+		{SubjectID: "workflow:1", Scope: permission.ScopeFieldSet, Resource: "db.contacts", Level: permission.FieldAll},
+		{SubjectID: "workflow:1", Scope: permission.ScopeRecord, Resource: "db.contacts", Field: "create", Level: permission.Write},
+		{SubjectID: "workflow:1", Scope: permission.ScopeViewSet, Resource: "db.contacts", Level: permission.Read},
+		{SubjectID: "workflow:1", Scope: permission.ScopeFile, Resource: "db.contacts", Level: permission.Read},
+		{SubjectID: "role:db:sync", Scope: permission.ScopeRecord, Resource: "db.contacts", Field: "delete", Level: permission.Write},
+	}
+	if err := orm.Create(&grants).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	upgraded, err := Open(ctx, path)
+	if err != nil {
+		t.Fatalf("expected version-6 database to open, got %v", err)
+	}
+	defer upgraded.Close()
+	if got := schemaVersion(t, upgraded); got != currentSchemaVersion() {
+		t.Fatalf("expected schema version %d, got %d", currentSchemaVersion(), got)
+	}
+	if upgraded.orm.Migrator().HasTable("database_owner_models") {
+		t.Fatal("expected database_owner_models to be dropped")
+	}
+
+	var remaining []permissionGrantModel
+	if err := upgraded.orm.Order("id").Find(&remaining).Error; err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]permission.Level{}
+	for _, grant := range remaining {
+		got[grant.SubjectID+"|"+string(grant.Scope)+"|"+grant.Resource+"|"+grant.Field] = grant.Level
+	}
+	want := map[string]permission.Level{
+		"u2|app|1|":                              permission.Open,
+		"u3|app|1|":                              permission.Open,
+		"u4|app_set|db|":                         permission.Open,
+		"u2|field|db.contacts|email":             permission.FieldRead | permission.FieldUpdate,
+		"u2|view|db.contacts|all":                permission.Read,
+		"workflow:1|field_set|db.contacts|":      permission.FieldAll,
+		"workflow:1|record|db.contacts|create":   permission.Write,
+		"workflow:1|view_set|db.contacts|":       permission.Read,
+		"workflow:1|file|db.contacts|":           permission.Read,
+		"role:db:sync|record|db.contacts|delete": permission.Write,
+	}
+	if len(got) != len(want) {
+		t.Fatalf("expected grants %#v, got %#v", want, got)
+	}
+	for key, level := range want {
+		if got[key] != level {
+			t.Fatalf("expected %s at level %d, got %#v", key, level, got)
+		}
+	}
+
+	// Everything else is intact.
+	user, err := upgraded.User(ctx, "u1")
+	if err != nil || user.Email != "u1@example.com" {
+		t.Fatalf("expected user to survive, got %#v, %v", user, err)
+	}
+	workflows, err := upgraded.Workflows(ctx, "db")
+	if err != nil || len(workflows) != 1 || workflows[0].Name != "sync" {
+		t.Fatalf("expected workflow to survive, got %#v, %v", workflows, err)
+	}
+	app, err := upgraded.AppByName(ctx, "db", "intake")
+	if err != nil || app.Title != "Intake" {
+		t.Fatalf("expected app to survive, got %#v, %v", app, err)
+	}
+	effective, err := upgraded.EffectiveGrantsForSubject(ctx, "workflow:1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !effective.CanCreateRecord("workflow:1", "db.contacts") || !effective.CanDeleteRecord("workflow:1", "db.contacts") {
+		t.Fatal("expected the workflow subject to keep its direct and role data grants")
 	}
 }

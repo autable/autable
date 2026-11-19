@@ -41,8 +41,8 @@ type WorkflowDefinition struct {
 	// positive number of seconds after which a run is aborted.
 	TimeoutSeconds  *int64           `json:"timeout_seconds"`
 	PermissionLevel permission.Level `json:"permission_level,omitempty" gorm:"-"`
-	CreatedAt            int64            `json:"created_at"`
-	UpdatedAt            int64            `json:"updated_at"`
+	CreatedAt       int64            `json:"created_at"`
+	UpdatedAt       int64            `json:"updated_at"`
 }
 
 type RoleDefinition struct {
@@ -88,13 +88,6 @@ type permissionGrantModel struct {
 	Resource  string           `gorm:"uniqueIndex:idx_permission_target;not null"`
 	Field     string           `gorm:"uniqueIndex:idx_permission_target;not null;default:''"`
 	Level     permission.Level `gorm:"not null"`
-}
-
-type databaseOwnerModel struct {
-	DatabaseName string `gorm:"primaryKey;not null"`
-	OwnerID      string `gorm:"primaryKey;not null"`
-	CreatedAt    int64  `gorm:"autoCreateTime:milli"`
-	UpdatedAt    int64  `gorm:"autoUpdateTime:milli"`
 }
 
 type workflowModel struct {
@@ -184,7 +177,6 @@ func (db *DB) Migrate(ctx context.Context) error {
 		&userModel{},
 		&sessionModel{},
 		&permissionGrantModel{},
-		&databaseOwnerModel{},
 		&workflowModel{},
 		&appModel{},
 		&appVersionModel{},
@@ -228,6 +220,32 @@ func (db *DB) UpsertUserByEmail(ctx context.Context, user auth.User) (auth.User,
 	}).Create(&model).Error
 	if err != nil {
 		return auth.User{}, err
+	}
+	return modelToUser(model), nil
+}
+
+// ErrEmailTaken is returned by RegisterUser for an email that already has
+// an account.
+var ErrEmailTaken = errors.New("email is already registered")
+
+// RegisterUser creates a new account and never touches an existing one: a
+// registration for a known email fails with ErrEmailTaken.
+func (db *DB) RegisterUser(ctx context.Context, user auth.User) (auth.User, error) {
+	if user.Email == "" {
+		return auth.User{}, errors.New("email is required")
+	}
+	displayName, err := auth.NormalizeDisplayName(user.DisplayName)
+	if err != nil {
+		return auth.User{}, err
+	}
+	user.DisplayName = displayName
+	model := userToModel(user)
+	result := db.orm.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&model)
+	if result.Error != nil {
+		return auth.User{}, result.Error
+	}
+	if result.RowsAffected == 0 {
+		return auth.User{}, ErrEmailTaken
 	}
 	return modelToUser(model), nil
 }
@@ -338,40 +356,6 @@ func (db *DB) DeleteGrant(ctx context.Context, subjectID string, scope permissio
 		query = query.Where("field IN ?", fields)
 	}
 	return query.Delete(&permissionGrantModel{}).Error
-}
-
-func (db *DB) SaveDatabaseOwner(ctx context.Context, dbName, ownerID string) error {
-	model := databaseOwnerModel{DatabaseName: dbName, OwnerID: ownerID}
-	return db.orm.WithContext(ctx).Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "database_name"}, {Name: "owner_id"}},
-		DoNothing: true,
-	}).Create(&model).Error
-}
-
-// OwnsAnyDatabase reports whether the user owns at least one database;
-// database owners are the only role allowed to manage the runner token.
-func (db *DB) OwnsAnyDatabase(ctx context.Context, userID string) (bool, error) {
-	var count int64
-	err := db.orm.WithContext(ctx).
-		Model(&databaseOwnerModel{}).
-		Where(&databaseOwnerModel{OwnerID: userID}).
-		Count(&count).Error
-	if err != nil {
-		return false, err
-	}
-	return count > 0, nil
-}
-
-func (db *DB) IsDatabaseOwner(ctx context.Context, userID, dbName string) (bool, error) {
-	var count int64
-	err := db.orm.WithContext(ctx).
-		Model(&databaseOwnerModel{}).
-		Where(&databaseOwnerModel{DatabaseName: dbName, OwnerID: userID}).
-		Count(&count).Error
-	if err != nil {
-		return false, err
-	}
-	return count > 0, nil
 }
 
 func (db *DB) GrantsForSubject(ctx context.Context, subjectID string) (permission.Set, error) {

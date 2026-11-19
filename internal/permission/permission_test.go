@@ -75,19 +75,16 @@ func TestRecordActionPermission(t *testing.T) {
 
 func TestResourceLevelPermission(t *testing.T) {
 	perms := New(
-		Grant{SubjectID: "u1", Scope: ScopeWorkflowSet, Resource: "workspace", Level: Read},
-		Grant{SubjectID: "u1", Scope: ScopeWorkflow, Resource: "7", Level: Write},
-		Grant{SubjectID: "u1", Scope: ScopeApp, Resource: "3", Level: Read},
+		Grant{SubjectID: "u1", Scope: ScopeWorkflow, Resource: "7", Level: Run},
+		Grant{SubjectID: "u1", Scope: ScopeAppSet, Resource: "workspace", Level: Open},
+		Grant{SubjectID: "u1", Scope: ScopeApp, Resource: "3", Level: Open},
 	)
 
-	if !perms.CanWriteResource("u1", ScopeWorkflow, "7") {
-		t.Fatal("expected workflow write permission")
-	}
 	if !perms.CanReadResource("u1", ScopeWorkflow, "7") {
-		t.Fatal("expected workflow write permission to allow reads")
+		t.Fatal("expected workflow run permission")
 	}
-	if perms.CanWriteResource("u1", ScopeApp, "3") {
-		t.Fatal("did not expect app read permission to allow writes")
+	if !perms.CanReadResource("u1", ScopeAppSet, "workspace") {
+		t.Fatal("expected app set open permission")
 	}
 	if perms.CanReadResource("u2", ScopeWorkflow, "7") {
 		t.Fatal("did not expect another subject to inherit workflow permission")

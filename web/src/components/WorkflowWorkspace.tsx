@@ -21,6 +21,12 @@ import {
   Select,
   Switch,
   Tab,
+  Table,
+  TableBody,
+  TableCell,
+  TableHeader,
+  TableHeaderCell,
+  TableRow,
   TabList,
   Text,
 } from "@fluentui/react-components";
@@ -235,6 +241,70 @@ export function WorkflowWorkspace({
           workflowRuns={workflowRuns}
         />
       )}
+    </div>
+  );
+}
+
+// WorkflowRunList is what non-admins see: the workflows they may run, each
+// with a Run action. Definitions and run history are admin-only.
+export function WorkflowRunList({
+  databaseName,
+  onRun,
+  workflows
+}: {
+  databaseName: string;
+  onRun: (workflow: WorkflowDefinition) => void | Promise<unknown>;
+  workflows: WorkflowDefinition[];
+}) {
+  const { t } = useTranslation();
+  const [running, setRunning] = useState<Record<number, boolean>>({});
+
+  async function run(workflow: WorkflowDefinition) {
+    const id = workflow.id ?? 0;
+    setRunning((current) => ({ ...current, [id]: true }));
+    try {
+      await onRun(workflow);
+    } finally {
+      setRunning((current) => ({ ...current, [id]: false }));
+    }
+  }
+
+  return (
+    <div className="app-workspace">
+      <div className="section-header app-section-header">
+        <div>
+          <Text weight="semibold">{t("nav.workflows")}</Text>
+          <Text size={200}>{t("workflow.workflowLabel", { database: databaseName })}</Text>
+        </div>
+      </div>
+      <div className="app-card">
+        <Table aria-label={t("workflow.runnableList")} size="small" style={{ tableLayout: "auto" }}>
+          <TableHeader>
+            <TableRow>
+              <TableHeaderCell>{t("nav.name")}</TableHeaderCell>
+              <TableHeaderCell className="app-actions-cell">{t("app.actions")}</TableHeaderCell>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {workflows.map((workflow) => (
+              <TableRow key={workflow.id ?? workflow.name}>
+                <TableCell>{workflow.name}</TableCell>
+                <TableCell className="app-actions-cell">
+                  <Button
+                    icon={<PlayRegular />}
+                    size="small"
+                    aria-label={t("workflow.runWorkflow", { name: workflow.name })}
+                    disabled={!workflow.id || running[workflow.id ?? 0]}
+                    onClick={() => void run(workflow)}
+                  >
+                    {t("common.run")}
+                  </Button>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
     </div>
   );
 }

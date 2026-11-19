@@ -248,11 +248,11 @@ func bearerToken(r *http.Request) string {
 }
 
 // requestSessionToken prefers a bearer token over the session cookie.
-func requestSessionToken(r *http.Request) (string, error) {
+func (server *Server) requestSessionToken(r *http.Request) (string, error) {
 	if token := bearerToken(r); token != "" {
 		return token, nil
 	}
-	cookie, err := r.Cookie(sessionCookieName)
+	cookie, err := r.Cookie(server.sessionCookieName())
 	if err != nil {
 		return "", err
 	}
@@ -262,7 +262,7 @@ func requestSessionToken(r *http.Request) (string, error) {
 // cookieUser resolves only the browser session cookie; CLI authorization
 // must be confirmed in a browser, never by another bearer token.
 func (server *Server) cookieUser(r *http.Request) (auth.User, bool, error) {
-	cookie, err := r.Cookie(sessionCookieName)
+	cookie, err := r.Cookie(server.sessionCookieName())
 	if err != nil {
 		if errors.Is(err, http.ErrNoCookie) {
 			return auth.User{}, false, nil

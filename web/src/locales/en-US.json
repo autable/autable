@@ -47,8 +47,10 @@
     "noDatabaseDescription": "Create or pick a database on the left to start building.",
     "noTableTitle": "No tables yet",
     "noTableDescription": "Use + in the Tables list to create your first table.",
+    "noGrantedTableDescription": "No tables have been shared with you in this database yet.",
     "noWorkflowTitle": "No workflows yet",
     "noWorkflowDescription": "Use + in the Workflows list to automate tasks with code.",
+    "noRunnableWorkflowDescription": "No workflows have been shared with you in this database yet.",
     "noRoleTitle": "No roles yet",
     "noRoleDescription": "Use + in the Roles list to create your first role."
   },
@@ -141,10 +143,7 @@
     "allItems": "All",
     "empty": "Create a role to configure table, field, workflow, and app permissions.",
     "dataSection": "Data",
-    "fieldDefine": "Field definitions",
     "fieldValues": "Field values",
-    "allowed": "Allowed",
-    "fieldAdd": "Add fields",
     "fieldSet": "{{table}} fields",
     "fields": "Fields",
     "fileView": "View",
@@ -153,11 +152,6 @@
       "create": "Create",
       "read": "Read",
       "update": "Update"
-    },
-    "levels": {
-      "none": "None",
-      "read": "Read",
-      "write": "Write"
     },
     "allFields": "All fields",
     "allViews": "All views",
@@ -181,7 +175,6 @@
     "roleAccessMatrix": "{{database}} role access matrix",
     "roleMemberDisplayName": "Role member display name",
     "scope": "scope",
-    "schemaSection": "Schema",
     "searchMember": "Search member",
     "tables": "Tables",
     "view": "{{view}} view",
@@ -189,14 +182,16 @@
     "views": "Views",
     "workflowMember": "Workflow member",
     "workflowPartialPermissions": "Workflow partial permissions",
-    "workflowSet": "All workflows",
     "workflows": "Workflows",
     "appSet": "All apps",
     "apps": "Apps",
     "appLevels": {
       "none": "None",
-      "read": "Open",
-      "write": "Manage"
+      "open": "Open"
+    },
+    "workflowLevels": {
+      "none": "None",
+      "run": "Run"
     }
   },
   "status": {
@@ -277,6 +272,7 @@
     "workflowTimeoutUpdated": "{{name}} run timeout updated",
     "workflowNameRequired": "Workflow name is required",
     "workflowRenameFailed": "Workflow rename failed",
+    "workflowRan": "Ran workflow {{name}}",
     "workflowRunFailed": "Workflow run failed",
     "workflowRunSaved": "Workflow run saved: {{key}}",
     "workflowSaveFailed": "Workflow save failed",
@@ -425,6 +421,8 @@
     "vars": "vars {{ports}}",
     "secrets": "secrets {{ports}}",
     "workflowLabel": "{{database}} workflow",
+    "runnableList": "Runnable workflows",
+    "runWorkflow": "Run {{name}}",
     "workflowScriptLabel": "Workflow JavaScript",
     "workspaceTabs": "Workflow workspace tabs"
   },
@@ -437,7 +435,6 @@
     "token": "Runner token",
     "tokenCreatedAt": "Created {{createdAt}}",
     "tokenMissing": "No token generated yet",
-    "ownerOnly": "Only the database owner can view and reset the token.",
     "tokenShownOnce": "Copy the token now — it will not be shown again:",
     "tokenValue": "Runner token value",
     "generate": "Generate token",

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"autable/internal/metadata"
+	"autable/internal/table"
 	"autable/internal/workflow"
 )
 
@@ -139,7 +140,11 @@ func workflowFieldInput(value any) (metadata.Field, error) {
 	}
 }
 
-func (server *Server) addTableFields(ctx context.Context, dbName string, tableName string, fields []metadata.Field) (workflowFieldMutation, error) {
+// addTableFields creates or restores the requested fields. Without
+// mayChange (anyone but an admin) it only confirms fields that already
+// exist and fails before touching anything when one would be created or
+// restored.
+func (server *Server) addTableFields(ctx context.Context, dbName string, tableName string, fields []metadata.Field, mayChange bool) (workflowFieldMutation, error) {
 	if server.metadataPath == "" {
 		return workflowFieldMutation{}, errors.New("metadata writes are not configured")
 	}
@@ -150,6 +155,9 @@ func (server *Server) addTableFields(ctx context.Context, dbName string, tableNa
 	if !ok {
 		return workflowFieldMutation{}, fmt.Errorf("database %q table %q not found", dbName, tableName)
 	}
+	// The field slice is shared with the live catalog: edit a copy, so a
+	// rejected or failed change leaves the catalog untouched.
+	tableMeta.Fields = append([]metadata.Field(nil), tableMeta.Fields...)
 	mutation := workflowFieldMutation{}
 	for _, field := range fields {
 		existingIndex := -1
@@ -178,6 +186,9 @@ func (server *Server) addTableFields(ctx context.Context, dbName string, tableNa
 		mutation.Existing = append(mutation.Existing, existing)
 	}
 	mutation.Fields = tableMeta.ActiveFields()
+	if !mayChange && (len(mutation.Created) > 0 || len(mutation.Restored) > 0) {
+		return workflowFieldMutation{}, fmt.Errorf("%w: adding fields requires an admin", table.ErrPermissionDenied)
+	}
 	if len(mutation.Created) == 0 && len(mutation.Restored) == 0 {
 		if err := server.tables.EnsureTable(ctx, server.catalog, dbName, tableName); err != nil {
 			return workflowFieldMutation{}, err

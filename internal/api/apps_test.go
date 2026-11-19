@@ -82,7 +82,7 @@ func testAppBundle(t *testing.T, database, name, sdk, marker string) []byte {
 
 func appTestRequest(t *testing.T, server *Server, system *systemdb.DB, userID, method, target string, body io.Reader) *httptest.ResponseRecorder {
 	t.Helper()
-	request := httptest.NewRequest(method, target, body)
+	request := newTestRequest(method, target, body)
 	if userID != "" {
 		request.AddCookie(testSessionCookie(t, system, userID))
 	}
@@ -139,7 +139,7 @@ func appSubjectLevel(t *testing.T, system *systemdb.DB, subjectID string, scope 
 
 func TestAppUploadCreatesAppAndVersions(t *testing.T) {
 	server, system := newTestServer(t)
-	saveTestGrants(t, system, permission.Grant{SubjectID: "builder", Scope: permission.ScopeAppSet, Resource: "db", Level: permission.Write})
+	makeTestAdmins(server, "builder")
 
 	created := createTestApp(t, server, system, "builder", "db", "widgets")
 	if created.App.Name != "widgets" || created.App.DatabaseName != "db" || created.App.Title != "Widgets" {
@@ -157,8 +157,8 @@ func TestAppUploadCreatesAppAndVersions(t *testing.T) {
 	if created.Version.Size == 0 || created.Version.CreatedBy != "builder" {
 		t.Fatalf("expected version bookkeeping, got %#v", created.Version)
 	}
-	if level := appSubjectLevel(t, system, "builder", permission.ScopeApp, resourceID(created.App.ID)); level != permission.Write {
-		t.Fatalf("expected creator app write grant, got %d", level)
+	if level := appSubjectLevel(t, system, "builder", permission.ScopeApp, resourceID(created.App.ID)); level != permission.None {
+		t.Fatalf("expected no grant for the creating admin, got %d", level)
 	}
 
 	second := uploadTestApp(t, server, system, "builder", "db", "widgets", testAppBundle(t, "db", "widgets", appsdk.Version(), "version-2"), "message="+url.QueryEscape("second build"))
@@ -200,7 +200,7 @@ func TestAppUploadCreatesAppAndVersions(t *testing.T) {
 func TestAppUploadRequiresPermission(t *testing.T) {
 	ctx := context.Background()
 	server, system := newTestServer(t)
-	saveTestDatabaseOwners(t, system, "db", "owner")
+	makeTestAdmins(server, "admin")
 
 	denied := uploadTestApp(t, server, system, "viewer", "db", "widgets", testAppBundle(t, "db", "widgets", appsdk.Version(), "x"), "")
 	if denied.Code != http.StatusForbidden {
@@ -215,24 +215,28 @@ func TestAppUploadRequiresPermission(t *testing.T) {
 		t.Fatalf("expected anonymous upload 401, got %d: %s", anonymous.Code, anonymous.Body.String())
 	}
 
-	created := createTestApp(t, server, system, "owner", "db", "widgets")
-	saveTestGrants(t, system, permission.Grant{SubjectID: "reader", Scope: permission.ScopeApp, Resource: resourceID(created.App.ID), Level: permission.Read})
-	readerUpload := uploadTestApp(t, server, system, "reader", "db", "widgets", testAppBundle(t, "db", "widgets", appsdk.Version(), "x"), "")
-	if readerUpload.Code != http.StatusForbidden {
-		t.Fatalf("expected reader upload 403, got %d: %s", readerUpload.Code, readerUpload.Body.String())
+	created := createTestApp(t, server, system, "admin", "db", "widgets")
+	saveTestGrants(t, system,
+		permission.Grant{SubjectID: "reader", Scope: permission.ScopeApp, Resource: resourceID(created.App.ID), Level: permission.Open},
+		permission.Grant{SubjectID: "set-reader", Scope: permission.ScopeAppSet, Resource: "db", Level: permission.Open},
+		// A level the API no longer accepts, as a pre-upgrade row would be.
+		permission.Grant{SubjectID: "legacy-editor", Scope: permission.ScopeApp, Resource: resourceID(created.App.ID), Level: permission.Write},
+	)
+	for _, userID := range []string{"reader", "set-reader", "legacy-editor"} {
+		upload := uploadTestApp(t, server, system, userID, "db", "widgets", testAppBundle(t, "db", "widgets", appsdk.Version(), "x"), "")
+		if upload.Code != http.StatusForbidden {
+			t.Fatalf("expected %s upload 403, got %d: %s", userID, upload.Code, upload.Body.String())
+		}
+		create := uploadTestApp(t, server, system, userID, "db", "gadgets", testAppBundle(t, "db", "gadgets", appsdk.Version(), "x"), "")
+		if create.Code != http.StatusForbidden {
+			t.Fatalf("expected %s app create 403, got %d: %s", userID, create.Code, create.Body.String())
+		}
+	}
+	if app, err := system.AppByName(ctx, "db", "widgets"); err != nil || app.LatestVersion != 1 {
+		t.Fatalf("expected denied uploads to add no version, got %#v, %v", app, err)
 	}
 
-	saveTestGrants(t, system, permission.Grant{SubjectID: "editor", Scope: permission.ScopeApp, Resource: resourceID(created.App.ID), Level: permission.Write})
-	editorUpload := uploadTestApp(t, server, system, "editor", "db", "widgets", testAppBundle(t, "db", "widgets", appsdk.Version(), "x"), "")
-	if editorUpload.Code != http.StatusOK {
-		t.Fatalf("expected app writer upload 200, got %d: %s", editorUpload.Code, editorUpload.Body.String())
-	}
-	editorCreate := uploadTestApp(t, server, system, "editor", "db", "gadgets", testAppBundle(t, "db", "gadgets", appsdk.Version(), "x"), "")
-	if editorCreate.Code != http.StatusForbidden {
-		t.Fatalf("expected single-app writer create 403, got %d: %s", editorCreate.Code, editorCreate.Body.String())
-	}
-
-	missingDatabase := uploadTestApp(t, server, system, "owner", "missing", "widgets", testAppBundle(t, "missing", "widgets", appsdk.Version(), "x"), "")
+	missingDatabase := uploadTestApp(t, server, system, "admin", "missing", "widgets", testAppBundle(t, "missing", "widgets", appsdk.Version(), "x"), "")
 	if missingDatabase.Code != http.StatusNotFound {
 		t.Fatalf("expected upload to unknown database 404, got %d: %s", missingDatabase.Code, missingDatabase.Body.String())
 	}
@@ -240,7 +244,7 @@ func TestAppUploadRequiresPermission(t *testing.T) {
 
 func TestAppUploadRejectsInvalidBundles(t *testing.T) {
 	server, system := newTestServer(t)
-	saveTestDatabaseOwners(t, system, "db", "owner")
+	makeTestAdmins(server, "admin")
 
 	cases := map[string]struct {
 		name   string
@@ -253,7 +257,7 @@ func TestAppUploadRejectsInvalidBundles(t *testing.T) {
 	}
 	for label, tc := range cases {
 		t.Run(label, func(t *testing.T) {
-			recorder := uploadTestApp(t, server, system, "owner", "db", tc.name, tc.bundle, "")
+			recorder := uploadTestApp(t, server, system, "admin", "db", tc.name, tc.bundle, "")
 			if recorder.Code != http.StatusBadRequest {
 				t.Fatalf("expected 400, got %d: %s", recorder.Code, recorder.Body.String())
 			}
@@ -270,10 +274,10 @@ func TestAppUploadRejectsInvalidBundles(t *testing.T) {
 
 func TestAppUploadRejectsUnsupportedSDK(t *testing.T) {
 	server, system := newTestServer(t)
-	saveTestDatabaseOwners(t, system, "db", "owner")
+	makeTestAdmins(server, "admin")
 	for _, sdk := range []string{"0.1", "2.0", "1.99", "1"} {
 		t.Run(sdk, func(t *testing.T) {
-			recorder := uploadTestApp(t, server, system, "owner", "db", "widgets", testAppBundle(t, "db", "widgets", sdk, "x"), "")
+			recorder := uploadTestApp(t, server, system, "admin", "db", "widgets", testAppBundle(t, "db", "widgets", sdk, "x"), "")
 			if recorder.Code != http.StatusUnprocessableEntity {
 				t.Fatalf("expected sdk %s upload 422, got %d: %s", sdk, recorder.Code, recorder.Body.String())
 			}
@@ -290,17 +294,17 @@ func TestAppUploadRejectsUnsupportedSDK(t *testing.T) {
 
 func TestAppPublishAndRollback(t *testing.T) {
 	server, system := newTestServer(t)
-	saveTestDatabaseOwners(t, system, "db", "owner")
-	created := createTestApp(t, server, system, "owner", "db", "widgets")
-	saveTestGrants(t, system, permission.Grant{SubjectID: "reader", Scope: permission.ScopeApp, Resource: resourceID(created.App.ID), Level: permission.Read})
+	makeTestAdmins(server, "admin")
+	created := createTestApp(t, server, system, "admin", "db", "widgets")
+	saveTestGrants(t, system, permission.Grant{SubjectID: "reader", Scope: permission.ScopeApp, Resource: resourceID(created.App.ID), Level: permission.Open})
 
-	second := uploadTestApp(t, server, system, "owner", "db", "widgets", testAppBundle(t, "db", "widgets", appsdk.Version(), "version-2"), "")
+	second := uploadTestApp(t, server, system, "admin", "db", "widgets", testAppBundle(t, "db", "widgets", appsdk.Version(), "version-2"), "")
 	if second.Code != http.StatusOK {
 		t.Fatalf("expected second upload 200, got %d: %s", second.Code, second.Body.String())
 	}
 	assertServedMarker(t, server, system, "reader", "/apps/db/widgets/", "version-1")
 
-	published := publishTestApp(t, server, system, "owner", "db", "widgets", 2)
+	published := publishTestApp(t, server, system, "admin", "db", "widgets", 2)
 	if published.Code != http.StatusOK {
 		t.Fatalf("expected publish 200, got %d: %s", published.Code, published.Body.String())
 	}
@@ -310,13 +314,13 @@ func TestAppPublishAndRollback(t *testing.T) {
 	assertServedMarker(t, server, system, "reader", "/apps/db/widgets/", "version-2")
 	assertServedMarker(t, server, system, "reader", "/apps/db/widgets/assets/x.js", "version-2")
 
-	rollback := publishTestApp(t, server, system, "owner", "db", "widgets", 1)
+	rollback := publishTestApp(t, server, system, "admin", "db", "widgets", 1)
 	if rollback.Code != http.StatusOK {
 		t.Fatalf("expected rollback 200, got %d: %s", rollback.Code, rollback.Body.String())
 	}
 	assertServedMarker(t, server, system, "reader", "/apps/db/widgets/", "version-1")
 
-	missing := publishTestApp(t, server, system, "owner", "db", "widgets", 3)
+	missing := publishTestApp(t, server, system, "admin", "db", "widgets", 3)
 	if missing.Code != http.StatusNotFound {
 		t.Fatalf("expected publish of missing version 404, got %d: %s", missing.Code, missing.Body.String())
 	}
@@ -324,7 +328,7 @@ func TestAppPublishAndRollback(t *testing.T) {
 	if readerPublish.Code != http.StatusForbidden {
 		t.Fatalf("expected reader publish 403, got %d: %s", readerPublish.Code, readerPublish.Body.String())
 	}
-	unknownApp := publishTestApp(t, server, system, "owner", "db", "gadgets", 1)
+	unknownApp := publishTestApp(t, server, system, "admin", "db", "gadgets", 1)
 	if unknownApp.Code != http.StatusNotFound {
 		t.Fatalf("expected publish of unknown app 404, got %d: %s", unknownApp.Code, unknownApp.Body.String())
 	}
@@ -336,7 +340,7 @@ func TestAppPublishAndRollback(t *testing.T) {
 		t.Fatalf("expected failed publishes to keep version 1, got %#v", app)
 	}
 
-	publishOnUpload := uploadTestApp(t, server, system, "owner", "db", "widgets", testAppBundle(t, "db", "widgets", appsdk.Version(), "version-3"), "publish=1")
+	publishOnUpload := uploadTestApp(t, server, system, "admin", "db", "widgets", testAppBundle(t, "db", "widgets", appsdk.Version(), "version-3"), "publish=1")
 	if publishOnUpload.Code != http.StatusOK {
 		t.Fatalf("expected publishing upload 200, got %d: %s", publishOnUpload.Code, publishOnUpload.Body.String())
 	}
@@ -349,15 +353,15 @@ func TestAppPublishAndRollback(t *testing.T) {
 func TestAppUnsupportedStoredVersion(t *testing.T) {
 	ctx := context.Background()
 	server, system := newTestServer(t)
-	saveTestDatabaseOwners(t, system, "db", "owner")
-	created := createTestApp(t, server, system, "owner", "db", "widgets")
+	makeTestAdmins(server, "admin")
+	created := createTestApp(t, server, system, "admin", "db", "widgets")
 	// A version built against an SDK this server no longer runs, as left
 	// behind by an upgrade.
-	if _, _, err := system.AddAppVersion(ctx, created.App.ID, "", systemdb.AppVersion{SDK: "0.9", CreatedBy: "owner"}, testAppBundle(t, "db", "widgets", "0.9", "old"), false); err != nil {
+	if _, _, err := system.AddAppVersion(ctx, created.App.ID, "", systemdb.AppVersion{SDK: "0.9", CreatedBy: "admin"}, testAppBundle(t, "db", "widgets", "0.9", "old"), false); err != nil {
 		t.Fatal(err)
 	}
 
-	detail := appTestRequest(t, server, system, "owner", http.MethodGet, "/api/databases/db/apps/widgets", nil)
+	detail := appTestRequest(t, server, system, "admin", http.MethodGet, "/api/databases/db/apps/widgets", nil)
 	if detail.Code != http.StatusOK {
 		t.Fatalf("expected detail 200, got %d: %s", detail.Code, detail.Body.String())
 	}
@@ -369,25 +373,25 @@ func TestAppUnsupportedStoredVersion(t *testing.T) {
 		t.Fatalf("expected version 1 supported, got %#v", response.Versions[1])
 	}
 
-	publish := publishTestApp(t, server, system, "owner", "db", "widgets", 2)
+	publish := publishTestApp(t, server, system, "admin", "db", "widgets", 2)
 	if publish.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("expected publish of unsupported version 422, got %d: %s", publish.Code, publish.Body.String())
 	}
-	preview := appTestRequest(t, server, system, "owner", http.MethodGet, "/apps/db/widgets/@2/", nil)
+	preview := appTestRequest(t, server, system, "admin", http.MethodGet, "/apps/db/widgets/@2/", nil)
 	if preview.Code != http.StatusGone || !strings.Contains(preview.Header().Get("Content-Type"), "text/html") {
 		t.Fatalf("expected unsupported version page 410, got %d: %s", preview.Code, preview.Body.String())
 	}
-	assertServedMarker(t, server, system, "owner", "/apps/db/widgets/", "version-1")
+	assertServedMarker(t, server, system, "admin", "/apps/db/widgets/", "version-1")
 }
 
 func TestAppListAndDetailFollowPermissions(t *testing.T) {
 	server, system := newTestServer(t)
-	saveTestDatabaseOwners(t, system, "db", "owner")
-	alpha := createTestApp(t, server, system, "owner", "db", "alpha")
-	createTestApp(t, server, system, "owner", "db", "beta")
+	makeTestAdmins(server, "admin")
+	alpha := createTestApp(t, server, system, "admin", "db", "alpha")
+	createTestApp(t, server, system, "admin", "db", "beta")
 	saveTestGrants(t, system,
-		permission.Grant{SubjectID: "reader", Scope: permission.ScopeApp, Resource: resourceID(alpha.App.ID), Level: permission.Read},
-		permission.Grant{SubjectID: "set-reader", Scope: permission.ScopeAppSet, Resource: "db", Level: permission.Read},
+		permission.Grant{SubjectID: "reader", Scope: permission.ScopeApp, Resource: resourceID(alpha.App.ID), Level: permission.Open},
+		permission.Grant{SubjectID: "set-reader", Scope: permission.ScopeAppSet, Resource: "db", Level: permission.Open},
 	)
 
 	list := func(userID string) []appResponse {
@@ -407,8 +411,8 @@ func TestAppListAndDetailFollowPermissions(t *testing.T) {
 	if apps := list("set-reader"); len(apps) != 2 || apps[0].PermissionLevel != permission.Read || apps[1].PermissionLevel != permission.Read {
 		t.Fatalf("expected both apps readable through app_set, got %#v", apps)
 	}
-	if apps := list("owner"); len(apps) != 2 || apps[0].Name != "alpha" || apps[1].Name != "beta" || apps[0].PermissionLevel != permission.Write {
-		t.Fatalf("expected owner to see both apps with write, got %#v", apps)
+	if apps := list("admin"); len(apps) != 2 || apps[0].Name != "alpha" || apps[1].Name != "beta" || apps[0].PermissionLevel != permission.Write {
+		t.Fatalf("expected admin to see both apps with write, got %#v", apps)
 	}
 
 	for _, tc := range []struct {
@@ -419,7 +423,7 @@ func TestAppListAndDetailFollowPermissions(t *testing.T) {
 		{"reader", "alpha", http.StatusOK},
 		{"reader", "beta", http.StatusForbidden},
 		{"set-reader", "beta", http.StatusOK},
-		{"owner", "missing", http.StatusNotFound},
+		{"admin", "missing", http.StatusNotFound},
 	} {
 		recorder := appTestRequest(t, server, system, tc.user, http.MethodGet, "/api/databases/db/apps/"+tc.app, nil)
 		if recorder.Code != tc.status {
@@ -427,18 +431,25 @@ func TestAppListAndDetailFollowPermissions(t *testing.T) {
 		}
 	}
 	readerDetail := decodeTestJSON[appDetailResponse](t, appTestRequest(t, server, system, "reader", http.MethodGet, "/api/databases/db/apps/alpha", nil))
-	if readerDetail.App.PermissionLevel != permission.Read {
-		t.Fatalf("expected reader detail permission read, got %#v", readerDetail.App)
+	if readerDetail.App.PermissionLevel != permission.Open || readerDetail.App.URL != "/apps/db/alpha/" {
+		t.Fatalf("expected reader detail permission open, got %#v", readerDetail.App)
+	}
+	if len(readerDetail.Versions) != 0 {
+		t.Fatalf("expected versions to be admin-only, got %#v", readerDetail.Versions)
+	}
+	adminDetail := decodeTestJSON[appDetailResponse](t, appTestRequest(t, server, system, "admin", http.MethodGet, "/api/databases/db/apps/alpha", nil))
+	if adminDetail.App.PermissionLevel != permission.Write || len(adminDetail.Versions) != 1 {
+		t.Fatalf("expected admin detail with versions, got %#v", adminDetail)
 	}
 }
 
 func TestAppCatalogPermissionLevelAndVisibility(t *testing.T) {
 	server, system := newTestServer(t)
-	saveTestDatabaseOwners(t, system, "db", "owner")
-	created := createTestApp(t, server, system, "owner", "db", "widgets")
+	makeTestAdmins(server, "admin")
+	created := createTestApp(t, server, system, "admin", "db", "widgets")
 	saveTestGrants(t, system,
-		permission.Grant{SubjectID: "app-reader", Scope: permission.ScopeApp, Resource: resourceID(created.App.ID), Level: permission.Read},
-		permission.Grant{SubjectID: "set-writer", Scope: permission.ScopeAppSet, Resource: "db", Level: permission.Write},
+		permission.Grant{SubjectID: "app-reader", Scope: permission.ScopeApp, Resource: resourceID(created.App.ID), Level: permission.Open},
+		permission.Grant{SubjectID: "set-reader", Scope: permission.ScopeAppSet, Resource: "db", Level: permission.Open},
 	)
 
 	catalogFor := func(userID string) []metadata.Database {
@@ -453,48 +464,59 @@ func TestAppCatalogPermissionLevelAndVisibility(t *testing.T) {
 		t.Fatalf("expected no databases for stranger, got %#v", databases)
 	}
 	appReader := catalogFor("app-reader")
-	if len(appReader) != 1 || appReader[0].Name != "db" || len(appReader[0].Tables) != 0 || appReader[0].AppPermissionLevel != int(permission.None) {
-		t.Fatalf("expected db visible through a readable app only, got %#v", appReader)
+	if len(appReader) != 1 || appReader[0].Name != "db" || len(appReader[0].Tables) != 0 {
+		t.Fatalf("expected db visible through an openable app only, got %#v", appReader)
 	}
-	setWriter := catalogFor("set-writer")
-	if len(setWriter) != 1 || setWriter[0].AppPermissionLevel != int(permission.Write) {
-		t.Fatalf("expected app_set writer app_permission_level 2, got %#v", setWriter)
+	setReader := catalogFor("set-reader")
+	if len(setReader) != 1 || setReader[0].Name != "db" || len(setReader[0].Tables) != 0 {
+		t.Fatalf("expected db visible through app_set, got %#v", setReader)
 	}
-	owner := catalogFor("owner")
-	if len(owner) != 1 || owner[0].AppPermissionLevel != int(permission.Write) {
-		t.Fatalf("expected owner app_permission_level 2, got %#v", owner)
+	admin := catalogFor("admin")
+	if len(admin) != 1 || len(admin[0].Tables) != 1 || admin[0].Tables[0].PermissionLevel != int(permission.Write) {
+		t.Fatalf("expected admin to see every table with full level, got %#v", admin)
 	}
 }
 
 func TestAppGrantsAreExclusive(t *testing.T) {
 	server, system := newTestServer(t)
-	saveTestDatabaseOwners(t, system, "db", "owner")
-	created := createTestApp(t, server, system, "owner", "db", "widgets")
+	makeTestAdmins(server, "admin")
+	created := createTestApp(t, server, system, "admin", "db", "widgets")
 	appResource := resourceID(created.App.ID)
 
 	saveGrant := func(grant string) {
 		t.Helper()
-		recorder := appTestRequest(t, server, system, "owner", http.MethodPost, "/api/permissions/grants", strings.NewReader(grant))
+		recorder := appTestRequest(t, server, system, "admin", http.MethodPost, "/api/permissions/grants", strings.NewReader(grant))
 		if recorder.Code != http.StatusCreated {
 			t.Fatalf("expected grant 201, got %d: %s", recorder.Code, recorder.Body.String())
 		}
 	}
 	saveGrant(`{"subject_id":"member","scope":"app","resource":"` + appResource + `","level":1}`)
-	saveGrant(`{"subject_id":"member","scope":"app_set","resource":"db","level":2}`)
+	saveGrant(`{"subject_id":"member","scope":"app_set","resource":"db","level":1}`)
 	if level := appSubjectLevel(t, system, "member", permission.ScopeApp, appResource); level != permission.None {
 		t.Fatalf("expected app_set grant to replace app grant, got app level %d", level)
 	}
-	if level := appSubjectLevel(t, system, "member", permission.ScopeAppSet, "db"); level != permission.Write {
-		t.Fatalf("expected app_set write, got %d", level)
+	if level := appSubjectLevel(t, system, "member", permission.ScopeAppSet, "db"); level != permission.Open {
+		t.Fatalf("expected app_set open, got %d", level)
 	}
 	saveGrant(`{"subject_id":"member","scope":"app","resource":"` + appResource + `","level":1}`)
 	if level := appSubjectLevel(t, system, "member", permission.ScopeAppSet, "db"); level != permission.None {
 		t.Fatalf("expected app grant to replace app_set grant, got app_set level %d", level)
 	}
 
-	other := appTestRequest(t, server, system, "stranger", http.MethodPost, "/api/permissions/grants", strings.NewReader(`{"subject_id":"member","scope":"app","resource":"`+appResource+`","level":2}`))
+	// Open is the only app level: anything above it is rejected.
+	for _, grant := range []string{
+		`{"subject_id":"member","scope":"app","resource":"` + appResource + `","level":2}`,
+		`{"subject_id":"member","scope":"app_set","resource":"db","level":2}`,
+	} {
+		rejected := appTestRequest(t, server, system, "admin", http.MethodPost, "/api/permissions/grants", strings.NewReader(grant))
+		if rejected.Code != http.StatusBadRequest {
+			t.Fatalf("expected app grant above open 400, got %d: %s", rejected.Code, rejected.Body.String())
+		}
+	}
+
+	other := appTestRequest(t, server, system, "stranger", http.MethodPost, "/api/permissions/grants", strings.NewReader(`{"subject_id":"member","scope":"app","resource":"`+appResource+`","level":1}`))
 	if other.Code != http.StatusForbidden {
-		t.Fatalf("expected non-owner grant 403, got %d: %s", other.Code, other.Body.String())
+		t.Fatalf("expected non-admin grant 403, got %d: %s", other.Code, other.Body.String())
 	}
 }
 
@@ -512,9 +534,9 @@ func assertServedMarker(t *testing.T, server *Server, system *systemdb.DB, userI
 
 func TestServeApp(t *testing.T) {
 	server, system := newTestServer(t)
-	saveTestDatabaseOwners(t, system, "db", "owner")
-	created := createTestApp(t, server, system, "owner", "db", "widgets")
-	saveTestGrants(t, system, permission.Grant{SubjectID: "reader", Scope: permission.ScopeApp, Resource: resourceID(created.App.ID), Level: permission.Read})
+	makeTestAdmins(server, "admin")
+	created := createTestApp(t, server, system, "admin", "db", "widgets")
+	saveTestGrants(t, system, permission.Grant{SubjectID: "reader", Scope: permission.ScopeApp, Resource: resourceID(created.App.ID), Level: permission.Open})
 
 	anonymous := appTestRequest(t, server, system, "", http.MethodGet, "/apps/db/widgets/orders/42?tab=open", nil)
 	if anonymous.Code != http.StatusFound {
@@ -561,7 +583,7 @@ func TestServeApp(t *testing.T) {
 	if etag == "" {
 		t.Fatal("expected asset etag")
 	}
-	conditional := httptest.NewRequest(http.MethodGet, "/apps/db/widgets/assets/x.js", nil)
+	conditional := newTestRequest(http.MethodGet, "/apps/db/widgets/assets/x.js", nil)
 	conditional.AddCookie(testSessionCookie(t, system, "reader"))
 	conditional.Header.Set("If-None-Match", etag)
 	notModified := httptest.NewRecorder()
@@ -597,45 +619,47 @@ func TestServeApp(t *testing.T) {
 	}
 }
 
-func TestServeAppPreviewRequiresWrite(t *testing.T) {
+func TestServeAppPreviewIsAdminOnly(t *testing.T) {
 	server, system := newTestServer(t)
-	saveTestDatabaseOwners(t, system, "db", "owner")
-	created := createTestApp(t, server, system, "owner", "db", "widgets")
+	makeTestAdmins(server, "admin")
+	created := createTestApp(t, server, system, "admin", "db", "widgets")
 	saveTestGrants(t, system,
-		permission.Grant{SubjectID: "reader", Scope: permission.ScopeApp, Resource: resourceID(created.App.ID), Level: permission.Read},
-		permission.Grant{SubjectID: "editor", Scope: permission.ScopeApp, Resource: resourceID(created.App.ID), Level: permission.Write},
+		permission.Grant{SubjectID: "reader", Scope: permission.ScopeApp, Resource: resourceID(created.App.ID), Level: permission.Open},
+		permission.Grant{SubjectID: "legacy-editor", Scope: permission.ScopeApp, Resource: resourceID(created.App.ID), Level: permission.Write},
 	)
-	if recorder := uploadTestApp(t, server, system, "editor", "db", "widgets", testAppBundle(t, "db", "widgets", appsdk.Version(), "version-2"), ""); recorder.Code != http.StatusOK {
-		t.Fatalf("expected editor upload 200, got %d: %s", recorder.Code, recorder.Body.String())
+	if recorder := uploadTestApp(t, server, system, "admin", "db", "widgets", testAppBundle(t, "db", "widgets", appsdk.Version(), "version-2"), ""); recorder.Code != http.StatusOK {
+		t.Fatalf("expected admin upload 200, got %d: %s", recorder.Code, recorder.Body.String())
 	}
 
-	readerPreview := appTestRequest(t, server, system, "reader", http.MethodGet, "/apps/db/widgets/@1/", nil)
-	if readerPreview.Code != http.StatusForbidden {
-		t.Fatalf("expected reader preview 403, got %d: %s", readerPreview.Code, readerPreview.Body.String())
+	for _, userID := range []string{"reader", "legacy-editor"} {
+		preview := appTestRequest(t, server, system, userID, http.MethodGet, "/apps/db/widgets/@1/", nil)
+		if preview.Code != http.StatusForbidden || strings.Contains(preview.Body.String(), "version-1") {
+			t.Fatalf("expected %s preview 403, got %d: %s", userID, preview.Code, preview.Body.String())
+		}
 	}
 
-	preview := assertServedMarker(t, server, system, "editor", "/apps/db/widgets/@2/", "version-2")
+	preview := assertServedMarker(t, server, system, "admin", "/apps/db/widgets/@2/", "version-2")
 	if !strings.Contains(preview.Body.String(), `<base href="/apps/db/widgets/@2/">`) {
 		t.Fatalf("expected preview base, got %s", preview.Body.String())
 	}
-	ownerPreview := assertServedMarker(t, server, system, "owner", "/apps/db/widgets/@1/orders/7", "version-1")
-	if !strings.Contains(ownerPreview.Body.String(), `<base href="/apps/db/widgets/@1/">`) {
-		t.Fatalf("expected preview deep path base, got %s", ownerPreview.Body.String())
+	adminPreview := assertServedMarker(t, server, system, "admin", "/apps/db/widgets/@1/orders/7", "version-1")
+	if !strings.Contains(adminPreview.Body.String(), `<base href="/apps/db/widgets/@1/">`) {
+		t.Fatalf("expected preview deep path base, got %s", adminPreview.Body.String())
 	}
-	assertServedMarker(t, server, system, "editor", "/apps/db/widgets/@2/assets/x.js", `console.log("version-2");`)
+	assertServedMarker(t, server, system, "admin", "/apps/db/widgets/@2/assets/x.js", `console.log("version-2");`)
 	// The published version is still version 1.
 	assertServedMarker(t, server, system, "reader", "/apps/db/widgets/", "version-1")
 
-	if index, preview := appTestRequest(t, server, system, "owner", http.MethodGet, "/apps/db/widgets/", nil), appTestRequest(t, server, system, "owner", http.MethodGet, "/apps/db/widgets/@1/", nil); index.Header().Get("ETag") == preview.Header().Get("ETag") {
+	if index, preview := appTestRequest(t, server, system, "admin", http.MethodGet, "/apps/db/widgets/", nil), appTestRequest(t, server, system, "admin", http.MethodGet, "/apps/db/widgets/@1/", nil); index.Header().Get("ETag") == preview.Header().Get("ETag") {
 		t.Fatalf("expected published and preview index pages to have distinct etags, got %q", index.Header().Get("ETag"))
 	}
 
-	noSlash := appTestRequest(t, server, system, "editor", http.MethodGet, "/apps/db/widgets/@2", nil)
+	noSlash := appTestRequest(t, server, system, "admin", http.MethodGet, "/apps/db/widgets/@2", nil)
 	if noSlash.Code != http.StatusMovedPermanently || noSlash.Header().Get("Location") != "/apps/db/widgets/@2/" {
 		t.Fatalf("expected preview 301 to trailing slash, got %d %q", noSlash.Code, noSlash.Header().Get("Location"))
 	}
 	for _, target := range []string{"/apps/db/widgets/@9/", "/apps/db/widgets/@x/", "/apps/db/widgets/@0/"} {
-		recorder := appTestRequest(t, server, system, "editor", http.MethodGet, target, nil)
+		recorder := appTestRequest(t, server, system, "admin", http.MethodGet, target, nil)
 		if recorder.Code != http.StatusNotFound {
 			t.Fatalf("expected %s 404, got %d: %s", target, recorder.Code, recorder.Body.String())
 		}
@@ -644,22 +668,22 @@ func TestServeAppPreviewRequiresWrite(t *testing.T) {
 
 func TestServeUnpublishedApp(t *testing.T) {
 	server, system := newTestServer(t)
-	saveTestDatabaseOwners(t, system, "db", "owner")
-	recorder := uploadTestApp(t, server, system, "owner", "db", "widgets", testAppBundle(t, "db", "widgets", appsdk.Version(), "draft"), "")
+	makeTestAdmins(server, "admin")
+	recorder := uploadTestApp(t, server, system, "admin", "db", "widgets", testAppBundle(t, "db", "widgets", appsdk.Version(), "draft"), "")
 	if recorder.Code != http.StatusCreated {
 		t.Fatalf("expected app create 201, got %d: %s", recorder.Code, recorder.Body.String())
 	}
 	if upload := decodeTestJSON[testAppUpload](t, recorder); upload.App.PublishedVersion != 0 {
 		t.Fatalf("expected unpublished app, got %#v", upload.App)
 	}
-	page := appTestRequest(t, server, system, "owner", http.MethodGet, "/apps/db/widgets/", nil)
+	page := appTestRequest(t, server, system, "admin", http.MethodGet, "/apps/db/widgets/", nil)
 	if page.Code != http.StatusNotFound || !strings.Contains(page.Body.String(), "Not published") {
 		t.Fatalf("expected not-published page 404, got %d: %s", page.Code, page.Body.String())
 	}
 	if strings.Contains(page.Body.String(), "draft") {
 		t.Fatalf("expected unpublished content to stay hidden, got %s", page.Body.String())
 	}
-	assertServedMarker(t, server, system, "owner", "/apps/db/widgets/@1/", "draft")
+	assertServedMarker(t, server, system, "admin", "/apps/db/widgets/@1/", "draft")
 }
 
 func TestServeAppWithNonASCIIDatabaseName(t *testing.T) {
@@ -668,10 +692,10 @@ func TestServeAppWithNonASCIIDatabaseName(t *testing.T) {
 		Tables: []metadata.Table{{Name: "contacts", Fields: []metadata.Field{{Name: "备注", Type: "string"}}}},
 	}}}
 	server, system, _ := newTestServerWithMetadataFile(t, catalog)
-	saveTestDatabaseOwners(t, system, "名称", "owner")
+	makeTestAdmins(server, "admin")
 	escaped := url.PathEscape("名称")
 
-	created := createTestApp(t, server, system, "owner", "名称", "widgets")
+	created := createTestApp(t, server, system, "admin", "名称", "widgets")
 	if created.App.DatabaseName != "名称" || created.App.URL != "/apps/"+escaped+"/widgets/" || created.Version.PreviewURL != "/apps/"+escaped+"/widgets/@1/" {
 		t.Fatalf("expected escaped app urls, got %#v %#v", created.App, created.Version)
 	}
@@ -682,20 +706,20 @@ func TestServeAppWithNonASCIIDatabaseName(t *testing.T) {
 		t.Fatalf("unexpected login redirect %d %q", anonymous.Code, anonymous.Header().Get("Location"))
 	}
 
-	root := appTestRequest(t, server, system, "owner", http.MethodGet, "/apps/"+escaped+"/widgets", nil)
+	root := appTestRequest(t, server, system, "admin", http.MethodGet, "/apps/"+escaped+"/widgets", nil)
 	if root.Code != http.StatusMovedPermanently || root.Header().Get("Location") != "/apps/"+escaped+"/widgets/" {
 		t.Fatalf("expected escaped root redirect, got %d %q", root.Code, root.Header().Get("Location"))
 	}
-	previewRoot := appTestRequest(t, server, system, "owner", http.MethodGet, "/apps/"+escaped+"/widgets/@1", nil)
+	previewRoot := appTestRequest(t, server, system, "admin", http.MethodGet, "/apps/"+escaped+"/widgets/@1", nil)
 	if previewRoot.Code != http.StatusMovedPermanently || previewRoot.Header().Get("Location") != "/apps/"+escaped+"/widgets/@1/" {
 		t.Fatalf("expected escaped preview redirect, got %d %q", previewRoot.Code, previewRoot.Header().Get("Location"))
 	}
 
-	index := assertServedMarker(t, server, system, "owner", "/apps/"+escaped+"/widgets/orders/1", "version-1")
+	index := assertServedMarker(t, server, system, "admin", "/apps/"+escaped+"/widgets/orders/1", "version-1")
 	if !strings.Contains(index.Body.String(), `<base href="/apps/`+escaped+`/widgets/">`) {
 		t.Fatalf("expected escaped base href, got %s", index.Body.String())
 	}
-	detail := appTestRequest(t, server, system, "owner", http.MethodGet, "/api/databases/"+escaped+"/apps/widgets", nil)
+	detail := appTestRequest(t, server, system, "admin", http.MethodGet, "/api/databases/"+escaped+"/apps/widgets", nil)
 	if detail.Code != http.StatusOK {
 		t.Fatalf("expected detail 200, got %d: %s", detail.Code, detail.Body.String())
 	}
@@ -703,18 +727,20 @@ func TestServeAppWithNonASCIIDatabaseName(t *testing.T) {
 
 func TestAppSourceDownload(t *testing.T) {
 	server, system := newTestServer(t)
-	saveTestDatabaseOwners(t, system, "db", "owner")
-	created := createTestApp(t, server, system, "owner", "db", "widgets")
+	makeTestAdmins(server, "admin")
+	created := createTestApp(t, server, system, "admin", "db", "widgets")
 	saveTestGrants(t, system,
-		permission.Grant{SubjectID: "reader", Scope: permission.ScopeApp, Resource: resourceID(created.App.ID), Level: permission.Read},
-		permission.Grant{SubjectID: "editor", Scope: permission.ScopeApp, Resource: resourceID(created.App.ID), Level: permission.Write},
+		permission.Grant{SubjectID: "reader", Scope: permission.ScopeApp, Resource: resourceID(created.App.ID), Level: permission.Open},
+		permission.Grant{SubjectID: "legacy-editor", Scope: permission.ScopeApp, Resource: resourceID(created.App.ID), Level: permission.Write},
 	)
 
-	reader := appTestRequest(t, server, system, "reader", http.MethodGet, "/api/databases/db/apps/widgets/versions/1/source", nil)
-	if reader.Code != http.StatusForbidden {
-		t.Fatalf("expected reader source 403, got %d: %s", reader.Code, reader.Body.String())
+	for _, userID := range []string{"reader", "legacy-editor"} {
+		denied := appTestRequest(t, server, system, userID, http.MethodGet, "/api/databases/db/apps/widgets/versions/1/source", nil)
+		if denied.Code != http.StatusForbidden {
+			t.Fatalf("expected %s source 403, got %d: %s", userID, denied.Code, denied.Body.String())
+		}
 	}
-	source := appTestRequest(t, server, system, "editor", http.MethodGet, "/api/databases/db/apps/widgets/versions/1/source", nil)
+	source := appTestRequest(t, server, system, "admin", http.MethodGet, "/api/databases/db/apps/widgets/versions/1/source", nil)
 	if source.Code != http.StatusOK {
 		t.Fatalf("expected source 200, got %d: %s", source.Code, source.Body.String())
 	}
@@ -740,11 +766,11 @@ func TestAppSourceDownload(t *testing.T) {
 		t.Fatalf("unexpected manifest %q", files[appbundle.ManifestName])
 	}
 
-	missing := appTestRequest(t, server, system, "editor", http.MethodGet, "/api/databases/db/apps/widgets/versions/9/source", nil)
+	missing := appTestRequest(t, server, system, "admin", http.MethodGet, "/api/databases/db/apps/widgets/versions/9/source", nil)
 	if missing.Code != http.StatusNotFound {
 		t.Fatalf("expected missing version source 404, got %d: %s", missing.Code, missing.Body.String())
 	}
-	invalid := appTestRequest(t, server, system, "editor", http.MethodGet, "/api/databases/db/apps/widgets/versions/x/source", nil)
+	invalid := appTestRequest(t, server, system, "admin", http.MethodGet, "/api/databases/db/apps/widgets/versions/x/source", nil)
 	if invalid.Code != http.StatusBadRequest {
 		t.Fatalf("expected invalid version source 400, got %d: %s", invalid.Code, invalid.Body.String())
 	}
@@ -774,21 +800,21 @@ func readTestTarGz(t *testing.T, archive []byte) map[string]string {
 	}
 }
 
-func TestDeleteAppIsOwnerOnly(t *testing.T) {
+func TestDeleteAppIsAdminOnly(t *testing.T) {
 	ctx := context.Background()
 	server, system := newTestServer(t)
-	saveTestDatabaseOwners(t, system, "db", "owner")
-	saveTestGrants(t, system, permission.Grant{SubjectID: "builder", Scope: permission.ScopeAppSet, Resource: "db", Level: permission.Write})
-	created := createTestApp(t, server, system, "builder", "db", "widgets")
-	assertServedMarker(t, server, system, "builder", "/apps/db/widgets/", "version-1")
+	makeTestAdmins(server, "admin")
+	created := createTestApp(t, server, system, "admin", "db", "widgets")
+	saveTestGrants(t, system, permission.Grant{SubjectID: "reader", Scope: permission.ScopeApp, Resource: resourceID(created.App.ID), Level: permission.Open})
+	assertServedMarker(t, server, system, "reader", "/apps/db/widgets/", "version-1")
 
-	builderDelete := appTestRequest(t, server, system, "builder", http.MethodDelete, "/api/databases/db/apps/widgets", nil)
-	if builderDelete.Code != http.StatusForbidden {
-		t.Fatalf("expected app writer delete 403, got %d: %s", builderDelete.Code, builderDelete.Body.String())
+	readerDelete := appTestRequest(t, server, system, "reader", http.MethodDelete, "/api/databases/db/apps/widgets", nil)
+	if readerDelete.Code != http.StatusForbidden {
+		t.Fatalf("expected non-admin delete 403, got %d: %s", readerDelete.Code, readerDelete.Body.String())
 	}
-	ownerDelete := appTestRequest(t, server, system, "owner", http.MethodDelete, "/api/databases/db/apps/widgets", nil)
-	if ownerDelete.Code != http.StatusNoContent {
-		t.Fatalf("expected owner delete 204, got %d: %s", ownerDelete.Code, ownerDelete.Body.String())
+	adminDelete := appTestRequest(t, server, system, "admin", http.MethodDelete, "/api/databases/db/apps/widgets", nil)
+	if adminDelete.Code != http.StatusNoContent {
+		t.Fatalf("expected admin delete 204, got %d: %s", adminDelete.Code, adminDelete.Body.String())
 	}
 
 	if _, err := system.App(ctx, created.App.ID); !errors.Is(err, gorm.ErrRecordNotFound) {
@@ -797,30 +823,30 @@ func TestDeleteAppIsOwnerOnly(t *testing.T) {
 	if _, err := system.AppVersion(ctx, created.App.ID, 1); !errors.Is(err, systemdb.ErrAppVersionNotFound) {
 		t.Fatalf("expected versions removed, got %v", err)
 	}
-	if level := appSubjectLevel(t, system, "builder", permission.ScopeApp, resourceID(created.App.ID)); level != permission.None {
+	if level := appSubjectLevel(t, system, "reader", permission.ScopeApp, resourceID(created.App.ID)); level != permission.None {
 		t.Fatalf("expected app grants removed, got %d", level)
 	}
-	detail := appTestRequest(t, server, system, "owner", http.MethodGet, "/api/databases/db/apps/widgets", nil)
+	detail := appTestRequest(t, server, system, "admin", http.MethodGet, "/api/databases/db/apps/widgets", nil)
 	if detail.Code != http.StatusNotFound {
 		t.Fatalf("expected deleted app detail 404, got %d: %s", detail.Code, detail.Body.String())
 	}
-	served := appTestRequest(t, server, system, "owner", http.MethodGet, "/apps/db/widgets/", nil)
+	served := appTestRequest(t, server, system, "admin", http.MethodGet, "/apps/db/widgets/", nil)
 	if served.Code != http.StatusNotFound {
 		t.Fatalf("expected deleted app page 404, got %d: %s", served.Code, served.Body.String())
 	}
-	again := appTestRequest(t, server, system, "owner", http.MethodDelete, "/api/databases/db/apps/widgets", nil)
+	again := appTestRequest(t, server, system, "admin", http.MethodDelete, "/api/databases/db/apps/widgets", nil)
 	if again.Code != http.StatusNotFound {
 		t.Fatalf("expected second delete 404, got %d: %s", again.Code, again.Body.String())
 	}
 
-	recreated := uploadTestApp(t, server, system, "builder", "db", "widgets", testAppBundle(t, "db", "widgets", appsdk.Version(), "fresh"), "publish=1")
+	recreated := uploadTestApp(t, server, system, "admin", "db", "widgets", testAppBundle(t, "db", "widgets", appsdk.Version(), "fresh"), "publish=1")
 	if recreated.Code != http.StatusCreated {
 		t.Fatalf("expected re-create 201, got %d: %s", recreated.Code, recreated.Body.String())
 	}
 	if upload := decodeTestJSON[testAppUpload](t, recreated); upload.Version.Version != 1 {
 		t.Fatalf("expected re-created app to restart at version 1, got %#v", upload.Version)
 	}
-	assertServedMarker(t, server, system, "builder", "/apps/db/widgets/", "fresh")
+	assertServedMarker(t, server, system, "admin", "/apps/db/widgets/", "fresh")
 }
 
 func TestAppSDKEndpointAndHeaderGate(t *testing.T) {
@@ -848,7 +874,7 @@ func TestAppSDKEndpointAndHeaderGate(t *testing.T) {
 
 	withHeader := func(userID, target, version string) *httptest.ResponseRecorder {
 		t.Helper()
-		request := httptest.NewRequest(http.MethodGet, target, nil)
+		request := newTestRequest(http.MethodGet, target, nil)
 		if userID != "" {
 			request.AddCookie(testSessionCookie(t, system, userID))
 		}

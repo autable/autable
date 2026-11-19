@@ -22,6 +22,7 @@ import (
 	"autable/internal/config"
 	"autable/internal/history"
 	"autable/internal/metadata"
+	"autable/internal/permission"
 	"autable/internal/recorddb"
 	"autable/internal/systemdb"
 	"autable/internal/table"
@@ -34,7 +35,9 @@ type testEnv struct {
 	server *httptest.Server
 	system *systemdb.DB
 	token  string
-	dir    string
+	// memberToken signs in a user who is not an admin.
+	memberToken string
+	dir         string
 	// noEnv runs without AUTABLE_SERVER/AUTABLE_TOKEN, using the stored login.
 	noEnv bool
 	// browser stands in for the user's browser during login.
@@ -70,6 +73,7 @@ func newTestEnv(t *testing.T) *testEnv {
 	tables := table.NewServiceWithRepository(historyStore, repository)
 	tables.SetFileBinder(system)
 	server := api.NewServerWithAuthConfig(catalog, system, tables, historyStore, config.AuthConfig{
+		Admins:   []string{"admin@example.com"},
 		Password: config.PasswordAuthConfig{Enabled: true},
 	})
 	metadataPath := filepath.Join(t.TempDir(), "metadata", "main.yml")
@@ -78,7 +82,7 @@ func newTestEnv(t *testing.T) *testEnv {
 	}
 	server.EnableMetadataWrites(metadataPath)
 
-	user, err := auth.NewPasswordUser(auth.PasswordRegistration{Email: "owner@example.com", DisplayName: "Owner", Password: "correct horse"})
+	user, err := auth.NewPasswordUser(auth.PasswordRegistration{Email: "admin@example.com", DisplayName: "Admin", Password: "correct horse"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,21 +90,37 @@ func newTestEnv(t *testing.T) *testEnv {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := system.SaveDatabaseOwner(ctx, "db", user.ID); err != nil {
+	session, err := system.CreateSession(ctx, user.ID, time.Hour)
+	if err != nil {
 		t.Fatal(err)
 	}
-	session, err := system.CreateSession(ctx, user.ID, time.Hour)
+	member, err := auth.NewPasswordUser(auth.PasswordRegistration{Email: "member@example.com", DisplayName: "Member", Password: "correct horse"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	member, err = system.UpsertUserByEmail(ctx, member)
+	if err != nil {
+		t.Fatal(err)
+	}
+	memberSession, err := system.CreateSession(ctx, member.ID, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
 	httpServer := httptest.NewServer(server)
 	t.Cleanup(httpServer.Close)
-	return &testEnv{t: t, server: httpServer, system: system, token: session.Token, dir: t.TempDir()}
+	return &testEnv{t: t, server: httpServer, system: system, token: session.Token, memberToken: memberSession.Token, dir: t.TempDir()}
 }
 
 // run executes autablectl and returns stdout; it fails the test on a
 // non-zero exit unless wantCode says otherwise.
 func (env *testEnv) run(wantCode int, args ...string) string {
+	env.t.Helper()
+	stdout, _ := env.runOutput(wantCode, args...)
+	return stdout
+}
+
+// runOutput is run that also returns stderr.
+func (env *testEnv) runOutput(wantCode int, args ...string) (string, string) {
 	env.t.Helper()
 	var stdout, stderr bytes.Buffer
 	a := &app{
@@ -127,7 +147,7 @@ func (env *testEnv) run(wantCode int, args ...string) string {
 	if code := a.run(args); code != wantCode {
 		env.t.Fatalf("autablectl %s: exit %d, want %d\nstdout: %s\nstderr: %s", strings.Join(args, " "), code, wantCode, stdout.String(), stderr.String())
 	}
-	return stdout.String()
+	return stdout.String(), stderr.String()
 }
 
 func decode[T any](t *testing.T, output string) T {
@@ -141,8 +161,8 @@ func decode[T any](t *testing.T, output string) T {
 
 func TestRowsCommandsRoundTrip(t *testing.T) {
 	env := newTestEnv(t)
-	if out := env.run(0, "whoami"); !strings.Contains(out, "owner@example.com") {
-		t.Fatalf("unexpected whoami: %s", out)
+	if me := decode[map[string]any](t, env.run(0, "whoami")); me["email"] != "admin@example.com" || me["is_admin"] != true {
+		t.Fatalf("unexpected whoami: %#v", me)
 	}
 
 	created := decode[map[string]any](t, env.run(0, "rows", "create", "db", "contacts", "--values", `{"名称":"Widget","status":"open"}`))
@@ -312,10 +332,10 @@ func TestBrowserLoginStoresToken(t *testing.T) {
 
 	env.run(1, "whoami")
 	login := decode[map[string]any](t, env.run(0, "login", "--server", env.server.URL))
-	if login["email"] != "owner@example.com" {
+	if login["email"] != "admin@example.com" {
 		t.Fatalf("unexpected login %#v", login)
 	}
-	if out := env.run(0, "whoami"); !strings.Contains(out, "owner@example.com") {
+	if out := env.run(0, "whoami"); !strings.Contains(out, "admin@example.com") {
 		t.Fatalf("stored token did not authenticate: %s", out)
 	}
 	env.run(0, "logout")
@@ -412,4 +432,68 @@ func TestSkillMapPointsAtExistingFiles(t *testing.T) {
 			t.Errorf("skill references %s, which does not exist", path)
 		}
 	}
+}
+
+func TestNonAdminSeesServerRefusals(t *testing.T) {
+	env := newTestEnv(t)
+	work := filepath.Join(env.dir, "scripts")
+	path := filepath.Join(work, "workflow", "db", "greet.js")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(testWorkflowScript), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	env.run(0, "pull", "--dir", work)
+	env.run(0, "push", "--dir", work)
+
+	env.token = env.memberToken
+	if me := decode[map[string]any](t, env.run(0, "whoami")); me["email"] != "member@example.com" || me["is_admin"] != false {
+		t.Fatalf("unexpected whoami: %#v", me)
+	}
+	// Admin-only commands report the server's refusal.
+	_, stderr := env.runOutput(1, "rows", "create", "db", "contacts", "--values", `{"status":"open"}`)
+	if !strings.Contains(stderr, "403") {
+		t.Fatalf("expected a 403 for a write without grants, got %q", stderr)
+	}
+	if _, stderr := env.runOutput(1, "workflow", "runs", "db", "1"); !strings.Contains(stderr, "not found") && !strings.Contains(stderr, "admin") {
+		t.Fatalf("expected the workflow to stay hidden, got %q", stderr)
+	}
+
+	// A user granted only run sees the workflow by name and runs it, but
+	// its script and history are for admins.
+	if err := env.system.SaveGrant(context.Background(), permission.Grant{SubjectID: memberID(t, env), Scope: permission.ScopeWorkflow, Resource: "1", Level: permission.Run}); err != nil {
+		t.Fatal(err)
+	}
+	if listed := decode[[]map[string]any](t, env.run(0, "workflow", "list", "db")); len(listed) != 1 || listed[0]["name"] != "greet" {
+		t.Fatalf("expected the runnable workflow, got %#v", listed)
+	}
+	run := decode[map[string]any](t, env.run(0, "workflow", "run", "db", "greet", "--inputs", `{"name":"Ada"}`))
+	if !strings.Contains(mustJSON(t, run["run"]), "hello Ada") {
+		t.Fatalf("unexpected run %#v", run)
+	}
+	for _, args := range [][]string{
+		{"workflow", "get", "db", "greet"},
+		{"workflow", "runs", "db", "greet"},
+		{"workflow", "set", "db", "greet", "--enabled", "false"},
+	} {
+		if _, stderr := env.runOutput(1, args...); !strings.Contains(stderr, "403") || !strings.Contains(stderr, "requires an admin") {
+			t.Fatalf("expected %v to surface the admin requirement, got %q", args, stderr)
+		}
+	}
+	if _, stderr := env.runOutput(1, "workflow", "get", "db", "greet", "--script"); !strings.Contains(stderr, "admin-only") {
+		t.Fatalf("expected script read to explain the admin requirement, got %q", stderr)
+	}
+	if _, stderr := env.runOutput(1, "pull", "--dir", filepath.Join(env.dir, "member")); !strings.Contains(stderr, "admin-only") {
+		t.Fatalf("expected pull to explain the admin requirement, got %q", stderr)
+	}
+}
+
+func memberID(t *testing.T, env *testEnv) string {
+	t.Helper()
+	user, err := env.system.UserByEmail(context.Background(), "member@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return user.ID
 }

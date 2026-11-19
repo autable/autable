@@ -125,8 +125,8 @@ describe("appState", () => {
     expect(buildWorkspacePath({ databaseName: "sales ops", view: "app", appName: "orders" })).toBe(
       "/databases/sales%20ops/apps/orders"
     );
-    expect(buildWorkspacePath({ databaseName: "workspace", view: "permission", roleName: "owner/admin" })).toBe(
-      "/databases/workspace/permissions/owner%2Fadmin"
+    expect(buildWorkspacePath({ databaseName: "workspace", view: "permission", roleName: "staff/lead" })).toBe(
+      "/databases/workspace/permissions/staff%2Flead"
     );
   });
 });

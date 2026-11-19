@@ -184,6 +184,9 @@ func runPull(a *app, args []string) error {
 			return fmt.Errorf("list workflows of %s: %w", database, err)
 		}
 		for _, workflow := range workflows {
+			if !workflow.readable() {
+				return fmt.Errorf("pull %s/%s: %w", database, workflow.Name, errScriptsAdminOnly)
+			}
 			add(kindWorkflow, workflow.remoteScript)
 		}
 	}

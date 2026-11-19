@@ -17,22 +17,18 @@ type Catalog struct {
 }
 
 type Database struct {
-	Name                    string  `yaml:"name" json:"name"`
-	Tables                  []Table `yaml:"tables" json:"tables"`
-	PermissionLevel         int     `yaml:"-" json:"permission_level"`
-	WorkflowPermissionLevel int     `yaml:"-" json:"workflow_permission_level"`
-	AppPermissionLevel      int     `yaml:"-" json:"app_permission_level"`
+	Name   string  `yaml:"name" json:"name"`
+	Tables []Table `yaml:"tables" json:"tables"`
 }
 
 type Table struct {
-	Name                    string  `yaml:"name" json:"name"`
-	DisplayName             string  `yaml:"display_name" json:"display_name"`
-	Fields                  []Field `yaml:"fields" json:"fields"`
-	Views                   []View  `yaml:"views" json:"views"`
-	PermissionLevel         int     `yaml:"-" json:"permission_level"`
-	DatabasePermissionLevel int     `yaml:"-" json:"database_permission_level"`
-	FieldPermissionLevel    int     `yaml:"-" json:"field_permission_level"`
-	ViewPermissionLevel     int     `yaml:"-" json:"view_permission_level"`
+	Name        string  `yaml:"name" json:"name"`
+	DisplayName string  `yaml:"display_name" json:"display_name"`
+	Fields      []Field `yaml:"fields" json:"fields"`
+	Views       []View  `yaml:"views" json:"views"`
+	// PermissionLevel is a response-only hint: 2 for admins, 1 for anyone
+	// else who can see the table.
+	PermissionLevel int `yaml:"-" json:"permission_level"`
 }
 
 // OptionSeparator joins the values of a multi-valued enum. Options may not
@@ -60,10 +56,10 @@ type Field struct {
 	Options []string `yaml:"options,omitempty" json:"options,omitempty"`
 	// Multiple lets an enum hold several options at once, stored as a
 	// comma-separated list. Storage is unchanged, so this needs no migration.
-	Multiple        bool     `yaml:"multiple,omitempty" json:"multiple,omitempty"`
-	RelationTable   string   `yaml:"relation_table,omitempty" json:"relation_table,omitempty"`
-	Deleted         bool     `yaml:"deleted" json:"deleted"`
-	PermissionLevel int      `yaml:"-" json:"permission_level,omitempty"`
+	Multiple        bool   `yaml:"multiple,omitempty" json:"multiple,omitempty"`
+	RelationTable   string `yaml:"relation_table,omitempty" json:"relation_table,omitempty"`
+	Deleted         bool   `yaml:"deleted" json:"deleted"`
+	PermissionLevel int    `yaml:"-" json:"permission_level,omitempty"`
 }
 
 type View struct {

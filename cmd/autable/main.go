@@ -168,6 +168,9 @@ func run(ctx context.Context, configPath string) error {
 		cfg.Auth,
 	)
 	server.SetPublicURL(cfg.Server.PublicURL)
+	if len(cfg.Auth.Admins) == 0 {
+		slog.Warn("auth.admins is empty: nobody can create databases or change schema, views, permissions, workflows, or apps")
+	}
 	if fileStore != nil {
 		server.SetFileStore(fileStore)
 	}

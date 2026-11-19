@@ -59,6 +59,8 @@ type TableWorkspaceProps = {
   columns: Column<TableGridRow>[];
   databaseName: string;
   displayedRows: TableGridRow[];
+  // Only admins change structure: fields, formulas, views.
+  isAdmin: boolean;
   openViewPanelRequest: number;
   onAddRow: () => void;
   onAddField: () => void;
@@ -119,6 +121,7 @@ export function TableWorkspace({
   columns,
   databaseName,
   displayedRows,
+  isAdmin,
   openViewPanelRequest,
   onAddRow,
   onAddField,
@@ -177,9 +180,7 @@ export function TableWorkspace({
   const { t } = useTranslation();
   const activeFields = table.fields.filter((field) => !field.deleted);
   const hasTable = Boolean(table.name);
-  const canWriteDatabase = hasTable && (table.database_permission_level ?? 2) >= 2;
-  const canWriteFields = hasTable && (table.field_permission_level ?? table.permission_level ?? 2) >= 2;
-  const canWriteViews = hasTable && (table.view_permission_level ?? table.permission_level ?? 2) >= 2;
+  const canWriteFields = hasTable && isAdmin;
   const canCreateRow = selectedTableView === "all" && activeFields.some((field) => canCreateField(field));
   const hasWritableFields = activeFields.some(canWriteField);
   const [recordPanelOpen, setRecordPanelOpen] = useState(false);
@@ -204,7 +205,7 @@ export function TableWorkspace({
     () => (table.views ?? []).find((viewDef) => viewDef.name === selectedTableView),
     [selectedTableView, table.views]
   );
-  const canWriteSelectedView = canWriteViews || (selectedView?.permission_level ?? 0) >= 2;
+  const canWriteSelectedView = hasTable && isAdmin;
   const recordMenuTarget = useMemo(
     () =>
       recordMenu
@@ -295,7 +296,6 @@ export function TableWorkspace({
           draggable: canWriteFields,
           renderHeaderCell: () => (
             <FieldHeader
-              canDeleteField={canWriteDatabase}
               canWriteFields={canWriteFields}
               field={field}
               onDeleteField={onDeleteField}
@@ -354,11 +354,10 @@ export function TableWorkspace({
         ),
         renderCell: () => ""
       };
-      return [...fieldColumns, addFieldColumn];
+      return canWriteFields ? [...fieldColumns, addFieldColumn] : fieldColumns;
     },
     [
       activeFields,
-      canWriteDatabase,
       canWriteFields,
       columns,
       hiddenFieldNameSet,
@@ -415,9 +414,10 @@ export function TableWorkspace({
             value={searchText}
             onChange={(_, data) => onSearchTextChange(data.value)}
           />
+          {canWriteSelectedView && (
           <Popover open={filterOpen} onOpenChange={(_, data) => setFilterOpen(data.open)} positioning="below-start" withArrow>
             <PopoverTrigger disableButtonEnhancement>
-              <ToolbarButton icon={<FilterRegular />} disabled={!canWriteSelectedView}>
+              <ToolbarButton icon={<FilterRegular />}>
                 {t("table.filter")}
               </ToolbarButton>
             </PopoverTrigger>
@@ -442,6 +442,7 @@ export function TableWorkspace({
               />
             </PopoverSurface>
           </Popover>
+          )}
           <ToolbarButton icon={<ColumnRegular />} onClick={() => setFieldSettingsOpen(true)}>
             {t("table.fields")}
           </ToolbarButton>
@@ -557,7 +558,6 @@ export function TableWorkspace({
               <MenuDivider />
               <MenuItem
                 icon={<DeleteRegular />}
-                disabled={!canWriteDatabase}
                 onClick={() => {
                   if (recordMenu) {
                     onDeleteSelectedRow(recordMenu.recordID);
@@ -879,21 +879,24 @@ function FieldSettingsList({
               }
             }}
           >
-            <button
-              type="button"
-              className="field-settings-drag-handle"
-              aria-label={t("table.dragField", { name: field.name })}
-              draggable={canWriteFields}
-              disabled={!canWriteFields}
-              onDragStart={(event) => {
-                setDraggedFieldName(field.name);
-                event.dataTransfer.effectAllowed = "move";
-                event.dataTransfer.setData("text/plain", field.name);
-              }}
-              onDragEnd={() => setDraggedFieldName("")}
-            >
-              <ReOrderDotsVerticalRegular />
-            </button>
+            {canWriteFields ? (
+              <button
+                type="button"
+                className="field-settings-drag-handle"
+                aria-label={t("table.dragField", { name: field.name })}
+                draggable
+                onDragStart={(event) => {
+                  setDraggedFieldName(field.name);
+                  event.dataTransfer.effectAllowed = "move";
+                  event.dataTransfer.setData("text/plain", field.name);
+                }}
+                onDragEnd={() => setDraggedFieldName("")}
+              >
+                <ReOrderDotsVerticalRegular />
+              </button>
+            ) : (
+              <span aria-hidden="true" />
+            )}
             <div className="field-settings-main">
               <Text weight="semibold" truncate>
                 {field.name}
@@ -953,7 +956,6 @@ function RelationDrawer({
 }
 
 function FieldHeader({
-  canDeleteField,
   canWriteFields,
   field,
   onDeleteField,
@@ -962,7 +964,6 @@ function FieldHeader({
   onSort,
   sortDirection
 }: {
-  canDeleteField: boolean;
   canWriteFields: boolean;
   field: Field;
   onDeleteField: (fieldName: string) => void;
@@ -995,13 +996,13 @@ function FieldHeader({
           <SortDownIcon className={sortDirection === "desc" ? "is-active" : ""} />
         </span>
       </button>
+      {canWriteFields && (
       <Menu>
         <MenuTrigger disableButtonEnhancement>
           <button
             type="button"
             className="field-header-menu-button"
             aria-label={t("table.fieldActions", { name: field.name })}
-            disabled={!canWriteFields && !canDeleteField}
             onClick={(event) => event.stopPropagation()}
           >
             <MoreHorizontalRegular />
@@ -1012,7 +1013,6 @@ function FieldHeader({
             {field.type === "formula" && (
               <MenuItem
                 icon={<EditRegular />}
-                disabled={!canWriteFields}
                 onClick={(event) => {
                   const rect = event.currentTarget.getBoundingClientRect();
                   onEditFormula(field, { x: rect.left, y: rect.bottom });
@@ -1024,7 +1024,6 @@ function FieldHeader({
             {field.type === "string" && (
               <MenuItem
                 icon={<EditRegular />}
-                disabled={!canWriteFields}
                 onClick={(event) => {
                   const rect = event.currentTarget.getBoundingClientRect();
                   onEditOptions(field, { x: rect.left, y: rect.bottom });
@@ -1033,12 +1032,13 @@ function FieldHeader({
                 {t("table.editOptions")}
               </MenuItem>
             )}
-            <MenuItem icon={<DeleteRegular />} disabled={!canDeleteField} onClick={() => onDeleteField(field.name)}>
+            <MenuItem icon={<DeleteRegular />} onClick={() => onDeleteField(field.name)}>
               {t("table.deleteField")}
             </MenuItem>
           </MenuList>
         </MenuPopover>
       </Menu>
+      )}
     </div>
   );
 }

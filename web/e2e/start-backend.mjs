@@ -15,6 +15,10 @@ const configPath = join(runtimeDir, "config.yml");
 // backslashes of Windows paths.
 const yamlString = (value) => JSON.stringify(value);
 
+// The specs sign in as this admin (see adminEmail in the specs); everyone
+// else they register is an ordinary user.
+const adminEmail = "e2e-admin@example.com";
+
 rmSync(runtimeDir, { force: true, recursive: true });
 mkdirSync(join(runtimeDir, "data"), { recursive: true });
 mkdirSync(join(repositoryPath, "metadata"), { recursive: true });
@@ -30,6 +34,8 @@ writeFileSync(
     "  enabled: false",
     `  path: ${yamlString(repositoryPath)}`,
     "auth:",
+    "  admins:",
+    `    - ${yamlString(adminEmail)}`,
     "  password:",
     "    enabled: true",
     "  oidc:",

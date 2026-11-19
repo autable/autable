@@ -439,6 +439,17 @@ type remoteScript struct {
 	Name         string `json:"name"`
 	Script       string `json:"script"`
 	UpdatedAt    int64  `json:"updated_at"`
+	// PermissionLevel is 2 for admins, who get the full definition, and 1
+	// for users who may only run the workflow (its script comes back empty).
+	PermissionLevel int `json:"permission_level"`
+}
+
+// errScriptsAdminOnly explains the blank scripts a non-admin's workflow
+// list carries instead of writing them out as empty files.
+var errScriptsAdminOnly = errors.New("workflow scripts are admin-only: sign in with an admin account (see autablectl whoami)")
+
+func (script remoteScript) readable() bool {
+	return script.PermissionLevel >= 2
 }
 
 type remoteWorkflow struct {
@@ -543,6 +554,9 @@ func runWorkflowGet(a *app, args []string) error {
 		return err
 	}
 	if *scriptOnly {
+		if !workflow.readable() {
+			return errScriptsAdminOnly
+		}
 		_, err := io.WriteString(a.stdout, workflow.Script)
 		return err
 	}

@@ -12,7 +12,7 @@ import { AuthDialog } from "./components/AuthDialog";
 import { PermissionPanel } from "./components/PermissionPanel";
 import { LoginPage } from "./components/LoginPage";
 import { TableWorkspace } from "./components/TableWorkspace";
-import { WorkflowWorkspace, type WorkflowTab } from "./components/WorkflowWorkspace";
+import { WorkflowRunList, WorkflowWorkspace, type WorkflowTab } from "./components/WorkflowWorkspace";
 import { WorkspaceEmptyState } from "./components/WorkspaceEmptyState";
 import { WorkspaceNavigation, type WorkspaceView } from "./components/WorkspaceNavigation";
 import { useNotifier } from "./notifications";
@@ -79,6 +79,9 @@ function WorkspaceApp() {
   const workspaceRoute = useMemo(() => parseWorkspaceRoute(locationPath), [locationPath]);
   const workspaceRouteRef = useRef<WorkspaceRoute | null>(workspaceRoute);
   workspaceRouteRef.current = workspaceRoute;
+  // Global admins (from the server config) write structure and code; all
+  // other users only get the data, apps and workflows granted to them.
+  const isAdmin = Boolean(currentUser?.is_admin);
 
   const database = catalog.databases.find((item) => item.name === selectedDatabaseName) ?? emptyDatabase;
   const table = database.tables.find((item) => item.name === selectedTable) ?? database.tables[0] ?? emptyTable;
@@ -114,6 +117,7 @@ function WorkspaceApp() {
   const workflowWorkspace = useWorkflowWorkspace({
     currentUserID: currentUser?.id,
     databaseName: database.name,
+    isAdmin,
     tableName: table.name,
     onStatus: notify
   });
@@ -141,6 +145,7 @@ function WorkspaceApp() {
   const permissionWorkspace = usePermissionWorkspace({
     currentUserID: currentUser?.id,
     database,
+    isAdmin,
     onStatus: notify
   });
   const {
@@ -198,7 +203,7 @@ function WorkspaceApp() {
       }
       return;
     }
-    const nextView = allowedWorkspaceView(nextDatabase, workspaceRoute.view);
+    const nextView = allowedWorkspaceView(isAdmin, workspaceRoute.view);
     setSelectedDatabaseName(nextDatabase.name);
     setView(nextView);
     if (nextView === "table") {
@@ -217,7 +222,7 @@ function WorkspaceApp() {
       setSelectedTable(nextTable?.name ?? "");
       setSelectedTableView(workspaceRoute.tableViewName ?? "all");
     }
-  }, [catalog.databases, locationPath, metadataReady, workspaceRoute]);
+  }, [catalog.databases, isAdmin, locationPath, metadataReady, workspaceRoute]);
 
   useEffect(() => {
     if (!workspaceRoute || workspaceRoute.databaseName !== database.name) {
@@ -368,7 +373,7 @@ function WorkspaceApp() {
       ? preferredDatabaseName
       : "";
     const nextDatabase = nextCatalog.databases.find((item) => item.name === dbName);
-    const nextView = route?.databaseName === dbName ? allowedWorkspaceView(nextDatabase, route.view) : "table";
+    const nextView = route?.databaseName === dbName ? allowedWorkspaceView(isAdmin, route.view) : "table";
     const nextTable =
       nextDatabase?.tables.find((item) => item.name === route?.tableName) ?? nextDatabase?.tables[0] ?? emptyTable;
     setSelectedDatabaseName(dbName);
@@ -495,7 +500,7 @@ function WorkspaceApp() {
     if (!nextDatabase) {
       return;
     }
-    if (nextView === "permission" && (nextDatabase.permission_level ?? 0) < 2) {
+    if (nextView === "permission" && !isAdmin) {
       nextView = "table";
     }
     setSelectedDatabaseName(databaseName);
@@ -677,6 +682,7 @@ function WorkspaceApp() {
         onToggleCollapsed={() => setPrimaryNavCollapsed((value) => !value)}
         currentUser={currentUser}
         database={database}
+        isAdmin={isAdmin}
         newDatabaseName={newDatabaseName}
         newRoleName={newRoleName}
         newTableName={newTableName}
@@ -715,7 +721,7 @@ function WorkspaceApp() {
             <Text weight="semibold">
               {database.name || t("common.noDatabase")}
               {view === "table" && table.name ? ` / ${table.display_name || table.name}` : ""}
-              {view === "workflow" && selectedWorkflow ? ` / ${selectedWorkflow.name}` : ""}
+              {view === "workflow" && isAdmin && selectedWorkflow ? ` / ${selectedWorkflow.name}` : ""}
               {view === "app" ? ` / ${selectedApp ? selectedApp.title || selectedApp.name : t("app.apps").toLowerCase()}` : ""}
               {view === "permission" ? ` / ${t("common.permission").toLowerCase()}` : ""}
             </Text>
@@ -750,6 +756,7 @@ function WorkspaceApp() {
               columns={tableWorkspace.columns}
               databaseName={database.name}
               displayedRows={tableWorkspace.displayedRows}
+              isAdmin={isAdmin}
               newFieldFormula={tableWorkspace.newFieldFormula}
               newFieldName={tableWorkspace.newFieldName}
               newFieldMultiple={tableWorkspace.newFieldMultiple}
@@ -809,12 +816,18 @@ function WorkspaceApp() {
               <WorkspaceEmptyState
                 icon={<DocumentTableRegular />}
                 title={t("empty.noTableTitle")}
-                description={t("empty.noTableDescription")}
+                description={t(isAdmin ? "empty.noTableDescription" : "empty.noGrantedTableDescription")}
               />
             ))}
 
           {view === "workflow" &&
-            (selectedWorkflow ? (
+            (selectedWorkflow && !isAdmin ? (
+            <WorkflowRunList
+              databaseName={database.name}
+              onRun={workflowWorkspace.runGrantedWorkflow}
+              workflows={workflows}
+            />
+            ) : selectedWorkflow ? (
             <WorkflowWorkspace
               activeTab={selectedWorkflowTab}
               databaseName={database.name}
@@ -839,7 +852,7 @@ function WorkspaceApp() {
               <WorkspaceEmptyState
                 icon={<DocumentFlowchartRegular />}
                 title={t("empty.noWorkflowTitle")}
-                description={t("empty.noWorkflowDescription")}
+                description={t(isAdmin ? "empty.noWorkflowDescription" : "empty.noRunnableWorkflowDescription")}
               />
             ))}
 
@@ -848,10 +861,10 @@ function WorkspaceApp() {
               apps={apps}
               appsReady={appsReady}
               busy={appWorkspace.busy}
-              canDelete={(database.permission_level ?? 0) >= 2}
               currentUser={currentUser}
               databaseName={database.name}
               detail={appWorkspace.detail}
+              isAdmin={isAdmin}
               onDelete={deleteSelectedApp}
               onPublish={appWorkspace.publishVersion}
               onSelectApp={selectAppFromNavigation}
@@ -859,7 +872,7 @@ function WorkspaceApp() {
             />
           )}
 
-          {view === "permission" && (
+          {view === "permission" && isAdmin && (
             <PermissionPanel
               apps={apps}
               database={database}
@@ -905,8 +918,8 @@ function WorkspaceApp() {
   );
 }
 
-function allowedWorkspaceView(database: DatabaseMetadata | undefined, nextView: View): View {
-  if (nextView === "permission" && (database?.permission_level ?? 0) < 2) {
+function allowedWorkspaceView(isAdmin: boolean, nextView: View): View {
+  if (nextView === "permission" && !isAdmin) {
     return "table";
   }
   return nextView;

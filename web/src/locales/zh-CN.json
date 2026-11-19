@@ -47,8 +47,10 @@
     "noDatabaseDescription": "在左侧创建或选择一个数据库开始。",
     "noTableTitle": "还没有表",
     "noTableDescription": "在「表」列表点 + 新建第一个表。",
+    "noGrantedTableDescription": "这个数据库里还没有共享给你的表。",
     "noWorkflowTitle": "还没有工作流",
     "noWorkflowDescription": "在「工作流」列表点 + 用代码创建自动化。",
+    "noRunnableWorkflowDescription": "这个数据库里还没有共享给你的工作流。",
     "noRoleTitle": "还没有角色",
     "noRoleDescription": "在「角色」列表点 + 新建第一个角色。"
   },
@@ -141,10 +143,7 @@
     "allItems": "全部",
     "empty": "创建角色后即可配置表、字段、工作流和应用权限。",
     "dataSection": "数据",
-    "fieldDefine": "字段定义",
     "fieldValues": "字段值",
-    "allowed": "允许",
-    "fieldAdd": "建字段",
     "fieldSet": "{{table}} 字段",
     "fields": "字段",
     "fileView": "查看",
@@ -153,11 +152,6 @@
       "create": "增",
       "read": "读",
       "update": "改"
-    },
-    "levels": {
-      "none": "无",
-      "read": "只读",
-      "write": "读写"
     },
     "allFields": "全部字段",
     "allViews": "全部视图",
@@ -181,7 +175,6 @@
     "roleAccessMatrix": "{{database}} 角色权限矩阵",
     "roleMemberDisplayName": "角色成员显示名",
     "scope": "范围",
-    "schemaSection": "结构",
     "searchMember": "搜索成员",
     "tables": "表",
     "view": "{{view}} 视图",
@@ -189,14 +182,16 @@
     "views": "视图",
     "workflowMember": "工作流成员",
     "workflowPartialPermissions": "工作流部分权限",
-    "workflowSet": "全部工作流",
     "workflows": "工作流",
     "appSet": "全部应用",
     "apps": "应用",
     "appLevels": {
       "none": "无",
-      "read": "打开",
-      "write": "管理"
+      "open": "打开"
+    },
+    "workflowLevels": {
+      "none": "无",
+      "run": "运行"
     }
   },
   "status": {
@@ -277,6 +272,7 @@
     "workflowTimeoutUpdated": "{{name}} 运行超时设置已更新",
     "workflowNameRequired": "工作流名称必填",
     "workflowRenameFailed": "工作流重命名失败",
+    "workflowRan": "已运行工作流 {{name}}",
     "workflowRunFailed": "工作流运行失败",
     "workflowRunSaved": "工作流运行已保存：{{key}}",
     "workflowSaveFailed": "工作流保存失败",
@@ -425,6 +421,8 @@
     "vars": "变量 {{ports}}",
     "secrets": "密钥 {{ports}}",
     "workflowLabel": "{{database}} 工作流",
+    "runnableList": "可运行的工作流",
+    "runWorkflow": "运行 {{name}}",
     "workflowScriptLabel": "工作流 JavaScript",
     "workspaceTabs": "工作流工作区标签"
   },
@@ -437,7 +435,6 @@
     "token": "运行器令牌",
     "tokenCreatedAt": "创建于 {{createdAt}}",
     "tokenMissing": "尚未生成令牌",
-    "ownerOnly": "只有数据库所有者可以查看和重置令牌。",
     "tokenShownOnce": "请立即复制令牌——之后不会再显示：",
     "tokenValue": "运行器令牌值",
     "generate": "生成令牌",
