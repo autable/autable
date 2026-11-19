@@ -41,9 +41,10 @@ test("does not request protected workspace resources before login", async ({ pag
   const authResponse = page.waitForResponse((response) => response.url().includes("/api/auth/me"));
   await page.goto("/");
   await authResponse;
+  await expect(page.getByRole("form", { name: "Sign in" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Login" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Create DB" })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Refresh metadata" })).toBeDisabled();
+  await expect(page.getByRole("navigation", { name: "Workspace" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "New database" })).toHaveCount(0);
 
   expect(apiPaths).toContain("/api/auth/me");
   expect(apiPaths).toContain("/api/auth/config");
@@ -237,9 +238,20 @@ async function createNamedResource(page: Page, buttonName: string, inputName: st
   await saveButton.click();
 }
 
+// The sidebar: database switcher, Home/Apps, tables and (admins) Manage.
+function sidebar(page: Page) {
+  return page.getByRole("navigation", { name: "Workspace" });
+}
+
 async function waitForWorkspaceReady(page: Page, databaseName: string, tableName = /Contacts/) {
-  await expect(page.getByRole("button", { name: databaseName })).toBeVisible();
-  await expect(page.getByRole("button", { name: tableName })).toBeVisible();
+  await expect(page.getByRole("button", { name: databaseName, exact: true })).toBeVisible();
+  await expect(sidebar(page).getByRole("link", { name: tableName })).toBeVisible();
+}
+
+// Opens the database switcher; admins find "New database" at its end.
+async function openDatabaseSwitcher(page: Page, databaseName: string) {
+  await page.getByRole("button", { name: databaseName, exact: true }).click();
+  return page.getByRole("menu");
 }
 
 async function waitForTableReady(page: Page, databaseName: string, tableName = /Contacts/) {
@@ -285,8 +297,8 @@ async function setupWorkspace(page: Page): Promise<WorkspaceSetup> {
     secrets: {},
     variables: {}
   });
-  // Selection is scoped to the URL route, so land on the database directly.
-  await page.goto(`/databases/${databaseName}`);
+  // Selection is scoped to the URL route, so land on the table directly.
+  await page.goto(`/databases/${databaseName}/tables/${tableName}`);
   await waitForTableReady(page, databaseName);
   return { user, databaseName, tableName };
 }
@@ -298,16 +310,23 @@ test("hides databases when the signed-in user has no permission", async ({ page 
   await expect(page.getByText("No database").first()).toBeVisible();
 });
 
-test("covers login modal and workspace navigation through the real backend", async ({ page }) => {
-  await setupWorkspace(page);
+test("covers workspace navigation through the real backend", async ({ page }) => {
+  const { databaseName } = await setupWorkspace(page);
 
-  await expect(page.getByRole("button", { name: "Table", exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "Workflow", exact: true }).click();
-  await expect(page.getByRole("button", { name: /welcome-contact/ })).toBeVisible();
-  await page.getByRole("button", { name: "App", exact: true }).click();
+  await expect(sidebar(page).getByRole("link", { name: "Contacts" })).toHaveAttribute("aria-current", "page");
+  await sidebar(page).getByRole("link", { name: "Home", exact: true }).click();
+  await expect(page).toHaveURL(`/databases/${databaseName}`);
+  await expect(page.getByRole("heading", { name: databaseName, level: 1 })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Tables" }).getByRole("link", { name: /Contacts/ })).toBeVisible();
+  await sidebar(page).getByRole("link", { name: "Workflows", exact: true }).click();
+  await expect(sidebar(page).getByRole("link", { name: /welcome-contact/ })).toBeVisible();
+  await sidebar(page).getByRole("link", { name: "Apps", exact: true }).click();
   await expect(page.getByText("No apps yet")).toBeVisible();
-  await page.getByRole("button", { name: "Permission", exact: true }).click();
+  await sidebar(page).getByRole("link", { name: "Permissions", exact: true }).click();
   await expect(page.getByRole("button", { name: "Create Role" })).toBeVisible();
+  await sidebar(page).getByRole("link", { name: "Overview", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Manage", level: 1 })).toBeVisible();
+  await expect(page.getByRole("table", { name: "Tables & schema" }).getByRole("link", { name: /Contacts/ })).toBeVisible();
 });
 
 test("gives granted non-admins data, apps and workflows but no structure actions", async ({ page }) => {
@@ -348,13 +367,24 @@ test("gives granted non-admins data, apps and workflows but no structure actions
 
   await api(page, "POST", "/api/auth/logout");
   await loginUser(page, member.email);
+  // The home page offers the granted app and table.
   await page.goto(`/databases/${databaseName}`);
+  await waitForWorkspaceReady(page, databaseName);
+  await expect(page.getByRole("region", { name: "Apps" }).getByRole("link", { name: `Open ${appTitle}` })).toHaveAttribute(
+    "href",
+    `/apps/${databaseName}/granted-app/`
+  );
+  await page.getByRole("region", { name: "Tables" }).getByRole("link", { name: /Contacts/ }).click();
   await waitForTableReady(page, databaseName);
   const tableCanvas = page.locator(".table-view");
   const recordsGrid = tableCanvas.getByRole("grid", { name: "Table records" });
   await expect(recordsGrid.getByRole("gridcell", { name: "Ada Lovelace", exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Create DB" })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Permission", exact: true })).toHaveCount(0);
+  const switcher = await openDatabaseSwitcher(page, databaseName);
+  await expect(switcher.getByRole("menuitemradio", { name: databaseName })).toBeVisible();
+  await expect(switcher.getByRole("menuitem", { name: "New database" })).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await expect(sidebar(page).getByRole("link", { name: "Permissions" })).toHaveCount(0);
+  await expect(sidebar(page).getByRole("link", { name: "Overview" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Create Table" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Create View" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Remote runners" })).toHaveCount(0);
@@ -362,15 +392,15 @@ test("gives granted non-admins data, apps and workflows but no structure actions
   await expect(recordsGrid.getByRole("button", { name: "Field actions name" })).toHaveCount(0);
   await expect(tableCanvas.getByRole("toolbar", { name: "Table canvas actions" }).getByRole("button", { name: "Edit Row" })).toBeVisible();
 
-  await page.getByRole("button", { name: "Workflow", exact: true }).click();
-  await expect(page.getByRole("button", { name: workflowName, exact: true })).toBeVisible();
+  await sidebar(page).getByRole("link", { name: "Workflows", exact: true }).click();
+  await expect(page.getByRole("table", { name: "Runnable workflows" }).getByText(workflowName, { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Create Workflow" })).toHaveCount(0);
   await expect(page.getByTestId("workflow-js-editor")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Workflow nodes" })).toHaveCount(0);
   await page.getByRole("button", { name: `Run ${workflowName}` }).click();
   await expect(page.getByText(`Ran workflow ${workflowName}`).first()).toBeVisible();
 
-  await page.getByRole("button", { name: "App", exact: true }).click();
+  await sidebar(page).getByRole("link", { name: "Apps", exact: true }).click();
   const openLink = page.getByRole("table", { name: "Apps" }).getByRole("link", { name: `Open ${appTitle}` });
   await expect(openLink).toHaveAttribute("href", `/apps/${databaseName}/granted-app/`);
   await expect(page.getByText(/autablectl/)).toHaveCount(0);
@@ -415,18 +445,19 @@ test("hides workflow and app resources without resource permission", async ({ pa
 
   await api(page, "POST", "/api/auth/logout");
   await loginUser(page, resourceUser.email);
-  await page.goto(`/databases/${databaseName}`);
+  await page.goto(`/databases/${databaseName}/tables/contacts`);
   await waitForTableReady(page, databaseName);
   const tableCanvas = page.locator(".table-view");
   const tableActions = tableCanvas.getByRole("toolbar", { name: "Table canvas actions" });
   await expect(tableCanvas.getByRole("grid", { name: "Table records" }).getByRole("button", { name: "Add field" })).toHaveCount(0);
   await expect(tableActions.getByRole("button", { name: "Edit Row" })).toBeDisabled();
   await expect(tableActions.getByRole("button", { name: "Row", exact: true })).toBeDisabled();
-  await page.getByRole("button", { name: "Workflow", exact: true }).click();
-  await expect(page.getByRole("button", { name: workflowName })).toHaveCount(0);
-  await page.getByRole("button", { name: "App", exact: true }).click();
+  await sidebar(page).getByRole("link", { name: "Workflows", exact: true }).click();
+  await expect(page.getByText("No workflows yet")).toBeVisible();
+  await expect(page.getByText(workflowName)).toHaveCount(0);
+  await sidebar(page).getByRole("link", { name: "Apps", exact: true }).click();
   await expect(page.getByText("No apps yet")).toBeVisible();
-  await expect(page.getByRole("button", { name: appTitle })).toHaveCount(0);
+  await expect(page.getByText(appTitle)).toHaveCount(0);
 });
 
 test("prevents partial field readers from mutating table metadata", async ({ page }) => {
@@ -459,7 +490,7 @@ test("prevents partial field readers from mutating table metadata", async ({ pag
 
   await api(page, "POST", "/api/auth/logout");
   await loginUser(page, reader.email);
-  await page.goto(`/databases/${databaseName}`);
+  await page.goto(`/databases/${databaseName}/tables/${tableName}`);
   await waitForTableReady(page, databaseName);
   await expect(page.getByRole("button", { name: "Add field" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Create View" })).toHaveCount(0);
@@ -536,9 +567,9 @@ test("lets run-granted non-admins run a workflow without the editor", async ({ p
   await page.goto(`/databases/${databaseName}`);
   await waitForWorkspaceReady(page, databaseName);
 
-  await page.getByRole("button", { name: "Workflow", exact: true }).click();
-  await expect(page.getByRole("button", { name: workflowName, exact: true })).toBeVisible();
+  await sidebar(page).getByRole("link", { name: "Workflows", exact: true }).click();
   await expect(page.getByRole("table", { name: "Runnable workflows" })).toBeVisible();
+  await expect(page.getByRole("table", { name: "Runnable workflows" }).getByText(workflowName, { exact: true })).toBeVisible();
   await expect(page.getByTestId("workflow-js-editor")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Edit config notifier" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Save" })).toHaveCount(0);
@@ -556,17 +587,26 @@ test("covers database and table creation through the real backend", async ({ pag
   const suffix = `${Date.now()}-${sequence}`;
   const databaseName = `sales${suffix}`;
   const tableName = `projects${suffix}`;
-  await createNamedResource(page, "Create DB", "New database name", databaseName);
-  await expect(page.getByRole("button", { name: databaseName })).toHaveAttribute("aria-expanded", "true");
+  const switcher = await openDatabaseSwitcher(page, workspace.databaseName);
+  await switcher.getByRole("menuitem", { name: "New database" }).click();
+  const createDialog = page.getByRole("dialog", { name: "New database" });
+  await createDialog.getByRole("textbox", { name: "New database name" }).fill(databaseName);
+  await createDialog.getByRole("button", { name: "Save" }).click();
+  await expect(page).toHaveURL(`/databases/${databaseName}`);
+  await expect(page.getByRole("button", { name: databaseName, exact: true })).toBeVisible();
   await expect(page.getByText(`Created database ${databaseName}`).first()).toBeVisible();
 
   await createNamedResource(page, "Create Table", "New table name", tableName);
-  await expect(page.getByRole("button", { name: tableName })).toBeVisible();
+  await expect(sidebar(page).getByRole("link", { name: tableName })).toHaveAttribute("aria-current", "page");
+  await expect(page).toHaveURL(`/databases/${databaseName}/tables/${tableName}`);
   await expect(page.getByText(`Created table ${databaseName}.${tableName}`).first()).toBeVisible();
 
-  await page.getByRole("button", { name: workspace.databaseName, exact: true }).click();
+  const back = await openDatabaseSwitcher(page, databaseName);
+  await back.getByRole("menuitemradio", { name: workspace.databaseName }).click();
+  await expect(page).toHaveURL(`/databases/${workspace.databaseName}`);
+  await sidebar(page).getByRole("link", { name: /Contacts/ }).click();
   await waitForTableReady(page, workspace.databaseName);
-  await expect(page.getByRole("button", { name: workspace.databaseName, exact: true })).toHaveAttribute("aria-expanded", "true");
+  await expect(sidebar(page).getByRole("link", { name: /Contacts/ })).toHaveAttribute("aria-current", "page");
 });
 
 test("covers table views, row creation, and row history through the real backend", async ({ page }) => {
@@ -729,7 +769,7 @@ test("covers table views, row creation, and row history through the real backend
   )) as Array<{ values: { name?: string } }>;
   expect(viewRows.map((row) => row.values.name)).toEqual(["Grace Hopper", "Ada Lovelace"]);
 
-  await page.getByRole("button", { name: "Active", exact: true }).click();
+  await page.getByRole("navigation", { name: "Views" }).getByRole("link", { name: "Active", exact: true }).click();
   await expect(page.getByText(/\d+ of \d+ records/).first()).toBeVisible();
   const graceRows = (await api(
     page,
@@ -792,11 +832,11 @@ test("covers table views, row creation, and row history through the real backend
 test("covers workflow editor, node list, and run history through the real backend", async ({ page }) => {
   const workspace = await setupWorkspace(page);
 
-  await page.getByRole("button", { name: "Workflow", exact: true }).click();
+  await sidebar(page).getByRole("link", { name: "Workflows", exact: true }).click();
   const workflowName = `ui-workflow-${Date.now()}`;
   await createNamedResource(page, "Create Workflow", "New workflow name", workflowName);
   await expect(page.getByText(`Created workflow ${workflowName}`).first()).toBeVisible();
-  await expect(page.getByRole("button", { name: workflowName })).toBeVisible();
+  await expect(sidebar(page).getByRole("link", { name: workflowName })).toHaveAttribute("aria-current", "page");
   const createdWorkflows = (await api(page, "GET", `/api/databases/${workspace.databaseName}/workflows`)) as Array<{
     name: string;
     script: string;
@@ -964,11 +1004,11 @@ test("covers workflow editor, node list, and run history through the real backen
 test("runs table row workflow nodes through the real backend", async ({ page }) => {
   const workspace = await setupWorkspace(page);
 
-  await page.getByRole("button", { name: "Workflow", exact: true }).click();
+  await sidebar(page).getByRole("link", { name: "Workflows", exact: true }).click();
   const workflowName = `row-node-workflow-${Date.now()}`;
   await createNamedResource(page, "Create Workflow", "New workflow name", workflowName);
   await expect(page.getByText(`Created workflow ${workflowName}`).first()).toBeVisible();
-  await expect(page.getByRole("button", { name: workflowName })).toBeVisible();
+  await expect(sidebar(page).getByRole("link", { name: workflowName })).toHaveAttribute("aria-current", "page");
   const rowNodeWorkflows = (await api(page, "GET", `/api/databases/${workspace.databaseName}/workflows`)) as Array<{
     id: number;
     name: string;
@@ -1098,9 +1138,9 @@ test("covers role members and resource permission grants through the real backen
   await page.reload();
   await waitForWorkspaceReady(page, databaseName);
 
-  await page.getByRole("button", { name: "Permission", exact: true }).click();
+  await sidebar(page).getByRole("link", { name: "Permissions", exact: true }).click();
   await createNamedResource(page, "Create Role", "New role name", "editor");
-  await expect(page.getByRole("button", { name: /editor/ })).toBeVisible();
+  await expect(sidebar(page).getByRole("link", { name: "editor", exact: true })).toHaveAttribute("aria-current", "page");
   await page.getByRole("button", { name: /Members/ }).click();
   const membersDialog = page.getByRole("dialog", { name: "Members" });
   await membersDialog.getByRole("combobox", { name: "Role member display name" }).fill(user.email);

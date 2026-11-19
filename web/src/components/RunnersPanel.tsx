@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Button,
   Dialog,
@@ -10,15 +10,24 @@ import {
   DialogTrigger,
   Text
 } from "@fluentui/react-components";
-import { ArrowSyncCircleRegular, KeyResetRegular } from "@fluentui/react-icons";
+import { KeyResetRegular } from "@fluentui/react-icons";
 import { useTranslation } from "react-i18next";
 import { fetchRunners, resetRunnerToken, type RunnersResponse } from "../api";
 
 // Runners are database-scoped: the panel manages the current database's
-// runner token and lists the runners connected with it. Only admins reach it.
-export function RunnersPanel({ databaseName }: { databaseName: string }) {
+// runner token and lists the runners connected with it. Only admins reach
+// it, from the sidebar's Manage group and the admin overview, which control
+// whether it is open.
+export function RunnersPanel({
+  databaseName,
+  open,
+  onOpenChange
+}: {
+  databaseName: string;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
   const { t, i18n } = useTranslation();
-  const [open, setOpen] = useState(false);
   const [runnersInfo, setRunnersInfo] = useState<RunnersResponse | null>(null);
   const [freshToken, setFreshToken] = useState("");
   const [error, setError] = useState("");
@@ -42,27 +51,19 @@ export function RunnersPanel({ databaseName }: { databaseName: string }) {
     }
   }
 
+  useEffect(() => {
+    if (open && databaseName) {
+      setFreshToken("");
+      setRunnersInfo(null);
+      setError("");
+      void refresh();
+    }
+    // Reload whenever the dialog opens, or the database changes under it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, databaseName]);
+
   return (
-    <Dialog
-      open={open}
-      onOpenChange={(_, data) => {
-        setOpen(data.open);
-        if (data.open) {
-          setFreshToken("");
-          void refresh();
-        }
-      }}
-    >
-      <DialogTrigger disableButtonEnhancement>
-        <Button
-          className="runners-entry"
-          icon={<ArrowSyncCircleRegular />}
-          appearance="subtle"
-          disabled={databaseName === ""}
-        >
-          {t("runners.title")}
-        </Button>
-      </DialogTrigger>
+    <Dialog open={open} onOpenChange={(_, data) => onOpenChange(data.open)}>
       <DialogSurface aria-label={t("runners.title")}>
         <DialogBody>
           <DialogTitle>{`${t("runners.title")} · ${databaseName}`}</DialogTitle>

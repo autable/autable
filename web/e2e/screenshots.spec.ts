@@ -37,22 +37,25 @@ async function signInAdmin(page: Page) {
   sequence += 1;
   const email = "e2e-admin@example.com";
   await page.goto("/");
-  await page.getByRole("button", { name: "Login" }).click();
-  const dialog = page.getByRole("dialog");
-  await dialog.getByRole("tab", { name: "Register" }).click();
-  await dialog.getByLabel("Email").fill(email);
-  await dialog.getByLabel("Display name").fill(email);
-  await dialog.getByLabel("Password").fill("correct horse");
+  const form = page.getByRole("form", { name: "Sign in" });
+  await form.getByRole("tab", { name: "Register" }).click();
+  await form.getByLabel("Email").fill(email);
+  await form.getByLabel("Display name").fill(email);
+  await form.getByLabel("Password").fill("correct horse");
   const registered = page.waitForResponse((response) => response.url().endsWith("/api/auth/register"));
-  await dialog.getByRole("button", { name: "Register" }).click();
+  await form.getByRole("button", { name: "Register" }).click();
   if ((await registered).status() === 409) {
-    await dialog.getByRole("tab", { name: "Login" }).click();
-    await dialog.getByLabel("Email").fill(email);
-    await dialog.getByLabel("Password").fill("correct horse");
-    await dialog.getByRole("button", { name: "Login" }).click();
+    await form.getByRole("tab", { name: "Login" }).click();
+    await form.getByLabel("Email").fill(email);
+    await form.getByLabel("Password").fill("correct horse");
+    await form.getByRole("button", { name: "Login" }).click();
   }
-  await page.getByRole("button", { name: email }).waitFor();
+  await page.getByRole("navigation", { name: "Workspace" }).or(page.getByText("No databases yet")).first().waitFor();
   return { email };
+}
+
+function sidebar(page: Page) {
+  return page.getByRole("navigation", { name: "Workspace" });
 }
 
 async function uploadApp(page: Page, databaseName: string, name: string, title: string, query = "") {
@@ -70,8 +73,8 @@ async function shot(page: Page, name: string) {
 }
 
 async function navShot(page: Page, name: string) {
-  // Clip just the two nav columns so we can inspect icon/text/selection detail.
-  await page.screenshot({ path: join(shotsDir, `${name}.png`), clip: { x: 0, y: 0, width: 522, height: 900 } });
+  // Clip just the sidebar so we can inspect icon/text/selection detail.
+  await page.screenshot({ path: join(shotsDir, `${name}.png`), clip: { x: 0, y: 0, width: 256, height: 900 } });
 }
 
 // Run an interaction, then screenshot; swallow failures so one flaky step
@@ -93,14 +96,12 @@ test("capture workspace screenshots", async ({ page }) => {
   test.setTimeout(180_000);
   await page.setViewportSize({ width: 1440, height: 900 });
 
-  // Login dialog before auth.
+  // Sign-in page before auth.
   await page.goto("/");
-  await page.getByRole("button", { name: "Login" }).click();
-  await page.getByRole("dialog").waitFor();
+  await page.getByRole("form", { name: "Sign in" }).waitFor();
   await page.getByRole("tab", { name: "Register" }).waitFor();
   await page.waitForTimeout(600);
-  await shot(page, "01-login-dialog");
-  await page.keyboard.press("Escape");
+  await shot(page, "01-login");
 
   await signInAdmin(page);
   const suffix = `${Date.now()}-${sequence}`;
@@ -153,29 +154,21 @@ test("capture workspace screenshots", async ({ page }) => {
   await uploadApp(page, databaseName, "stock-check", "Stock check");
   // Selection is scoped to the URL route, so land on the database directly.
   await page.goto(`/databases/${databaseName}`);
-  await page.getByRole("button", { name: databaseName }).waitFor();
-  await page.getByRole("button", { name: /Contacts/ }).waitFor();
+  await page.getByRole("button", { name: databaseName, exact: true }).waitFor();
+  await sidebar(page).getByRole("link", { name: /Contacts/ }).waitFor();
+  await shot(page, "02-home");
 
   // Table view.
-  await page.getByRole("button", { name: /Contacts/ }).click();
+  await sidebar(page).getByRole("link", { name: /Contacts/ }).click();
   await page.locator(".autable-grid").waitFor();
   await page.waitForTimeout(400);
   await shot(page, "02-table-view");
   await navShot(page, "nav-01-table");
-  await page.screenshot({ path: join(shotsDir, "nav-zoom-primary.png"), clip: { x: 0, y: 0, width: 260, height: 300 } });
-
-  // Collapsed primary nav rail.
-  await capture(page, "nav-03-rail", async () => {
-    await page.getByRole("button", { name: /Collapse/ }).click(bestEffort);
-    await page.waitForTimeout(300);
-  });
-  await page.screenshot({ path: join(shotsDir, "nav-zoom-rail.png"), clip: { x: 0, y: 0, width: 320, height: 420 } });
-  await page.getByRole("button", { name: /Expand/ }).click(bestEffort).catch(() => undefined);
-  await page.waitForTimeout(200);
+  await page.screenshot({ path: join(shotsDir, "nav-zoom-primary.png"), clip: { x: 0, y: 0, width: 256, height: 300 } });
 
   // Filter popover (best-effort; never abort the whole capture run on one flaky step).
   await capture(page, "03-table-filter-popover", async () => {
-    await page.getByRole("button", { name: "Active", exact: true }).click(bestEffort);
+    await page.getByRole("navigation", { name: "Views" }).getByRole("link", { name: "Active", exact: true }).click(bestEffort);
     await page.getByRole("button", { name: "Filter" }).click(bestEffort);
     await page.getByLabel("View filters").waitFor(bestEffort);
     await page.waitForTimeout(200);
@@ -185,7 +178,7 @@ test("capture workspace screenshots", async ({ page }) => {
   // Add field popover.
   await capture(page, "04-table-add-field", async () => {
     await page.getByRole("button", { name: "Add field" }).click(bestEffort);
-    await page.getByRole("group", { name: "Add field" }).waitFor(bestEffort);
+    await page.getByRole("dialog", { name: "Add field" }).waitFor(bestEffort);
     await page.getByLabel("Field type").selectOption("relation", bestEffort);
     await page.waitForTimeout(200);
   });
@@ -201,7 +194,7 @@ test("capture workspace screenshots", async ({ page }) => {
   await page.getByRole("button", { name: "Close" }).click({ ...bestEffort }).catch(() => undefined);
 
   // Workflow view.
-  await page.getByRole("button", { name: "Workflow", exact: true }).click();
+  await sidebar(page).getByRole("link", { name: "Workflows", exact: true }).click();
   await page.getByText("Instances", { exact: true }).waitFor();
   await page.waitForTimeout(500);
   await shot(page, "06-workflow-editor");
@@ -224,23 +217,23 @@ test("capture workspace screenshots", async ({ page }) => {
   });
 
   // Apps: list, then one app's versions.
-  await page.getByRole("button", { name: "App", exact: true }).click();
+  await sidebar(page).getByRole("link", { name: "Apps", exact: true }).click();
   await page.getByRole("table", { name: "Apps" }).waitFor();
   await page.waitForTimeout(400);
   await shot(page, "09-app-list");
-  await page.getByLabel("App list").getByRole("button", { name: "Orders" }).click();
+  await page.getByRole("table", { name: "Apps" }).getByRole("button", { name: "Orders" }).click();
   await page.getByRole("table", { name: "Versions" }).waitFor();
   await page.waitForTimeout(400);
   await shot(page, "09-app-detail");
 
   // Permission view — capture the empty state before creating a role.
-  await page.getByRole("button", { name: "Permission", exact: true }).click();
+  await sidebar(page).getByRole("link", { name: "Permissions", exact: true }).click();
   await page.waitForTimeout(300);
   await shot(page, "19-permission-empty");
   await page.getByRole("button", { name: "Create Role" }).click();
   await page.getByRole("textbox", { name: "New role name" }).fill("editor");
   await page.getByRole("button", { name: "Save" }).last().click();
-  await page.getByRole("button", { name: /editor/ }).waitFor();
+  await sidebar(page).getByRole("link", { name: "editor", exact: true }).waitFor();
   await page.waitForTimeout(300);
   await shot(page, "10-permission-matrix");
 
@@ -289,12 +282,15 @@ test("capture workspace screenshots", async ({ page }) => {
   await shot(page, "11-narrow-permission");
   await page.setViewportSize({ width: 1440, height: 900 });
 
+  // Back to English for the remaining captures.
+  await page.getByRole("button", { name: "切换语言" }).click(bestEffort).catch(() => undefined);
+
   // Empty database: table and app empty states.
   const emptyDb = `empty${Date.now()}-${sequence}`;
   await api(page, "POST", "/api/databases", { name: emptyDb });
-  await page.reload();
-  await capture(page, "20-table-empty", async () => {
-    await page.getByRole("button", { name: emptyDb }).click(bestEffort);
+  await capture(page, "20-database-empty", async () => {
+    await page.goto(`/databases/${emptyDb}`);
+    await page.getByText("No tables yet").first().waitFor(bestEffort);
     await page.waitForTimeout(400);
   });
   await capture(page, "21-app-empty", async () => {

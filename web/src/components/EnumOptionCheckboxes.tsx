@@ -1,5 +1,5 @@
-import { Checkbox } from "@fluentui/react-components";
 import { OPTION_SEPARATOR, selectedOptions } from "../tableGrid";
+import { Checkbox } from "../ui";
 
 type EnumOptionCheckboxesProps = {
   label: string;
@@ -15,16 +15,16 @@ type EnumOptionCheckboxesProps = {
 export function EnumOptionCheckboxes({ label, options, value, disabled, onChange }: EnumOptionCheckboxesProps) {
   const selected = new Set(selectedOptions(value));
   return (
-    <div className="enum-option-checkboxes" role="group" aria-label={label}>
+    <div className="flex flex-wrap gap-x-4 gap-y-1" role="group" aria-label={label}>
       {options.map((option) => (
         <Checkbox
           key={option}
           checked={selected.has(option)}
           disabled={disabled}
           label={option}
-          onChange={(_, data) => {
+          onChange={(event) => {
             const next = new Set(selected);
-            if (data.checked) {
+            if (event.target.checked) {
               next.add(option);
             } else {
               next.delete(option);

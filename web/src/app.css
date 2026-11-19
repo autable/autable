@@ -1,0 +1,264 @@
+/* Cascade layers, in order. react-data-grid ships its styles in an `rdg`
+   layer; declaring it between Tailwind's base (preflight) and its utilities
+   keeps the grid's own rules above the preflight resets, while utility
+   classes on the grid still win. */
+@layer theme, base, rdg, components, utilities;
+
+@import "./ui/styles.css";
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+/* The page is a fixed-height shell and every scroll happens inside it, so the
+   page itself never rubber-bands like a web page. */
+html,
+body {
+  overscroll-behavior: none;
+}
+
+body {
+  overflow: hidden;
+}
+
+code,
+pre,
+.font-mono {
+  font-variant-ligatures: none;
+}
+
+/* ---------------------------------------------------------------------------
+ * Records grid (react-data-grid), themed with the design tokens so it follows
+ * light and dark mode. The grid is the content of a card, so it has no frame.
+ * ------------------------------------------------------------------------- */
+.autable-grid {
+  --rdg-color: var(--text-primary);
+  --rdg-color-scheme: light dark;
+  --rdg-border-color: var(--border-soft);
+  --rdg-summary-border-color: var(--border);
+  --rdg-background-color: var(--surface-elevated);
+  --rdg-header-background-color: color-mix(in oklab, var(--surface-elevated), var(--text-primary) 2.5%);
+  --rdg-header-draggable-background-color: var(--hover);
+  --rdg-row-hover-background-color: color-mix(in oklab, var(--surface-elevated), var(--text-primary) 3%);
+  --rdg-row-selected-background-color: color-mix(in oklab, var(--surface-elevated), var(--focus-ring) 9%);
+  --rdg-row-selected-hover-background-color: color-mix(in oklab, var(--surface-elevated), var(--focus-ring) 13%);
+  --rdg-checkbox-focus-color: var(--focus-ring-soft);
+  --rdg-selection-color: var(--focus-ring);
+  --rdg-font-size: var(--text-13);
+  min-width: 0;
+  min-height: 0;
+  block-size: 100%;
+  border: 0;
+  overflow: auto;
+  font-family: var(--font-sans);
+}
+
+.autable-grid [role="columnheader"] {
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.autable-grid [role="gridcell"],
+.autable-grid [role="columnheader"] {
+  padding-inline: 12px;
+}
+
+.autable-grid .rdg-text-editor,
+.autable-grid .enum-cell-editor {
+  background: var(--surface-elevated);
+  color: var(--text-primary);
+  font: inherit;
+  padding-inline: 11px;
+}
+
+.field-header {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 100%;
+  min-width: 0;
+}
+
+.field-header-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.field-header-button {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  color: var(--text-tertiary);
+  opacity: 0;
+  transition:
+    opacity 150ms,
+    background-color 150ms,
+    color 150ms;
+}
+
+.field-header-button svg {
+  width: 14px;
+  height: 14px;
+}
+
+[role="columnheader"]:hover .field-header-button,
+.field-header-button:focus-visible,
+.field-header-button[data-state="open"],
+.field-header-button.is-active {
+  opacity: 1;
+}
+
+.field-header-button:hover {
+  background: var(--hover);
+  color: var(--text-primary);
+}
+
+.field-header-button.is-active {
+  color: var(--text-primary);
+}
+
+.add-field-header-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  color: var(--text-tertiary);
+  transition:
+    background-color 150ms,
+    color 150ms;
+}
+
+.add-field-header-button svg {
+  width: 16px;
+  height: 16px;
+}
+
+.add-field-header-button:hover {
+  background: var(--hover);
+  color: var(--text-primary);
+}
+
+/* Cell renderers from tableGrid.ts. */
+.relation-cell {
+  color: var(--text-primary);
+  text-decoration: underline;
+  text-decoration-color: var(--border);
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.file-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--text-primary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-decoration: underline;
+  text-decoration-color: var(--border);
+  text-underline-offset: 3px;
+}
+
+.file-cell-upload {
+  color: var(--text-secondary);
+  font-size: var(--text-12);
+}
+
+/* ---------------------------------------------------------------------------
+ * View filter editor (react-querybuilder), restyled as compact pill controls.
+ * ------------------------------------------------------------------------- */
+.view-query-builder .queryBuilder {
+  font-size: var(--text-13);
+}
+
+.view-query-builder .ruleGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-container);
+  background: var(--info-bg);
+}
+
+.view-query-builder .ruleGroup .ruleGroup {
+  background: var(--surface-elevated);
+}
+
+.view-query-builder .ruleGroup-header,
+.view-query-builder .rule {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.view-query-builder .ruleGroup-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.view-query-builder select,
+.view-query-builder input:not([type="checkbox"]) {
+  height: 28px;
+  min-width: 0;
+  padding-inline: 10px;
+  border: 1px solid var(--border);
+  border-radius: 9999px;
+  background: var(--surface-elevated);
+  color: var(--text-primary);
+  font: inherit;
+}
+
+.view-query-builder select:focus,
+.view-query-builder input:focus {
+  border-color: var(--focus-ring);
+  outline: none;
+}
+
+.view-query-builder button {
+  height: 28px;
+  padding-inline: 10px;
+  border-radius: 9999px;
+  background: var(--chip);
+  color: var(--text-primary);
+  font: inherit;
+  font-weight: 500;
+  transition: background-color 150ms;
+}
+
+.view-query-builder button:hover {
+  background: color-mix(in oklab, var(--chip), var(--text-primary) 8%);
+}
+
+.view-query-builder .rule-remove,
+.view-query-builder .ruleGroup-remove {
+  width: 28px;
+  padding: 0;
+  background: transparent;
+  color: var(--text-secondary);
+}
+
+.view-query-builder label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-secondary);
+}
+
+.view-query-builder[aria-disabled="true"] {
+  opacity: 0.6;
+}

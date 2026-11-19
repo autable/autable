@@ -9,10 +9,9 @@ import {
   DialogTitle,
   ProgressBar,
   Select,
-  Text,
-  ToolbarButton
+  Text
 } from "@fluentui/react-components";
-import { ArrowUploadRegular } from "@fluentui/react-icons";
+import { Upload } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { createFields, createRow, listRowsPage, upsertRow, type TableMetadata } from "../api";
@@ -30,6 +29,8 @@ import {
   type ParsedSheet,
   type PreparedRow
 } from "../excelImport";
+import { FluentScope } from "../shell/FluentScope";
+import { Button as UIButton } from "../ui";
 
 const PREVIEW_ROW_LIMIT = 20;
 const IMPORT_TYPES: ImportFieldType[] = ["string", "int", "float"];
@@ -206,9 +207,12 @@ export function ExcelImportButton({
 
   return (
     <>
-      <ToolbarButton icon={<ArrowUploadRegular />} disabled={disabled} onClick={pickFile}>
-        {t("import.import")}
-      </ToolbarButton>
+      <UIButton variant="quiet" size="sm" className="px-2 sm:px-2.5" aria-label={t("import.import")} disabled={disabled} onClick={pickFile}>
+        <Upload aria-hidden />
+        <span className="hidden lg:inline">{t("import.import")}</span>
+      </UIButton>
+      {/* The import dialog itself still uses Fluent UI (phase 2 converts it). */}
+      <FluentScope className="contents">
       <Dialog open={open} onOpenChange={(_, data) => (data.open ? setOpen(true) : close())}>
         <DialogSurface className="import-dialog" style={{ width: "min(960px, calc(100vw - 32px))", maxWidth: "none" }}>
           <DialogBody>
@@ -279,6 +283,7 @@ export function ExcelImportButton({
           </DialogBody>
         </DialogSurface>
       </Dialog>
+      </FluentScope>
     </>
   );
 }

@@ -59,7 +59,10 @@ describe("appState", () => {
 
   it("parses workspace routes", () => {
     expect(parseWorkspaceRoute("/")).toBeNull();
-    expect(parseWorkspaceRoute("/databases/workspace")).toEqual({ databaseName: "workspace", view: "table" });
+    expect(parseWorkspaceRoute("/databases/workspace")).toEqual({ databaseName: "workspace", view: "home" });
+    expect(parseWorkspaceRoute("/databases/workspace/tables")).toEqual({ databaseName: "workspace", view: "home" });
+    expect(parseWorkspaceRoute("/databases/workspace/admin")).toEqual({ databaseName: "workspace", view: "admin" });
+    expect(parseWorkspaceRoute("/databases/workspace/admin/extra")).toBeNull();
     expect(parseWorkspaceRoute("/databases/workspace/tables/contacts")).toEqual({
       databaseName: "workspace",
       view: "table",
@@ -104,7 +107,9 @@ describe("appState", () => {
 
   it("builds encoded workspace paths", () => {
     expect(buildWorkspacePath(null)).toBe("/");
+    expect(buildWorkspacePath({ databaseName: "workspace", view: "home" })).toBe("/databases/workspace");
     expect(buildWorkspacePath({ databaseName: "workspace", view: "table" })).toBe("/databases/workspace");
+    expect(buildWorkspacePath({ databaseName: "sales ops", view: "admin" })).toBe("/databases/sales%20ops/admin");
     expect(buildWorkspacePath({
       databaseName: "sales ops",
       view: "table",

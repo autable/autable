@@ -6,15 +6,21 @@ type RecordDataGridProps<R extends TableGridRow> = Omit<DataGridProps<R>, "class
   defaultColumnOptions?: DataGridProps<R>["defaultColumnOptions"];
 };
 
+// The grid takes its colors from the design tokens (see .autable-grid in
+// app.css), so it follows the light and dark themes.
 export function RecordDataGrid<R extends TableGridRow>({
   className,
   defaultColumnOptions,
+  rowHeight = 36,
+  headerRowHeight = 38,
   ...props
 }: RecordDataGridProps<R>) {
   return (
     <DataGrid
       {...props}
-      className={["autable-grid", "rdg-light", className].filter(Boolean).join(" ")}
+      rowHeight={rowHeight}
+      headerRowHeight={headerRowHeight}
+      className={["autable-grid", className].filter(Boolean).join(" ")}
       defaultColumnOptions={{ resizable: true, ...defaultColumnOptions }}
     />
   );

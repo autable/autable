@@ -33,7 +33,8 @@ import {
   type WorkflowDefinition
 } from "../api";
 import { compactRoleGrants } from "../permissionState";
-import { WorkspaceEmptyState } from "./WorkspaceEmptyState";
+import { Card, EmptyState } from "../ui";
+import { Users } from "lucide-react";
 
 export { compactRoleGrants };
 
@@ -89,11 +90,9 @@ export function PermissionPanel({
   const { t } = useTranslation();
   if (!role) {
     return (
-      <WorkspaceEmptyState
-        icon={<PeopleRegular />}
-        title={t("empty.noRoleTitle")}
-        description={t("empty.noRoleDescription")}
-      />
+      <Card className="mx-auto max-w-5xl">
+        <EmptyState icon={Users} title={t("empty.noRoleTitle")} description={t("empty.noRoleDescription")} />
+      </Card>
     );
   }
   const dirty =

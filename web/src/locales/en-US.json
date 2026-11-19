@@ -40,19 +40,25 @@
     "noMethods": "No login method is enabled",
     "or": "or",
     "password": "Password",
-    "registerTitle": "Register"
+    "registerTitle": "Register",
+    "signInTitle": "Sign in to autable",
+    "signInDescription": "Tables, apps and workflows for your team.",
+    "registerTitleFull": "Create your autable account",
+    "registerDescription": "Register with your work email. Admins grant access after you join.",
+    "form": "Sign in"
   },
   "empty": {
-    "noDatabaseTitle": "No database selected",
-    "noDatabaseDescription": "Create or pick a database on the left to start building.",
+    "noDatabaseTitle": "No databases yet",
+    "noDatabaseDescription": "Create a database to start building tables, apps and workflows.",
     "noTableTitle": "No tables yet",
-    "noTableDescription": "Use + in the Tables list to create your first table.",
+    "noTableDescription": "Create the first table with + next to Tables in the sidebar.",
     "noGrantedTableDescription": "No tables have been shared with you in this database yet.",
     "noWorkflowTitle": "No workflows yet",
-    "noWorkflowDescription": "Use + in the Workflows list to automate tasks with code.",
+    "noWorkflowDescription": "Create one with + under Workflows in the sidebar to automate tasks with code.",
     "noRunnableWorkflowDescription": "No workflows have been shared with you in this database yet.",
     "noRoleTitle": "No roles yet",
-    "noRoleDescription": "Use + in the Roles list to create your first role."
+    "noRoleDescription": "Create one with + under Permissions in the sidebar.",
+    "noGrantedDatabaseDescription": "Nothing has been shared with you yet. Ask an admin for access."
   },
   "app": {
     "actions": "Actions",
@@ -99,15 +105,21 @@
     "version": "Version",
     "versionLabel": "v{{version}}",
     "versionTable": "Versions",
-    "versions": "Versions"
+    "versions": "Versions",
+    "backToApps": "Apps",
+    "about": "About",
+    "latestVersion": "Latest version",
+    "address": "Address",
+    "none": "None"
   },
   "language": {
     "switch": "Switch language",
-    "toggleLabel": "EN"
+    "toggleLabel": "EN",
+    "switchTo": "中文"
   },
   "nav": {
     "autable": "autable",
-    "createDb": "Create DB",
+    "createDb": "New database",
     "createRole": "Create Role",
     "createTable": "Create Table",
     "createView": "Create View",
@@ -135,7 +147,28 @@
     "view": "+ View",
     "workflowActions": "workflow actions {{id}}",
     "workflowList": "Workflow list",
-    "workflows": "Workflows"
+    "workflows": "Workflows",
+    "home": "Home",
+    "apps": "Apps",
+    "manage": "Manage",
+    "overview": "Overview",
+    "permissions": "Permissions",
+    "primary": "Workspace",
+    "openNavigation": "Open navigation",
+    "navigation": "Navigation",
+    "switchDatabase": "Switch database",
+    "newDatabaseTitle": "New database",
+    "newDatabaseDescription": "A database holds its own tables, apps, workflows and roles.",
+    "newTableTitle": "New table",
+    "newViewTitle": "New view",
+    "newWorkflowTitle": "New workflow",
+    "newRoleTitle": "New role",
+    "noTables": "No tables yet",
+    "admin": "Admin",
+    "account": "Account {{name}}",
+    "goHome": "autable home",
+    "deleteWorkflowTitle": "Delete workflow",
+    "deleteWorkflowConfirm": "Delete {{name}}? Its script, settings and run history are removed. This cannot be undone."
   },
   "permission": {
     "addRoleMember": "Add role member",
@@ -343,7 +376,7 @@
     "recordCount": "{{shown}} of {{total}} records",
     "recordPanel": "Record panel",
     "recordTabs": "Record tabs",
-    "recordTitle": "record #{{id}}",
+    "recordTitle": "Record #{{id}}",
     "relationRecordDetail": "Relation record detail",
     "row": "Row",
     "rowHistory": "Row history",
@@ -373,7 +406,9 @@
     "viewSortField": "View sort field",
     "writableFields": "Writable fields",
     "byActor": "by {{actor}}",
-    "fieldOptionsMultiple": "Allow several options"
+    "fieldOptionsMultiple": "Allow several options",
+    "views": "Views",
+    "rowPanelEmpty": "Select a row to see its fields"
   },
   "workflow": {
     "editConfig": "Edit config {{id}}",
@@ -424,7 +459,8 @@
     "runnableList": "Runnable workflows",
     "runWorkflow": "Run {{name}}",
     "workflowScriptLabel": "Workflow JavaScript",
-    "workspaceTabs": "Workflow workspace tabs"
+    "workspaceTabs": "Workflow workspace tabs",
+    "runnableDescription": "Workflows you can run in {{database}}"
   },
   "runners": {
     "title": "Remote runners",
@@ -488,5 +524,66 @@
     "problemType": "“{{value}}” is not {{type}}",
     "problemEnum": "“{{value}}” is not an allowed option",
     "problemMissingMatch": "Missing dedup value"
+  },
+  "ui": {
+    "loading": "Loading",
+    "loadFailed": "Could not load",
+    "retry": "Retry",
+    "notification": "Notification",
+    "appearanceLabel": "Appearance: {{theme}}",
+    "theme": {
+      "system": "System",
+      "light": "Light",
+      "dark": "Dark"
+    }
+  },
+  "home": {
+    "description": "Apps and tables you can use in {{database}}",
+    "apps": "Apps",
+    "allApps": "All apps",
+    "tables": "Tables",
+    "tableMeta": "{{fields}} · {{views}}",
+    "noTablesAdmin": "No tables yet. Create one with + next to Tables in the sidebar.",
+    "noAppsAdmin": "No apps yet. Publish one from the command line with autablectl.",
+    "emptyTitle": "Nothing shared with you yet",
+    "emptyDescription": "Ask an admin to grant you access to tables or apps in this database.",
+    "notPublished": "Not published",
+    "openInNewTab": "Opens in a new tab",
+    "fieldCount_one": "{{count}} field",
+    "fieldCount_other": "{{count}} fields",
+    "viewCount_one": "{{count}} view",
+    "viewCount_other": "{{count}} views",
+    "updatedOn": "Updated {{date}}"
+  },
+  "admin": {
+    "title": "Manage",
+    "description": "Structure, code and access for {{database}}. Only admins can see this area.",
+    "areas": "Areas",
+    "tablesTitle": "Tables & schema",
+    "tablesDescription": "Fields, formulas and views are edited on each table.",
+    "workflowsTitle": "Workflows",
+    "workflowsDescription": "JavaScript automations, triggered by changes or run by hand.",
+    "workflowsMeta": "{{workflows}} · {{enabled}} enabled",
+    "permissionsTitle": "Permissions & roles",
+    "permissionsDescription": "Roles grant people and workflows access to data, apps and workflows.",
+    "appsTitle": "Apps & versions",
+    "appsDescription": "Publish, preview and roll back hosted web apps.",
+    "appsMeta": "{{apps}} · {{published}} published",
+    "runnersTitle": "Remote runners",
+    "runnersDescription": "Run workflow nodes on machines in other networks.",
+    "tableColumns": {
+      "table": "Table",
+      "fields": "Fields",
+      "views": "Views",
+      "formulas": "Formulas"
+    },
+    "tablesMeta_one": "{{count}} table",
+    "tablesMeta_other": "{{count}} tables",
+    "workflowCount_one": "{{count}} workflow",
+    "workflowCount_other": "{{count}} workflows",
+    "permissionsMeta_one": "{{count}} role",
+    "permissionsMeta_other": "{{count}} roles",
+    "appCount_one": "{{count}} app",
+    "appCount_other": "{{count}} apps"
   }
 }

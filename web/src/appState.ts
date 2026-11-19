@@ -1,6 +1,8 @@
 import type { RoleDefinition, RoleMember } from "./api";
 
-export type WorkspaceViewName = "table" | "workflow" | "app" | "permission";
+// home: the database landing page (apps and tables); admin: the management
+// overview, admins only.
+export type WorkspaceViewName = "home" | "table" | "workflow" | "app" | "permission" | "admin";
 
 export type WorkspaceRoute = {
   databaseName: string;
@@ -57,11 +59,14 @@ export function parseWorkspaceRoute(pathname: string): WorkspaceRoute | null {
   }
   const databaseName = segments[1];
   if (segments.length === 2) {
-    return { databaseName, view: "table" };
+    return { databaseName, view: "home" };
+  }
+  if (segments[2] === "admin" && segments.length === 3) {
+    return { databaseName, view: "admin" };
   }
   if (segments[2] === "tables") {
     if (!segments[3]) {
-      return { databaseName, view: "table" };
+      return { databaseName, view: "home" };
     }
     if (segments[4] === "views" && segments[5]) {
       return { databaseName, view: "table", tableName: segments[3], tableViewName: segments[5] };
@@ -95,6 +100,9 @@ export function buildWorkspacePath(route: WorkspaceRoute | null): string {
     return "/";
   }
   const database = encodePathSegment(route.databaseName);
+  if (route.view === "admin") {
+    return `/databases/${database}/admin`;
+  }
   if (route.view === "workflow") {
     if (!route.workflowID) {
       return `/databases/${database}/workflows`;

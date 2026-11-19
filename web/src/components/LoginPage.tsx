@@ -1,28 +1,17 @@
 import { useEffect, useState } from "react";
-import { Text } from "@fluentui/react-components";
 import { useTranslation } from "react-i18next";
-import {
-  loadAuthConfig,
-  loadCurrentUser,
-  login,
-  oidcStartURL,
-  register,
-  type OIDCProvider
-} from "../api";
+import { loadAuthConfig, loadCurrentUser, login, oidcStartURL, register, type OIDCProvider } from "../api";
 import { useNotifier } from "../notifications";
-import { AuthDialog } from "./AuthDialog";
+import { AuthScreen } from "./AuthScreen";
 
 // LoginPage is a standalone login route for shared links (e.g. file URLs
 // pasted into approvals): /login?redirect=/api/files/6 signs the user in and
 // sends them back to the link they clicked.
 export function LoginPage() {
   const { t } = useTranslation();
-  const [email, setEmail] = useState("");
-  const [displayName, setDisplayName] = useState("");
-  const [password, setPassword] = useState("");
   const [passwordEnabled, setPasswordEnabled] = useState(true);
   const [providers, setProviders] = useState<OIDCProvider[]>([]);
-  const { Toaster, notify } = useNotifier();
+  const { notify } = useNotifier();
   const redirect = safeRedirectTarget();
 
   useEffect(() => {
@@ -47,7 +36,7 @@ export function LoginPage() {
     };
   }, [redirect]);
 
-  async function loginUser() {
+  async function loginUser(email: string, password: string) {
     try {
       await login(email, password);
       window.location.assign(redirect);
@@ -58,7 +47,7 @@ export function LoginPage() {
     }
   }
 
-  async function registerUser() {
+  async function registerUser(email: string, password: string, displayName: string) {
     try {
       await register(email, password, displayName);
       window.location.assign(redirect);
@@ -70,29 +59,13 @@ export function LoginPage() {
   }
 
   return (
-    <div className="standalone-shell">
-      <main className="standalone-main">
-        <div className="section-header">
-          <Text weight="semibold">{t("status.loginRequired")}</Text>
-        </div>
-        <Toaster />
-        <AuthDialog
-          displayName={displayName}
-          email={email}
-          onDisplayNameChange={setDisplayName}
-          onEmailChange={setEmail}
-          onLogin={loginUser}
-          onOIDCLogin={(providerName) => window.location.assign(oidcStartURL(providerName, redirect))}
-          onOpenChange={() => undefined}
-          onPasswordChange={setPassword}
-          onRegister={registerUser}
-          open
-          password={password}
-          passwordEnabled={passwordEnabled}
-          providers={providers}
-        />
-      </main>
-    </div>
+    <AuthScreen
+      onLogin={loginUser}
+      onRegister={registerUser}
+      onOIDCLogin={(providerName) => window.location.assign(oidcStartURL(providerName, redirect))}
+      passwordEnabled={passwordEnabled}
+      providers={providers}
+    />
   );
 }
 

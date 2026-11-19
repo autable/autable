@@ -176,7 +176,8 @@ test("app openers can open an app but not manage it", async ({ page }) => {
   // Versions, previews, sources, publishing and deletion are admin-only.
   await expect(page.getByRole("table", { name: "Versions" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Delete app" })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Permission", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("navigation", { name: "Workspace" }).getByRole("link", { name: "Permissions" })).toHaveCount(0);
+  await expect(page.getByRole("navigation", { name: "Workspace" }).getByRole("link", { name: "Apps", exact: true })).toHaveAttribute("aria-current", "page");
 
   await expectAppPage(page, `/apps/${database}/stock-check/`, "Stock check v1");
   // Previews of unpublished versions are for admins only.
@@ -195,7 +196,7 @@ test("signed-out visitors are sent to login before an app opens", async ({ page 
 
   await page.goto(`/apps/${database}/orders/`);
   await expect(page).toHaveURL(new RegExp(`/login\\?redirect=${encodeURIComponent(`/apps/${database}/orders/`)}`));
-  const dialog = page.getByRole("dialog");
+  const dialog = page.getByRole("form", { name: "Sign in" });
   await dialog.getByLabel("Email").fill(admin.email);
   await dialog.getByLabel("Password").fill("correct horse");
   await dialog.getByRole("button", { name: "Login" }).click();

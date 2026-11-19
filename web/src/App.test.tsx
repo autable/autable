@@ -1,6 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { FluentProvider, webLightTheme } from "@fluentui/react-components";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 import i18n from "./i18n";
@@ -335,11 +334,17 @@ beforeEach(async () => {
 
 function renderApp(path = "/databases/workspace/tables/contacts") {
   window.history.replaceState(null, "", path);
-  return render(
-    <FluentProvider theme={webLightTheme}>
-      <App />
-    </FluentProvider>
-  );
+  return render(<App />);
+}
+
+// The sidebar: database switcher, Home/Apps, tables and (admins) Manage.
+async function sidebar() {
+  return screen.findByRole("navigation", { name: "Workspace" });
+}
+
+async function openDatabaseSwitcher(user = userEvent.setup()) {
+  await user.click(await screen.findByRole("button", { name: "workspace" }));
+  return screen.findByRole("menu");
 }
 
 async function waitForSignedIn() {
@@ -353,8 +358,8 @@ async function waitForDefaultTableReady(recordCountText = "3 of 3 records") {
 
 async function waitForDefaultNavigationReady() {
   await waitForSignedIn();
-  expect(await screen.findByRole("button", { name: /^Table$/ })).toBeInTheDocument();
-  expect(await screen.findByRole("button", { name: /Contacts/ })).toBeInTheDocument();
+  expect(await screen.findByRole("button", { name: "workspace" })).toBeInTheDocument();
+  expect(await within(await sidebar()).findByRole("link", { name: /Contacts/ })).toBeInTheDocument();
 }
 
 async function findEnabledButton(name: string | RegExp) {
@@ -378,11 +383,38 @@ function getFieldVisibilityStorageValue() {
 }
 
 describe("App", () => {
-  it("renders the unselected default page at root", async () => {
+  it("opens the first database's home from the root", async () => {
     renderApp("/");
     await waitForSignedIn();
-    expect(await screen.findByText("No database selected")).toBeInTheDocument();
-    expect(await screen.findByRole("button", { name: "workspace" })).toBeInTheDocument();
+    await waitFor(() => expect(window.location.pathname).toBe("/databases/workspace"));
+    expect(await screen.findByRole("heading", { name: "workspace", level: 1 })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "workspace" })).toBeInTheDocument();
+    expect(within(await sidebar()).getByRole("link", { name: "Home" })).toHaveAttribute("aria-current", "page");
+  });
+
+  it("opens the database used last from the root", async () => {
+    window.localStorage.setItem("autable.database", "sales");
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      if (String(input) === "/api/metadata") {
+        return jsonResponse({ databases: [...catalogFixture.databases, { name: "sales", tables: [] }] });
+      }
+      return defaultFetch(input, init);
+    });
+    renderApp("/");
+    await waitFor(() => expect(window.location.pathname).toBe("/databases/sales"));
+    expect(await screen.findByRole("button", { name: "sales" })).toBeInTheDocument();
+  });
+
+  it("shows an empty state when there is no database", async () => {
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      if (String(input) === "/api/metadata") {
+        return jsonResponse({ databases: [] });
+      }
+      return defaultFetch(input, init);
+    });
+    renderApp("/");
+    expect(await screen.findByText("No databases yet")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "New database" })).toBeInTheDocument();
     expect(window.location.pathname).toBe("/");
   });
 
@@ -391,44 +423,53 @@ describe("App", () => {
     await waitForDefaultTableReady();
   });
 
-  it("returns unmatched URLs to the unselected default page", async () => {
+  it("returns unmatched URLs to the default database home", async () => {
     renderApp("/not-a-real-route");
     await waitForSignedIn();
-    expect(await screen.findByText("No database selected")).toBeInTheDocument();
-    expect(window.location.pathname).toBe("/");
+    await waitFor(() => expect(window.location.pathname).toBe("/databases/workspace"));
+    expect(await screen.findByRole("heading", { name: "workspace", level: 1 })).toBeInTheDocument();
   });
 
-  it("returns unknown database URLs to the unselected default page", async () => {
+  it("returns unknown database URLs to the default database home", async () => {
     renderApp("/databases/missing/tables/contacts");
     await waitForSignedIn();
-    expect(await screen.findByText("No database selected")).toBeInTheDocument();
-    await waitFor(() => expect(window.location.pathname).toBe("/"));
+    await waitFor(() => expect(window.location.pathname).toBe("/databases/workspace"));
+    expect(await screen.findByRole("heading", { name: "workspace", level: 1 })).toBeInTheDocument();
   });
 
   it("updates the URL when navigating workspace resources", async () => {
     renderApp();
     await waitForDefaultTableReady();
 
-    await userEvent.click(await screen.findByRole("button", { name: "Active" }));
+    await userEvent.click(within(screen.getByRole("navigation", { name: "Views" })).getByRole("link", { name: "Active" }));
     expect(window.location.pathname).toBe("/databases/workspace/tables/contacts/views/active");
 
-    await userEvent.click(await screen.findByRole("button", { name: /^Workflow$/ }));
+    const nav = await sidebar();
+    await userEvent.click(within(nav).getByRole("link", { name: "Workflows" }));
     expect(window.location.pathname).toBe("/databases/workspace/workflows");
-    await userEvent.click(await screen.findByRole("button", { name: /welcome-contact/ }));
+    await userEvent.click(await within(nav).findByRole("link", { name: /welcome-contact/ }));
     expect(window.location.pathname).toBe("/databases/workspace/workflows/2");
 
-    await userEvent.click(await screen.findByRole("button", { name: /^App$/ }));
+    await userEvent.click(within(nav).getByRole("link", { name: "Apps" }));
     expect(window.location.pathname).toBe("/databases/workspace/apps");
-    await userEvent.click(await within(await screen.findByLabelText("App list")).findByRole("button", { name: /Stock check/ }));
+    await userEvent.click(await within(await screen.findByRole("table", { name: "Apps" })).findByRole("button", { name: /Stock check/ }));
     expect(window.location.pathname).toBe("/databases/workspace/apps/stock-check");
     expect(await screen.findByRole("table", { name: "Versions" })).toBeInTheDocument();
+
+    await userEvent.click(within(nav).getByRole("link", { name: "Overview" }));
+    expect(window.location.pathname).toBe("/databases/workspace/admin");
+    await userEvent.click(within(nav).getByRole("link", { name: "Home" }));
+    expect(window.location.pathname).toBe("/databases/workspace");
+    await userEvent.click(within(nav).getByRole("link", { name: "Contacts" }));
+    expect(window.location.pathname).toBe("/databases/workspace/tables/contacts");
   });
 
   it("restores a workspace route on initial render", async () => {
     renderApp("/databases/workspace/tables/contacts/views/active-ops");
 
     await waitForDefaultNavigationReady();
-    await waitFor(() => expect(screen.getByRole("button", { name: "Active ops" })).toHaveAttribute("aria-current", "page"));
+    await waitFor(() => expect(screen.getByRole("link", { name: "Active ops" })).toHaveAttribute("aria-current", "page"));
+    expect(within(await sidebar()).getByRole("link", { name: "Contacts" })).toHaveAttribute("aria-current", "page");
     expect(window.location.pathname).toBe("/databases/workspace/tables/contacts/views/active-ops");
   });
 
@@ -442,7 +483,7 @@ describe("App", () => {
     });
 
     const user = userEvent.setup();
-    renderApp("/databases/workspace");
+    renderApp("/databases/workspace/tables/contacts");
     await waitForDefaultTableReady();
     const sortButton = await findEnabledButton("Toggle name sort");
 
@@ -528,9 +569,10 @@ describe("App", () => {
 
     renderApp();
     await waitFor(() => expect(requests).toContain("/api/auth/me"));
+    expect(await screen.findByRole("form", { name: "Sign in" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Login" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Create DB" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Refresh metadata" })).toBeDisabled();
+    expect(screen.queryByRole("navigation", { name: "Workspace" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "New database" })).not.toBeInTheDocument();
     expect(requests).not.toContain("/api/metadata");
     expect(requests.some((url) => url.includes("/rows"))).toBe(false);
     expect(requests.some((url) => url.includes("/workflows"))).toBe(false);
@@ -555,7 +597,7 @@ describe("App", () => {
     });
 
     renderApp();
-    await userEvent.click(await screen.findByRole("button", { name: "Login" }));
+    await screen.findByRole("form", { name: "Sign in" });
     expect(await screen.findByRole("button", { name: "Continue with example" })).toBeInTheDocument();
   });
 
@@ -587,8 +629,16 @@ describe("App", () => {
 
     renderApp();
     await waitForDefaultTableReady();
-    expect(screen.queryByRole("button", { name: "Create DB" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Permission" })).not.toBeInTheDocument();
+    const user = userEvent.setup();
+    const switcher = await openDatabaseSwitcher(user);
+    expect(within(switcher).getByRole("menuitemradio", { name: "workspace" })).toBeInTheDocument();
+    expect(within(switcher).queryByRole("menuitem", { name: "New database" })).not.toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    const nav = await sidebar();
+    expect(within(nav).queryByRole("link", { name: "Permissions" })).not.toBeInTheDocument();
+    expect(within(nav).queryByRole("link", { name: "Overview" })).not.toBeInTheDocument();
+    // Ordinary users run their granted workflows from the main group instead.
+    expect(within(nav).getByRole("link", { name: "Workflows" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Create Table" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Create View" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Remote runners" })).not.toBeInTheDocument();
@@ -606,27 +656,35 @@ describe("App", () => {
 
     renderApp("/databases/workspace/permissions");
     await waitForSignedIn();
-    await screen.findByRole("button", { name: /Contacts/ });
+    await waitFor(() => expect(window.location.pathname).toBe("/databases/workspace"));
+    await within(await sidebar()).findByRole("link", { name: /Contacts/ });
     expect(screen.queryByRole("button", { name: "Members" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Create Role" })).not.toBeInTheDocument();
   });
 
-  it("hides collapsed database permissions for non-admins", async () => {
-    vi.mocked(fetch).mockImplementation(memberFetch());
+  it("keeps a non-admin out of the admin overview", async () => {
+    const requests: Array<{ url: string; init?: RequestInit }> = [];
+    vi.mocked(fetch).mockImplementation(memberFetch(requests));
 
-    renderApp();
+    renderApp("/databases/workspace/admin");
     await waitForSignedIn();
-    await screen.findByRole("button", { name: /Contacts/ });
-    await userEvent.click(await findEnabledButton("Collapse sidebar"));
-
-    expect(screen.queryByRole("button", { name: "Permission" })).not.toBeInTheDocument();
+    await waitFor(() => expect(window.location.pathname).toBe("/databases/workspace"));
+    await within(await sidebar()).findByRole("link", { name: /Contacts/ });
+    expect(screen.queryByRole("heading", { name: "Manage" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Remote runners" })).not.toBeInTheDocument();
+    expect(requests.some((request) => adminOnlyEndpoints.includes(request.url))).toBe(false);
   });
 
   it("shows admin-only actions to admins", async () => {
     renderApp();
     await waitForDefaultTableReady();
-    expect(screen.getByRole("button", { name: "Create DB" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Permission" })).toBeInTheDocument();
+    const user = userEvent.setup();
+    const switcher = await openDatabaseSwitcher(user);
+    expect(within(switcher).getByRole("menuitem", { name: "New database" })).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    const nav = await sidebar();
+    expect(within(nav).getByRole("link", { name: "Permissions" })).toBeInTheDocument();
+    expect(within(nav).getByRole("link", { name: "Overview" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Create Table" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Create View" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Remote runners" })).toBeInTheDocument();
@@ -639,12 +697,14 @@ describe("App", () => {
   it("disables row creation outside all records", async () => {
     renderApp();
     await waitForDefaultTableReady();
-    await userEvent.click(await screen.findByRole("button", { name: "Active" }));
+    expect(screen.getByRole("button", { name: "Row" })).toBeEnabled();
+    await userEvent.click(within(screen.getByRole("navigation", { name: "Views" })).getByRole("link", { name: "Active" }));
 
-    expect(screen.getByRole("button", { name: "Row" })).toBeDisabled();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Row" })).toBeDisabled());
   });
 
   it("creates a database from the sidebar and selects it", async () => {
+    let created = false;
     vi.mocked(fetch).mockImplementation(async (input, init) => {
       const url = String(input);
       if (url === "/api/auth/me") {
@@ -657,36 +717,35 @@ describe("App", () => {
         return new Response(JSON.stringify({ error: "permission denied" }), { status: 403 });
       }
       if (url === "/api/databases" && init?.method === "POST") {
+        created = true;
         return new Response(JSON.stringify({ name: "sales", tables: [] }), {
           status: 201
         });
       }
       if (url === "/api/metadata") {
-        return new Response(
-          JSON.stringify({
-            databases: [
-              {
-                name: "sales",
-                tables: []
-              }
-            ]
-          }),
-          { status: 200 }
-        );
+        return jsonResponse({
+          databases: created ? [...catalogFixture.databases, { name: "sales", tables: [] }] : catalogFixture.databases
+        });
       }
       return defaultFetch(input, init);
     });
 
     renderApp();
     await waitForSignedIn();
-    await userEvent.click(await findEnabledButton("Create DB"));
-    await userEvent.type(screen.getByRole("textbox", { name: "New database name" }), "sales");
-    await userEvent.click(await findEnabledButton("Save"));
-    await waitFor(() => expect(screen.getByRole("button", { name: "sales" })).toHaveAttribute("aria-expanded", "true"));
+    const user = userEvent.setup();
+    const switcher = await openDatabaseSwitcher(user);
+    expect(within(switcher).queryByRole("menuitemradio", { name: "sales" })).not.toBeInTheDocument();
+    await user.click(within(switcher).getByRole("menuitem", { name: "New database" }));
+    const dialog = await findDialog("New database");
+    await user.type(within(dialog).getByRole("textbox", { name: "New database name" }), "sales");
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(window.location.pathname).toBe("/databases/sales"));
+    expect(await screen.findByRole("button", { name: "sales" })).toBeInTheDocument();
     expect(screen.getAllByText("Created database sales").length).toBeGreaterThan(0);
   });
 
   it("creates a table in the selected database", async () => {
+    let created = false;
     vi.mocked(fetch).mockImplementation(async (input, init) => {
       const url = String(input);
       if (url === "/api/auth/me") {
@@ -702,6 +761,7 @@ describe("App", () => {
         return jsonResponse([]);
       }
       if (url === "/api/databases/workspace/tables" && init?.method === "POST") {
+        created = true;
         return new Response(
           JSON.stringify({
             name: "projects",
@@ -718,14 +778,16 @@ describe("App", () => {
             databases: [
               {
                 name: "workspace",
-                tables: [
-                  {
-                    name: "projects",
-                    display_name: "projects",
-                    fields: [],
-                    views: []
-                  }
-                ]
+                tables: created
+                  ? [
+                      {
+                        name: "projects",
+                        display_name: "projects",
+                        fields: [],
+                        views: []
+                      }
+                    ]
+                  : []
               }
             ]
           }),
@@ -737,13 +799,15 @@ describe("App", () => {
 
     renderApp("/databases/workspace");
     await waitForSignedIn();
+    expect(await within(await sidebar()).findByText("No tables yet")).toBeInTheDocument();
     await userEvent.click(await findEnabledButton("Create Table"));
     await userEvent.type(screen.getByRole("textbox", { name: "New table name" }), "projects");
     await userEvent.click(await findEnabledButton("Save"));
-    await waitFor(() => expect(screen.getByRole("button", { name: /projects/ })).toBeInTheDocument());
+    await waitFor(() => expect(within(screen.getByRole("navigation", { name: "Workspace" })).getByRole("link", { name: /projects/ })).toBeInTheDocument());
+    await waitFor(() => expect(window.location.pathname).toBe("/databases/workspace/tables/projects"));
   });
 
-  it("creates a named table view from the sidebar", async () => {
+  it("creates a named table view from the view strip", async () => {
     let metadata = catalogFixture;
     let savedTable: unknown;
     vi.mocked(fetch).mockImplementation(async (input, init) => {
@@ -777,6 +841,9 @@ describe("App", () => {
       views: expect.arrayContaining([{ name: "Needs Review", display_name: "Needs Review", sorts: [] }])
     });
     expect(screen.getAllByText("Needs Review").length).toBeGreaterThan(0);
+    await waitFor(() => expect(window.location.pathname).toBe("/databases/workspace/tables/contacts/views/Needs%20Review"));
+    // The new view opens with its filter editor, ready to define it.
+    expect(await screen.findByRole("dialog", { name: "View filters" })).toBeInTheDocument();
   });
 
   it("loads row history for the selected table record", async () => {
@@ -825,8 +892,8 @@ describe("App", () => {
   it("shows workflow JavaScript as the workflow view", async () => {
     renderApp();
     await waitForDefaultTableReady();
-    await userEvent.click(await screen.findByRole("button", { name: /^Workflow$/ }));
-    expect(await screen.findByRole("button", { name: /welcome-contact/ })).toBeInTheDocument();
+    await userEvent.click(await within(await sidebar()).findByRole("link", { name: "Workflows" }));
+    expect(await within(await sidebar()).findByRole("link", { name: /welcome-contact/ })).toBeInTheDocument();
     await waitFor(() => expect((screen.getByLabelText("Workflow JavaScript") as HTMLTextAreaElement).value).toContain(
       'info.instance("review_echo").exec'
     ));
@@ -893,7 +960,7 @@ describe("App", () => {
 
     renderApp();
     await waitForDefaultTableReady();
-    await userEvent.click(await screen.findByRole("button", { name: /^Workflow$/ }));
+    await userEvent.click(await within(await sidebar()).findByRole("link", { name: "Workflows" }));
     await userEvent.click(await findEnabledButton("Edit config review_echo"));
 
     const runnerSelect = await screen.findByLabelText("Runner for review_echo");
@@ -910,7 +977,7 @@ describe("App", () => {
   it("manages the database's remote runners from the workflow sidebar", async () => {
     renderApp();
     await waitForDefaultTableReady();
-    await userEvent.click(await screen.findByRole("button", { name: /^Workflow$/ }));
+    await userEvent.click(await within(await sidebar()).findByRole("link", { name: "Workflows" }));
     await userEvent.click(await screen.findByRole("button", { name: "Remote runners" }));
 
     const dialog = await findDialog("Remote runners");
@@ -960,8 +1027,8 @@ describe("App", () => {
 
     renderApp("/databases/workspace/workflows/1/history");
     await waitForSignedIn();
-    expect(await screen.findByRole("button", { name: /^Workflow$/ })).toBeInTheDocument();
-    expect(await screen.findByRole("button", { name: /record-review/ })).toBeInTheDocument();
+    expect(await within(await sidebar()).findByRole("link", { name: "Workflows" })).toHaveAttribute("aria-current", "page");
+    expect(await within(await sidebar()).findByRole("link", { name: /record-review/ })).toHaveAttribute("aria-current", "page");
     expect(await screen.findByRole("tab", { name: "History", selected: true })).toBeInTheDocument();
     await waitFor(() => expect(screen.getByRole("button", { name: "Workflow run history" })).toBeInTheDocument());
     expect(screen.getByRole("button", { name: "Workflow run history" })).toHaveTextContent(
@@ -1038,8 +1105,8 @@ describe("App", () => {
 
     renderApp();
     await waitForDefaultTableReady();
-    await userEvent.click(await screen.findByRole("button", { name: /^Workflow$/ }));
-    await screen.findByRole("button", { name: /record-review/ });
+    await userEvent.click(await within(await sidebar()).findByRole("link", { name: "Workflows" }));
+    await within(await sidebar()).findByRole("link", { name: /record-review/ });
     await userEvent.click(await findEnabledButton("Run"));
     await waitFor(() => expect(runBody).toEqual({ inputs: {} }));
     await waitFor(() =>
@@ -1198,8 +1265,10 @@ describe("App", () => {
 
     renderApp();
     await waitForSignedIn();
-    expect(await screen.findByRole("button", { name: "Mine" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "All records" })).not.toBeInTheDocument();
+    const views = await screen.findByRole("navigation", { name: "Views" });
+    expect(await within(views).findByRole("link", { name: "Mine" })).toBeInTheDocument();
+    expect(within(views).queryByRole("link", { name: "All records" })).not.toBeInTheDocument();
+    await waitFor(() => expect(within(views).getByRole("link", { name: "Mine" })).toHaveAttribute("aria-current", "page"));
     await waitFor(() => expect(pageBodies.some((body) => body.view === "mine")).toBe(true));
   });
 
@@ -1253,4 +1322,123 @@ describe("App", () => {
     await waitFor(() => expect(pageBodies.some((body) => body.offset === 200)).toBe(true));
     await waitFor(() => expect(screen.getAllByText("250 of 250 records").length).toBeGreaterThan(0));
   }, 15_000);
+  it("shows admins every app as a launcher card and the tables on the home page", async () => {
+    renderApp("/databases/workspace");
+    const apps = await screen.findByRole("region", { name: "Apps" });
+    expect(await within(apps).findByRole("link", { name: "Orders" })).toHaveAttribute("href", "/databases/workspace/apps/orders");
+    expect(within(apps).getByRole("link", { name: "Open Orders" })).toHaveAttribute("href", "/apps/workspace/orders/");
+    // Unpublished apps are listed for admins, without an open link.
+    expect(within(apps).getByRole("link", { name: "Stock check" })).toBeInTheDocument();
+    expect(within(apps).getByText("Not published")).toBeInTheDocument();
+    expect(within(apps).queryByRole("link", { name: "Open Stock check" })).not.toBeInTheDocument();
+    const tables = screen.getByRole("region", { name: "Tables" });
+    expect(within(tables).getByRole("link", { name: /Contacts/ })).toHaveAttribute("href", "/databases/workspace/tables/contacts");
+    expect(within(tables).getByText("3 fields · 3 views")).toBeInTheDocument();
+
+    await userEvent.click(within(apps).getByRole("link", { name: "Orders" }));
+    expect(window.location.pathname).toBe("/databases/workspace/apps/orders");
+  });
+
+  it("shows ordinary users only the apps they can open on the home page", async () => {
+    vi.mocked(fetch).mockImplementation(memberFetch());
+    renderApp("/databases/workspace");
+    const apps = await screen.findByRole("region", { name: "Apps" });
+    expect(await within(apps).findByRole("link", { name: "Open Orders" })).toHaveAttribute("href", "/apps/workspace/orders/");
+    expect(within(apps).queryByText("Stock check")).not.toBeInTheDocument();
+    expect(within(apps).queryByText("Not published")).not.toBeInTheDocument();
+    expect(within(screen.getByRole("region", { name: "Tables" })).getByRole("link", { name: /Contacts/ })).toBeInTheDocument();
+  });
+
+  it("tells ordinary users when nothing is shared with them", async () => {
+    const member = memberFetch();
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url === "/api/metadata") {
+        return jsonResponse({ databases: [{ name: "workspace", tables: [] }] });
+      }
+      if (url === "/api/databases/workspace/apps") {
+        return jsonResponse([]);
+      }
+      return member(input, init);
+    });
+    renderApp("/databases/workspace");
+    expect(await screen.findByText("Nothing shared with you yet")).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Apps" })).not.toBeInTheDocument();
+  });
+
+  it("summarizes the management areas on the admin overview", async () => {
+    renderApp("/databases/workspace/admin");
+    expect(await screen.findByRole("heading", { name: "Manage", level: 1 })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("link", { name: /Workflows.*2 workflows · 2 enabled/ })).toHaveAttribute("href", "/databases/workspace/workflows"));
+    expect(screen.getByRole("link", { name: /Apps & versions.*2 apps · 1 published/ })).toHaveAttribute("href", "/databases/workspace/apps");
+    expect(screen.getByRole("link", { name: /Permissions & roles/ })).toHaveAttribute("href", "/databases/workspace/permissions");
+    const tables = screen.getByRole("table", { name: "Tables & schema" });
+    expect(within(tables).getByRole("link", { name: /Contacts/ })).toHaveAttribute("href", "/databases/workspace/tables/contacts");
+
+    await userEvent.click(screen.getByRole("button", { name: /Remote runners.*other networks/ }));
+    const dialog = await findDialog("Remote runners");
+    expect(await within(dialog).findByText("intranet")).toBeInTheDocument();
+  });
+
+  it("signs out from the account menu", async () => {
+    const user = userEvent.setup();
+    let signedIn = true;
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url === "/api/auth/logout") {
+        signedIn = false;
+        return new Response(null, { status: 204 });
+      }
+      if (url === "/api/auth/me" && !signedIn) {
+        return jsonResponse({ error: "not authenticated" }, 401);
+      }
+      return defaultFetch(input, init);
+    });
+    renderApp();
+    await waitForDefaultTableReady();
+    await user.click(screen.getByRole("button", { name: authUserFixture.display_name }));
+    expect(within(await screen.findByRole("menu")).getByText(authUserFixture.email)).toBeInTheDocument();
+    await user.click(screen.getByRole("menuitem", { name: "Logout" }));
+    expect(await screen.findByRole("form", { name: "Sign in" })).toBeInTheDocument();
+    expect(screen.queryByRole("navigation", { name: "Workspace" })).not.toBeInTheDocument();
+  });
+
+  it("switches the theme and the language from the sidebar", async () => {
+    const user = userEvent.setup();
+    renderApp("/databases/workspace");
+    await waitForSignedIn();
+    await user.click(screen.getByRole("button", { name: "Appearance: System" }));
+    await user.click(await screen.findByRole("menuitemradio", { name: "Dark" }));
+    await waitFor(() => expect(document.documentElement).toHaveClass("dark"));
+    expect(window.localStorage.getItem("autable.theme")).toBe("dark");
+
+    await user.click(screen.getByRole("button", { name: "Switch language" }));
+    expect(await screen.findByRole("navigation", { name: "工作区" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "首页" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "切换语言" }));
+    expect(await within(await sidebar()).findByRole("link", { name: "Home" })).toBeInTheDocument();
+    document.documentElement.classList.remove("dark");
+  });
+
+  it("puts the navigation in a drawer on narrow screens", async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal("matchMedia", (query: string) => ({
+      matches: false,
+      media: query,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined
+    }));
+    try {
+      renderApp();
+      await waitFor(() => expect(screen.getAllByText("3 of 3 records").length).toBeGreaterThan(0));
+      expect(screen.queryByRole("navigation", { name: "Workspace" })).not.toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "Open navigation" }));
+      const drawer = await screen.findByRole("dialog", { name: "Navigation" });
+      await user.click(within(drawer).getByRole("link", { name: "Apps" }));
+      expect(window.location.pathname).toBe("/databases/workspace/apps");
+      await waitFor(() => expect(screen.queryByRole("dialog", { name: "Navigation" })).not.toBeInTheDocument());
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 });

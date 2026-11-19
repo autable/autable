@@ -40,19 +40,25 @@
     "noMethods": "没有启用登录方式",
     "or": "或",
     "password": "密码",
-    "registerTitle": "注册"
+    "registerTitle": "注册",
+    "signInTitle": "登录 autable",
+    "signInDescription": "团队的表格、应用和工作流。",
+    "registerTitleFull": "注册 autable 账号",
+    "registerDescription": "用工作邮箱注册，加入后由管理员开通权限。",
+    "form": "登录"
   },
   "empty": {
-    "noDatabaseTitle": "未选择数据库",
-    "noDatabaseDescription": "在左侧创建或选择一个数据库开始。",
+    "noDatabaseTitle": "还没有数据库",
+    "noDatabaseDescription": "新建一个数据库，开始搭建表、应用和工作流。",
     "noTableTitle": "还没有表",
-    "noTableDescription": "在「表」列表点 + 新建第一个表。",
+    "noTableDescription": "在左栏「表」旁边点 + 新建第一个表。",
     "noGrantedTableDescription": "这个数据库里还没有共享给你的表。",
     "noWorkflowTitle": "还没有工作流",
-    "noWorkflowDescription": "在「工作流」列表点 + 用代码创建自动化。",
+    "noWorkflowDescription": "在左栏「工作流」下点 + 新建一个，用代码自动处理事务。",
     "noRunnableWorkflowDescription": "这个数据库里还没有共享给你的工作流。",
     "noRoleTitle": "还没有角色",
-    "noRoleDescription": "在「角色」列表点 + 新建第一个角色。"
+    "noRoleDescription": "在左栏「权限」下点 + 新建一个角色。",
+    "noGrantedDatabaseDescription": "还没有共享给你的内容。请联系管理员开通权限。"
   },
   "app": {
     "actions": "操作",
@@ -99,15 +105,21 @@
     "version": "版本",
     "versionLabel": "v{{version}}",
     "versionTable": "版本",
-    "versions": "版本"
+    "versions": "版本",
+    "backToApps": "应用",
+    "about": "信息",
+    "latestVersion": "最新版本",
+    "address": "地址",
+    "none": "无"
   },
   "language": {
     "switch": "切换语言",
-    "toggleLabel": "中文"
+    "toggleLabel": "中文",
+    "switchTo": "English"
   },
   "nav": {
     "autable": "autable",
-    "createDb": "创建数据库",
+    "createDb": "新建数据库",
     "createRole": "创建角色",
     "createTable": "创建表",
     "createView": "创建视图",
@@ -135,7 +147,28 @@
     "view": "+ 视图",
     "workflowActions": "工作流操作 {{id}}",
     "workflowList": "工作流列表",
-    "workflows": "工作流"
+    "workflows": "工作流",
+    "home": "首页",
+    "apps": "应用",
+    "manage": "管理",
+    "overview": "概览",
+    "permissions": "权限",
+    "primary": "工作区",
+    "openNavigation": "打开导航",
+    "navigation": "导航",
+    "switchDatabase": "切换数据库",
+    "newDatabaseTitle": "新建数据库",
+    "newDatabaseDescription": "每个数据库有自己的表、应用、工作流和角色。",
+    "newTableTitle": "新建表",
+    "newViewTitle": "新建视图",
+    "newWorkflowTitle": "新建工作流",
+    "newRoleTitle": "新建角色",
+    "noTables": "还没有表",
+    "admin": "管理员",
+    "account": "账号 {{name}}",
+    "goHome": "autable 首页",
+    "deleteWorkflowTitle": "删除工作流",
+    "deleteWorkflowConfirm": "删除 {{name}}？它的脚本、设置和运行记录都会删除，无法恢复。"
   },
   "permission": {
     "addRoleMember": "添加角色成员",
@@ -373,7 +406,9 @@
     "viewSortField": "视图排序字段",
     "writableFields": "可写字段",
     "byActor": "由 {{actor}} 操作",
-    "fieldOptionsMultiple": "允许多选"
+    "fieldOptionsMultiple": "允许多选",
+    "views": "视图",
+    "rowPanelEmpty": "选择一行查看它的字段"
   },
   "workflow": {
     "editConfig": "编辑配置 {{id}}",
@@ -424,7 +459,8 @@
     "runnableList": "可运行的工作流",
     "runWorkflow": "运行 {{name}}",
     "workflowScriptLabel": "工作流 JavaScript",
-    "workspaceTabs": "工作流工作区标签"
+    "workspaceTabs": "工作流工作区标签",
+    "runnableDescription": "{{database}} 里你可以运行的工作流"
   },
   "runners": {
     "title": "远程运行器",
@@ -488,5 +524,60 @@
     "problemType": "“{{value}}”不是{{type}}",
     "problemEnum": "“{{value}}”不在允许的选项中",
     "problemMissingMatch": "缺少去重字段的值"
+  },
+  "ui": {
+    "loading": "加载中",
+    "loadFailed": "加载失败",
+    "retry": "重试",
+    "notification": "通知",
+    "appearanceLabel": "外观：{{theme}}",
+    "theme": {
+      "system": "跟随系统",
+      "light": "浅色",
+      "dark": "深色"
+    }
+  },
+  "home": {
+    "description": "{{database}} 里你可以使用的应用和表",
+    "apps": "应用",
+    "allApps": "全部应用",
+    "tables": "表",
+    "tableMeta": "{{fields}} · {{views}}",
+    "noTablesAdmin": "还没有表。在左栏「表」旁边点 + 新建。",
+    "noAppsAdmin": "还没有应用。用命令行工具 autablectl 发布一个。",
+    "emptyTitle": "还没有共享给你的内容",
+    "emptyDescription": "请联系管理员，开通这个数据库里的表或应用。",
+    "notPublished": "未发布",
+    "openInNewTab": "在新标签页打开",
+    "fieldCount_other": "{{count}} 个字段",
+    "viewCount_other": "{{count}} 个视图",
+    "updatedOn": "更新于 {{date}}"
+  },
+  "admin": {
+    "title": "管理",
+    "description": "{{database}} 的结构、代码与权限。只有管理员能看到这里。",
+    "areas": "管理项",
+    "tablesTitle": "表与字段",
+    "tablesDescription": "字段、公式和视图在各个表里编辑。",
+    "workflowsTitle": "工作流",
+    "workflowsDescription": "用 JavaScript 写的自动化，数据变更触发或手动运行。",
+    "workflowsMeta": "{{workflows}} · {{enabled}} 个已启用",
+    "permissionsTitle": "权限与角色",
+    "permissionsDescription": "角色把数据、应用和工作流的权限授予成员和工作流。",
+    "appsTitle": "应用与版本",
+    "appsDescription": "发布、预览和回滚托管的网页应用。",
+    "appsMeta": "{{apps}} · {{published}} 个已发布",
+    "runnersTitle": "远程运行器",
+    "runnersDescription": "在其他网络里的机器上运行工作流节点。",
+    "tableColumns": {
+      "table": "表",
+      "fields": "字段",
+      "views": "视图",
+      "formulas": "公式"
+    },
+    "tablesMeta_other": "{{count}} 个表",
+    "workflowCount_other": "{{count}} 个工作流",
+    "permissionsMeta_other": "{{count}} 个角色",
+    "appCount_other": "{{count}} 个应用"
   }
 }
