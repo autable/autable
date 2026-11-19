@@ -970,7 +970,9 @@ test("covers workflow editor, node list, and run history through the real backen
   await page.getByRole("button", { name: "Run", exact: true }).click();
   await expect(page.getByText(/Workflow run saved: whistory_/).first()).toBeVisible();
   await page.getByRole("tab", { name: "History" }).click();
-  await expect(page.getByRole("button", { name: "Workflow run history" })).toBeVisible();
+  const runHistory = page.getByRole("navigation", { name: "Workflow run history" });
+  // The run just started is the one shown.
+  await expect(runHistory.locator('[aria-current="true"]')).toBeVisible();
   const runList = page.getByLabel("Workflow run nodes");
   await expect(runList.getByRole("button", { name: /Run input/ })).toBeVisible();
   await expect(runList.getByRole("button", { name: /Run output/ })).toBeVisible();
@@ -1141,8 +1143,7 @@ test("covers role members and resource permission grants through the real backen
   await sidebar(page).getByRole("link", { name: "Permissions", exact: true }).click();
   await createNamedResource(page, "Create Role", "New role name", "editor");
   await expect(sidebar(page).getByRole("link", { name: "editor", exact: true })).toHaveAttribute("aria-current", "page");
-  await page.getByRole("button", { name: /Members/ }).click();
-  const membersDialog = page.getByRole("dialog", { name: "Members" });
+  const membersDialog = page.getByRole("region", { name: /^Members/ });
   await membersDialog.getByRole("combobox", { name: "Role member display name" }).fill(user.email);
   await page.getByRole("option", { name: user.email }).click();
   await expect(membersDialog.getByText(user.email)).toBeVisible();

@@ -18,6 +18,7 @@ export function DialogContent({
   children,
   footer,
   className,
+  bodyClassName,
   ...props
 }: ContentProps & {
   title: ReactNode;
@@ -25,6 +26,8 @@ export function DialogContent({
   children?: ReactNode;
   footer?: ReactNode;
   className?: string;
+  /** Classes for the scrolling body, e.g. to let a two-pane layout fill the dialog. */
+  bodyClassName?: string;
 }) {
   const { t } = useTranslation();
   return (
@@ -52,7 +55,7 @@ export function DialogContent({
             </Button>
           </D.Close>
         </div>
-        {children && <div className="min-h-0 overflow-y-auto px-5 pb-1 pt-4">{children}</div>}
+        {children && <div className={cn("min-h-0 overflow-y-auto px-5 pb-1 pt-4", bodyClassName)}>{children}</div>}
         {footer && <div className="flex justify-end gap-2 px-5 pb-5 pt-4">{footer}</div>}
       </D.Content>
     </D.Portal>

@@ -37,7 +37,6 @@ import { AdminPage } from "./pages/AdminPage";
 import { HomePage } from "./pages/HomePage";
 import { WorkflowRunsPage } from "./pages/WorkflowRunsPage";
 import { AppShell } from "./shell/AppShell";
-import { FluentScope } from "./shell/FluentScope";
 import { NavigationProvider } from "./shell/navigation";
 import { Page } from "./shell/Page";
 import type { SidebarProps } from "./shell/Sidebar";
@@ -683,9 +682,7 @@ function WorkspaceApp() {
         {renderContent()}
       </AppShell>
       {isAdmin && (
-        <FluentScope className="contents">
-          <RunnersPanel databaseName={database.name} open={runnersOpen && Boolean(database.name)} onOpenChange={setRunnersOpen} />
-        </FluentScope>
+        <RunnersPanel databaseName={database.name} open={runnersOpen && Boolean(database.name)} onOpenChange={setRunnersOpen} />
       )}
     </NavigationProvider>
   );
@@ -810,7 +807,6 @@ function WorkspaceApp() {
           return <WorkflowRunsPage databaseName={database.name} onRun={workflowWorkspace.runGrantedWorkflow} workflows={workflows} />;
         }
         return selectedWorkflow ? (
-          <FluentScope className="h-full min-h-0 overflow-hidden p-4 md:px-8 md:py-6">
             <WorkflowWorkspace
               activeTab={selectedWorkflowTab}
               databaseName={database.name}
@@ -831,7 +827,6 @@ function WorkspaceApp() {
               workflowNodes={workflowNodes}
               workflowRuns={workflowRuns}
             />
-          </FluentScope>
         ) : (
           <Page title={t("nav.workflows")}>
             <Card>
@@ -857,7 +852,6 @@ function WorkspaceApp() {
         );
       case "permission":
         return isAdmin ? (
-          <FluentScope className="h-full min-h-0 overflow-auto p-4 md:px-8 md:py-6">
             <PermissionPanel
               apps={apps}
               database={database}
@@ -876,7 +870,6 @@ function WorkspaceApp() {
               role={selectedRole}
               workflows={workflows}
             />
-          </FluentScope>
         ) : null;
     }
   }

@@ -205,7 +205,7 @@
       "createDelete": "可增删"
     },
     "removeMember": "移除 {{name}}",
-    "roleAccessMatrix": "{{database}} 角色权限矩阵",
+    "roleAccessMatrix": "这个角色在 {{database}} 里可以使用的内容",
     "roleMemberDisplayName": "角色成员显示名",
     "scope": "范围",
     "searchMember": "搜索成员",
@@ -225,7 +225,16 @@
     "workflowLevels": {
       "none": "无",
       "run": "运行"
-    }
+    },
+    "pageDescription": "{{database}} 里的角色把数据、应用和工作流的权限授予成员和工作流。",
+    "unsaved": "有未保存的修改",
+    "access": "权限",
+    "workflowMembers": "工作流成员",
+    "workflowMembersHint": "角色里的工作流在运行表节点时使用角色的数据权限。",
+    "workflowsHint": "成员可以手动运行这些工作流。编辑工作流仍由管理员负责。",
+    "appsHint": "成员可以打开这些应用。发布和版本管理仍由管理员负责。",
+    "structureSection": "结构",
+    "structureNote": "字段、公式和视图只能由管理员修改，不能授权给他人。"
   },
   "status": {
     "allRecordsBaseView": "全部记录是基础视图",
@@ -460,7 +469,18 @@
     "runWorkflow": "运行 {{name}}",
     "workflowScriptLabel": "工作流 JavaScript",
     "workspaceTabs": "工作流工作区标签",
-    "runnableDescription": "{{database}} 里你可以运行的工作流"
+    "runnableDescription": "{{database}} 里你可以运行的工作流",
+    "disabled": "已停用",
+    "enabledHint": "启用后按触发条件运行",
+    "noInstances": "脚本还没有声明实例。",
+    "noRunsDescription": "点「运行」或触发后，运行记录会出现在这里。",
+    "runs": "运行记录",
+    "steps": "步骤",
+    "runFailed": "出错",
+    "runSucceeded": "完成",
+    "nodeCatalogDescription": "工作流可以使用的节点类型，以及它们的输入、输出和设置。",
+    "variables": "变量",
+    "secretsTitle": "密钥"
   },
   "runners": {
     "title": "远程运行器",
@@ -476,7 +496,10 @@
     "generate": "生成令牌",
     "reset": "重置令牌",
     "loadFailed": "运行器加载失败",
-    "resetFailed": "运行器令牌重置失败"
+    "resetFailed": "运行器令牌重置失败",
+    "description": "运行器在其他网络里的机器上为 {{database}} 执行工作流节点。",
+    "online": "已连接",
+    "copy": "复制令牌"
   },
   "import": {
     "import": "导入",
@@ -523,7 +546,13 @@
     "failedRow": "第 {{index}} 行：{{error}}",
     "problemType": "“{{value}}”不是{{type}}",
     "problemEnum": "“{{value}}”不在允许的选项中",
-    "problemMissingMatch": "缺少去重字段的值"
+    "problemMissingMatch": "缺少去重字段的值",
+    "stepConfigure": "第 1 步，共 2 步 · 选择要导入的列",
+    "stepPreview": "第 2 步，共 2 步 · 导入前检查数据",
+    "stepRunning": "正在导入…",
+    "stepDone": "导入完成",
+    "rowCount_other": "{{count}} 行数据",
+    "preview": "导入预览"
   },
   "ui": {
     "loading": "加载中",

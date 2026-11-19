@@ -3,7 +3,6 @@ import { createRoot } from "react-dom/client";
 import "./app.css";
 import "react-data-grid/lib/styles.css";
 import "react-querybuilder/dist/query-builder.css";
-import "./legacy.css";
 import "./i18n";
 import { App } from "./App";
 

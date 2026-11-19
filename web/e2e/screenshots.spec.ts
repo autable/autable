@@ -212,7 +212,7 @@ test("capture workspace screenshots", async ({ page }) => {
     await page.getByRole("button", { name: "Run", exact: true }).click(bestEffort);
     await page.getByText(/Workflow run saved/).first().waitFor(bestEffort);
     await page.getByRole("tab", { name: "History" }).click(bestEffort);
-    await page.locator(".workflow-run-node-list").waitFor(bestEffort);
+    await page.getByLabel("Workflow run nodes").waitFor(bestEffort);
     await page.waitForTimeout(800);
   });
 
@@ -237,44 +237,43 @@ test("capture workspace screenshots", async ({ page }) => {
   await page.waitForTimeout(300);
   await shot(page, "10-permission-matrix");
 
-  // Partial popover (per-item levels) from the connected split control.
-  await capture(page, "13-permission-partial", async () => {
-    await page.getByRole("button", { name: /Partial/ }).first().click(bestEffort);
-    await page.waitForTimeout(250);
-  });
-  await page.keyboard.press("Escape");
-
-  // Members popover (users): count badge + add/list.
-  await capture(page, "12-members-popover", async () => {
-    await page.getByRole("button", { name: /Members/ }).click(bestEffort);
-    await page.getByRole("combobox", { name: "Role member email" }).waitFor(bestEffort);
+  // Member search: matching people appear under the combobox.
+  await capture(page, "12-members-search", async () => {
+    await page.getByRole("combobox", { name: "Role member display name" }).fill("e2e", bestEffort);
+    await page.getByRole("listbox").waitFor(bestEffort);
     await page.waitForTimeout(200);
   });
   await page.keyboard.press("Escape");
 
-  // Workflow members popover (separate from users).
-  await capture(page, "14-workflow-members", async () => {
-    await page.getByRole("button", { name: /Workflows/ }).click(bestEffort);
-    await page.waitForTimeout(250);
+  // Apps tab: an all-apps row and one none/open row per app.
+  await capture(page, "13-permission-apps", async () => {
+    await page.getByRole("tab", { name: "Apps" }).click(bestEffort);
+    await page.getByLabel("All apps permission").waitFor(bestEffort);
+    await page.waitForTimeout(200);
   });
-  await page.keyboard.press("Escape");
 
-  // Switch to Chinese to verify translations + disabled Save.
+  // Workflows tab: one none/run row per workflow.
+  await capture(page, "14-permission-workflows", async () => {
+    await page.getByRole("tab", { name: "Workflows" }).click(bestEffort);
+    await page.getByLabel(/permission$/).first().waitFor(bestEffort);
+    await page.waitForTimeout(200);
+  });
+
+  // Switch to Chinese to verify translations.
   await capture(page, "15-permission-zh", async () => {
     await page.getByRole("button", { name: "Switch language" }).click(bestEffort);
+    await page.getByRole("tab", { name: "表" }).click(bestEffort);
     await page.waitForTimeout(300);
   });
-  const permissionView = page.locator(".permission-view");
-  await capture(page, "16-workflow-members-zh", async () => {
-    await permissionView.getByRole("button", { name: /工作流|Workflows/ }).first().click(bestEffort);
+  await capture(page, "16-permission-workflows-zh", async () => {
+    await page.getByRole("tab", { name: "工作流" }).click(bestEffort);
     await page.waitForTimeout(250);
   });
-  await page.keyboard.press("Escape");
-  await capture(page, "17-permission-zh-partial", async () => {
-    await permissionView.getByRole("button", { name: /部分|Partial/ }).first().click(bestEffort);
+  await capture(page, "17-permission-apps-zh", async () => {
+    await page.getByRole("tab", { name: "应用" }).click(bestEffort);
+    await page.getByLabel("全部应用 permission").waitFor(bestEffort);
     await page.waitForTimeout(250);
   });
-  await page.keyboard.press("Escape");
 
   // Narrow viewport (responsive) on the permission matrix.
   await page.setViewportSize({ width: 760, height: 900 });

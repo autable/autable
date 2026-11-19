@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo } from "react";
 import MonacoEditor, { useMonaco, type Monaco } from "@monaco-editor/react";
 import { useTranslation } from "react-i18next";
 import type { EditorExtraLib } from "../editorTypes";
+import { useTheme } from "../ui";
 
 export type JavaScriptEditorProps = {
   canWrite: boolean;
@@ -32,6 +33,7 @@ export function JavaScriptEditor({
   value
 }: JavaScriptEditorProps) {
   const { t } = useTranslation();
+  const { resolved } = useTheme();
   const monaco = useMonaco();
   const normalizedExtraLibs = useMemo(
     () => [...extraLibs].sort((left, right) => left.filePath.localeCompare(right.filePath)),
@@ -47,6 +49,7 @@ export function JavaScriptEditor({
   }, [language, monaco, normalizedExtraLibs]);
 
   const beforeMount = useCallback((nextMonaco: Monaco) => {
+    defineThemes(nextMonaco);
     if (language === "javascript") {
       configureJavaScriptLanguage(nextMonaco);
       installExtraLibs(nextMonaco, normalizedExtraLibs);
@@ -54,24 +57,24 @@ export function JavaScriptEditor({
   }, [language, normalizedExtraLibs]);
 
   return (
-    <div className="javascript-editor-shell">
+    <div className="min-h-[24rem] min-w-0 flex-1 overflow-hidden relative rounded-container border border-border bg-elevated lg:min-h-0">
       <MonacoEditor
         beforeMount={beforeMount}
-        className="javascript-editor"
         defaultLanguage={language}
         height="100%"
         language={language}
-        loading={<span className="flow-empty">{t("common.loadingEditor")}</span>}
+        loading={<span className="text-13 text-muted">{t("common.loadingEditor")}</span>}
         onChange={(nextValue) => onChange(nextValue ?? "")}
         options={{
           ariaLabel: label,
           // Render suggestion/hover/parameter-hint popups with position: fixed
           // so they aren't clipped by the editor pane's overflow: hidden.
           fixedOverflowWidgets: true,
-          fontFamily: '"SFMono-Regular", Consolas, "Liberation Mono", monospace',
+          fontFamily: 'ui-monospace, "SFMono-Regular", "Cascadia Code", Menlo, Consolas, monospace',
           fontSize: 13,
           lineNumbersMinChars: 3,
           minimap: { enabled: false },
+          padding: { top: 10, bottom: 10 },
           readOnly: !canWrite,
           renderLineHighlight: "line",
           scrollBeyondLastLine: false,
@@ -79,7 +82,7 @@ export function JavaScriptEditor({
           wordWrap: "on"
         }}
         path={path}
-        theme="light"
+        theme={resolved === "dark" ? "autable-dark" : "autable-light"}
         value={value}
         wrapperProps={{
           "aria-disabled": String(!canWrite),
@@ -91,6 +94,32 @@ export function JavaScriptEditor({
       />
     </div>
   );
+}
+
+// Editor themes on the design tokens' surfaces, so the editor sits flush in its card.
+function defineThemes(monaco: Monaco) {
+  monaco.editor.defineTheme("autable-light", {
+    base: "vs",
+    inherit: true,
+    rules: [],
+    colors: {
+      "editor.background": "#fdfdf8",
+      "editorGutter.background": "#fdfdf8",
+      "editor.lineHighlightBackground": "#00000008",
+      "editorLineNumber.foreground": "#00000047"
+    }
+  });
+  monaco.editor.defineTheme("autable-dark", {
+    base: "vs-dark",
+    inherit: true,
+    rules: [],
+    colors: {
+      "editor.background": "#1f1f1f",
+      "editorGutter.background": "#1f1f1f",
+      "editor.lineHighlightBackground": "#ffffff0a",
+      "editorLineNumber.foreground": "#ffffff4d"
+    }
+  });
 }
 
 function configureJavaScriptLanguage(monaco: Monaco) {

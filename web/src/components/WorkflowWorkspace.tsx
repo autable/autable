@@ -1,30 +1,5 @@
+import { BookOpen, History, Pencil, Play, Workflow, Zap } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import {
-  Button,
-  Dialog,
-  DialogBody,
-  DialogContent,
-  DialogSurface,
-  DialogTitle,
-  DialogTrigger,
-  Field as FluentField,
-  Input,
-  Menu,
-  MenuButton,
-  MenuItem,
-  MenuList,
-  MenuPopover,
-  MenuTrigger,
-  Popover,
-  PopoverSurface,
-  PopoverTrigger,
-  Select,
-  Switch,
-  Tab,
-  TabList,
-  Text,
-} from "@fluentui/react-components";
-import { EditRegular, HistoryRegular, InfoRegular, PlayRegular, SaveRegular } from "@fluentui/react-icons";
 import { useTranslation } from "react-i18next";
 import { fetchRunners } from "../api";
 import type {
@@ -37,6 +12,28 @@ import type {
 } from "../api";
 import { workflowEditorExtraLibs } from "../editorTypes";
 import type { WorkflowTriggerDeclaration } from "../workflowInstances";
+import {
+  Badge,
+  Button,
+  Card,
+  cn,
+  Dialog,
+  DialogContent,
+  DialogTrigger,
+  EmptyState,
+  Field,
+  Input,
+  Label,
+  NativeSelect,
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+  StatusDot,
+  Switch,
+  Tabs,
+  TabsList,
+  TabsTrigger
+} from "../ui";
 import { JavaScriptEditor } from "./JavaScriptEditorLazy";
 
 type WorkflowWorkspaceProps = {
@@ -78,6 +75,11 @@ type WorkflowRunListItem = {
   error?: string;
 };
 
+/**
+ * The workflow page (admins): the script in Monaco on the left, settings and
+ * the declared instances on the right; History shows past runs, the steps of
+ * the selected run and each step's input and output.
+ */
 export function WorkflowWorkspace({
   activeTab,
   databaseName,
@@ -100,6 +102,7 @@ export function WorkflowWorkspace({
 }: WorkflowWorkspaceProps) {
   const { t } = useTranslation();
   const canWriteWorkflow = (workflow?.permission_level ?? 2) >= 2;
+  const enabled = workflow?.enabled ?? true;
   const workflowNodesByType = new Map(workflowNodes.map((node) => [node.type, node]));
   const [runnersInfo, setRunnersInfo] = useState<RunnersResponse | null>(null);
   useEffect(() => {
@@ -133,51 +136,49 @@ export function WorkflowWorkspace({
   );
 
   return (
-    <div className="workflow-workspace">
-      <div className="section-header workflow-section-header">
-        <div>
-          <Text weight="semibold">{workflow?.name ?? t("common.workflow")}.js</Text>
-          <Text size={200}>{t("workflow.workflowLabel", { database: databaseName })}</Text>
+    <div className="flex min-h-full flex-col lg:h-full">
+      <div className="shrink-0 px-4 pt-4 md:px-8 md:pt-7">
+        <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
+          <div className="flex min-w-0 items-center gap-3">
+            <span className="hidden size-10 shrink-0 items-center justify-center rounded-inner bg-chip text-description sm:flex" aria-hidden>
+              <Workflow className="size-5" strokeWidth={1.75} />
+            </span>
+            <div className="min-w-0">
+              <h1 className="truncate text-20 font-medium tracking-tight text-fg">{workflow?.name ?? t("common.workflow")}</h1>
+              <p className="flex items-center gap-2 text-13 text-muted">
+                <span className="truncate">{t("workflow.workflowLabel", { database: databaseName })}</span>
+                <span className="inline-flex items-center gap-1.5 text-12">
+                  <span className={cn("size-1.5 rounded-full", enabled ? "bg-success" : "bg-subtle")} aria-hidden />
+                  {enabled ? t("common.enabled") : t("workflow.disabled")}
+                </span>
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <NodeCatalogDialog language={language} workflowNodes={workflowNodes} />
+            <Button size="sm" onClick={onExecute} disabled={!workflow?.id || !canWriteWorkflow}>
+              <Play aria-hidden />
+              {t("common.run")}
+            </Button>
+            <Button size="sm" variant="cta" onClick={onSave} disabled={!canWriteWorkflow}>
+              {t("common.save")}
+            </Button>
+          </div>
         </div>
-        <div className="workflow-header-actions">
-          <NodeCatalogDialog language={language} workflowNodes={workflowNodes} />
-          <HistoryRetentionSelect
-            canWriteWorkflow={canWriteWorkflow}
-            onSetHistoryRetention={onSetHistoryRetention}
-            workflow={workflow}
-          />
-          <TimeoutSelect
-            canWriteWorkflow={canWriteWorkflow}
-            onSetTimeoutSeconds={onSetTimeoutSeconds}
-            workflow={workflow}
-          />
-          <Switch
-            checked={workflow?.enabled ?? true}
-            label={t("common.enabled")}
-            onChange={(_, data) => onToggleEnabled(Boolean(data.checked))}
-            disabled={!workflow?.id || !canWriteWorkflow}
-          />
-          <Button icon={<PlayRegular />} onClick={onExecute} disabled={!workflow?.id || !canWriteWorkflow}>
-            {t("common.run")}
-          </Button>
-          <Button icon={<SaveRegular />} appearance="primary" onClick={onSave} disabled={!canWriteWorkflow}>
-            {t("common.save")}
-          </Button>
-        </div>
+        <Tabs value={activeTab} onValueChange={(value) => onSelectTab(value as WorkflowTab)} className="mt-4">
+          <TabsList aria-label={t("workflow.workspaceTabs")}>
+            <TabsTrigger value="editor">{t("workflow.editor")}</TabsTrigger>
+            <TabsTrigger value="history">
+              <History aria-hidden />
+              {t("common.history")}
+            </TabsTrigger>
+          </TabsList>
+        </Tabs>
       </div>
 
-      <TabList
-        selectedValue={activeTab}
-        onTabSelect={(_, data) => onSelectTab(data.value as WorkflowTab)}
-        aria-label={t("workflow.workspaceTabs")}
-      >
-        <Tab value="editor">{t("workflow.editor")}</Tab>
-        <Tab value="history">{t("common.history")}</Tab>
-      </TabList>
-
-      {activeTab === "editor" ? (
-        <div className="split-view workflow-editor-tab">
-          <div className="editor-pane">
+      <div className="flex min-h-0 flex-1 flex-col px-4 pb-4 pt-3 md:px-8 md:pb-6">
+        {activeTab === "editor" ? (
+          <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[minmax(0,1fr)_20rem]">
             <JavaScriptEditor
               canWrite={canWriteWorkflow}
               extraLibs={editorExtraLibs}
@@ -187,60 +188,118 @@ export function WorkflowWorkspace({
               testID="workflow-js-editor"
               value={workflow?.script ?? ""}
             />
-          </div>
-          <div className="history-pane">
-            <Text weight="semibold">{t("workflow.instances")}</Text>
-            <div className="node-list" aria-label={t("workflow.instances")}>
-              {workflowInstances.ok ? (
-                Object.entries(workflowInstances.value).map(([instanceID, instance]) => {
-                  const ports = effectiveInstancePorts(instance, workflowNodesByType);
-                  const remoteCapable = runnersInfo?.remote_node_types.includes(instance.node) ?? false;
-                  const boundRunner = workflow?.runners?.[instanceID] ?? "";
-                  return (
-                    <div key={instanceID} className="node-item">
-                      <div className="node-title">
-                        <span>{instanceID}</span>
-                        <span>{instance.node}</span>
-                      </div>
-                      <div className="node-ports">
-                        <span>{t("workflow.vars", { ports: formatPorts(ports.variables, t) })}</span>
-                        <span>{t("workflow.secrets", { ports: formatPorts(ports.secrets, t) })}</span>
-                        {boundRunner !== "" && <span>{t("workflow.boundRunner", { name: boundRunner })}</span>}
-                      </div>
-                      {(ports.variables.length > 0 || ports.secrets.length > 0 || remoteCapable) && (
-                        <InstanceConfigPopover
-                          canWriteWorkflow={canWriteWorkflow}
-                          instanceID={instanceID}
-                          instanceNode={instance.node}
-                          onSaveInstanceConfig={onSaveInstanceConfig}
-                          ports={ports}
-                          remoteCapable={remoteCapable}
-                          runnersInfo={runnersInfo}
-                          workflow={workflow}
-                        />
-                      )}
-                    </div>
-                  );
-                })
-              ) : (
-                <Text size={200}>{workflowInstances.error}</Text>
-              )}
+            <div className="flex min-h-0 flex-col gap-4 lg:overflow-y-auto">
+              <WorkflowSettings
+                canWriteWorkflow={canWriteWorkflow}
+                onSetHistoryRetention={onSetHistoryRetention}
+                onSetTimeoutSeconds={onSetTimeoutSeconds}
+                onToggleEnabled={onToggleEnabled}
+                workflow={workflow}
+              />
+              <Card>
+                <div className="px-4 pb-2 pt-3.5">
+                  <h2 className="text-13 font-medium text-fg">{t("workflow.instances")}</h2>
+                </div>
+                <div className="flex flex-col gap-2 px-3 pb-3" aria-label={t("workflow.instances")} role="list">
+                  {workflowInstances.ok ? (
+                    Object.keys(workflowInstances.value).length === 0 ? (
+                      <p className="px-1 pb-1 text-12 text-muted">{t("workflow.noInstances")}</p>
+                    ) : (
+                      Object.entries(workflowInstances.value).map(([instanceID, instance]) => {
+                        const ports = effectiveInstancePorts(instance, workflowNodesByType);
+                        const remoteCapable = runnersInfo?.remote_node_types.includes(instance.node) ?? false;
+                        const boundRunner = workflow?.runners?.[instanceID] ?? "";
+                        return (
+                          <div key={instanceID} role="listitem" className="rounded-inner border border-border-soft bg-surface/40 px-3 py-2.5">
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="min-w-0">
+                                <p className="truncate font-mono text-13 font-medium text-fg">{instanceID}</p>
+                                <p className="truncate font-mono text-12 text-muted">{instance.node}</p>
+                              </div>
+                              {(ports.variables.length > 0 || ports.secrets.length > 0 || remoteCapable) && (
+                                <InstanceConfigPopover
+                                  canWriteWorkflow={canWriteWorkflow}
+                                  instanceID={instanceID}
+                                  instanceNode={instance.node}
+                                  onSaveInstanceConfig={onSaveInstanceConfig}
+                                  ports={ports}
+                                  remoteCapable={remoteCapable}
+                                  runnersInfo={runnersInfo}
+                                  workflow={workflow}
+                                />
+                              )}
+                            </div>
+                            <div className="mt-1.5 flex flex-col gap-0.5 text-12 text-description">
+                              <span className="truncate">{t("workflow.vars", { ports: formatPorts(ports.variables, t) })}</span>
+                              <span className="truncate">{t("workflow.secrets", { ports: formatPorts(ports.secrets, t) })}</span>
+                            </div>
+                            {boundRunner !== "" && (
+                              <Badge className="mt-2">
+                                <span>{t("workflow.boundRunner", { name: boundRunner })}</span>
+                              </Badge>
+                            )}
+                          </div>
+                        );
+                      })
+                    )
+                  ) : (
+                    <p className="rounded-inner bg-error-bg px-3 py-2 font-mono text-12 text-error">{workflowInstances.error}</p>
+                  )}
+                </div>
+              </Card>
             </div>
           </div>
-        </div>
-      ) : (
-        <WorkflowHistoryView
-          onSelectRunKey={onSelectRunKey}
-          selectedRun={selectedRun}
-          workflowRuns={workflowRuns}
-        />
-      )}
+        ) : (
+          <WorkflowHistoryView onSelectRunKey={onSelectRunKey} selectedRun={selectedRun} workflowRuns={workflowRuns} />
+        )}
+      </div>
     </div>
   );
 }
 
-// WorkflowRunList is what non-admins see: the workflows they may run, each
-// with a Run action. Definitions and run history are admin-only.
+function WorkflowSettings({
+  canWriteWorkflow,
+  onSetHistoryRetention,
+  onSetTimeoutSeconds,
+  onToggleEnabled,
+  workflow
+}: {
+  canWriteWorkflow: boolean;
+  onSetHistoryRetention: (days: number | null) => void;
+  onSetTimeoutSeconds: (seconds: number | null) => void;
+  onToggleEnabled: (enabled: boolean) => void;
+  workflow?: WorkflowDefinition;
+}) {
+  const { t } = useTranslation();
+  const disabled = !workflow?.id || !canWriteWorkflow;
+  return (
+    <Card>
+      <div className="flex items-center justify-between gap-3 border-b border-border-soft px-4 py-3">
+        <div className="min-w-0">
+          <Label htmlFor="workflow-enabled">{t("common.enabled")}</Label>
+          <p className="text-12 text-muted">{t("workflow.enabledHint")}</p>
+        </div>
+        <Switch
+          id="workflow-enabled"
+          checked={workflow?.enabled ?? true}
+          onCheckedChange={(checked) => onToggleEnabled(checked)}
+          disabled={disabled}
+        />
+      </div>
+      <div className="flex flex-col gap-3 px-4 py-3">
+        <Field label={t("workflow.historyRetention")}>
+          {(field) => (
+            <HistoryRetentionSelect {...field} disabled={disabled} onSetHistoryRetention={onSetHistoryRetention} workflow={workflow} />
+          )}
+        </Field>
+        <Field label={t("workflow.timeout")}>
+          {(field) => <TimeoutSelect {...field} disabled={disabled} onSetTimeoutSeconds={onSetTimeoutSeconds} workflow={workflow} />}
+        </Field>
+      </div>
+    </Card>
+  );
+}
+
 function WorkflowHistoryView({
   onSelectRunKey,
   selectedRun,
@@ -254,79 +313,98 @@ function WorkflowHistoryView({
   const [selectedRunItemID, setSelectedRunItemID] = useState("run-input");
   const runItems = useMemo(() => runListItems(selectedRun, t), [selectedRun, t]);
   const selectedItem = runItems.find((item) => item.id === selectedRunItemID) ?? runItems[0];
-  const selectedRunLabel = selectedRun ? new Date(selectedRun.run.timestamp).toLocaleString() : t("workflow.noRunsYet");
+  const runs = useMemo(() => [...workflowRuns].sort((left, right) => right.run.timestamp - left.run.timestamp), [workflowRuns]);
+
+  if (workflowRuns.length === 0) {
+    return (
+      <Card className="flex flex-1 items-center justify-center">
+        <EmptyState icon={History} title={t("workflow.noRunsYet")} description={t("workflow.noRunsDescription")} />
+      </Card>
+    );
+  }
 
   return (
-    <div className="workflow-history-tab">
-      <div className="workflow-run-left">
-        <Menu>
-          <MenuTrigger disableButtonEnhancement>
-            <MenuButton
-              className="workflow-run-history-button"
-              icon={<HistoryRegular />}
-              disabled={workflowRuns.length === 0}
-              aria-label={t("workflow.historyList")}
-            >
-              {selectedRunLabel}
-            </MenuButton>
-          </MenuTrigger>
-          <MenuPopover className="workflow-run-history-menu">
-            <MenuList className="workflow-run-history-menu-list">
-              {workflowRuns.map((run) => {
-                const runLabel = new Date(run.run.timestamp).toLocaleString();
-                return (
-                  <MenuItem
-                    key={run.history_key}
-                    onClick={() => {
-                      onSelectRunKey(run.history_key);
-                      setSelectedRunItemID("run-input");
-                    }}
-                  >
-                    {runLabel}
-                  </MenuItem>
-                );
-              })}
-            </MenuList>
-          </MenuPopover>
-        </Menu>
-        {workflowRuns.length > 0 ? (
-          <div className="workflow-run-node-list" aria-label={t("workflow.runList")}>
-            {runItems.map((item, index) => (
+    <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[15rem_17rem_minmax(0,1fr)]">
+      <Card className="flex min-h-0 flex-col overflow-hidden">
+        <h2 className="shrink-0 px-4 pb-2 pt-3.5 text-13 font-medium text-fg">{t("workflow.runs")}</h2>
+        <nav aria-label={t("workflow.historyList")} className="scroll-quiet flex max-h-64 min-h-0 flex-col gap-px overflow-y-auto px-2 pb-2 lg:max-h-none">
+          {runs.map((run) => {
+            const active = run.history_key === selectedRun?.history_key;
+            const failed = Boolean(run.run.error) || run.run.steps.some((step) => step.error);
+            return (
               <button
-                key={item.id}
+                key={run.history_key}
                 type="button"
-                className={runNodeItemClassName(item, item.id === selectedItem?.id)}
-                onClick={() => setSelectedRunItemID(item.id)}
+                aria-current={active ? "true" : undefined}
+                onClick={() => {
+                  onSelectRunKey(run.history_key);
+                  setSelectedRunItemID("run-input");
+                }}
+                className={cn(
+                  "flex items-center gap-2.5 rounded-inner px-2.5 py-2 text-left text-13 transition-colors duration-150",
+                  active ? "bg-chip font-medium text-fg" : "text-description hover:bg-hover hover:text-fg"
+                )}
               >
-                <span className="workflow-run-node-index">{index + 1}</span>
-                <span className="workflow-run-node-main">
-                  <span>{item.title}</span>
-                  {item.subtitle && <span>{item.subtitle}</span>}
-                  {item.error && <span>{item.error}</span>}
-                </span>
+                <StatusDot tone={failed ? "error" : "success"} label={failed ? t("workflow.runFailed") : t("workflow.runSucceeded")} />
+                <span className="min-w-0 truncate tabular-nums">{new Date(run.run.timestamp).toLocaleString()}</span>
               </button>
-            ))}
-          </div>
+            );
+          })}
+        </nav>
+      </Card>
+      <Card className="flex min-h-0 flex-col overflow-hidden">
+        <h2 className="shrink-0 px-4 pb-2 pt-3.5 text-13 font-medium text-fg">{t("workflow.steps")}</h2>
+        {selectedRun ? (
+          <ol aria-label={t("workflow.runList")} className="scroll-quiet flex min-h-0 flex-col gap-px overflow-y-auto px-2 pb-2">
+            {runItems.map((item, index) => {
+              const active = item.id === selectedItem?.id;
+              return (
+                <li key={item.id}>
+                  <button
+                    type="button"
+                    aria-current={active ? "true" : undefined}
+                    onClick={() => setSelectedRunItemID(item.id)}
+                    className={cn(
+                      "flex w-full items-start gap-2.5 rounded-inner px-2.5 py-2 text-left transition-colors duration-150",
+                      active ? "bg-chip" : "hover:bg-hover"
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        "mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full text-11 font-medium tabular-nums",
+                        item.error ? "bg-error-bg text-error" : "bg-chip text-description"
+                      )}
+                    >
+                      {index + 1}
+                    </span>
+                    <span className="flex min-w-0 flex-col">
+                      <span className={cn("truncate text-13", active ? "font-medium text-fg" : "text-description")}>{item.title}</span>
+                      {item.subtitle && <span className="truncate font-mono text-11 text-muted">{item.subtitle}</span>}
+                      {item.error && <span className="text-12 text-error [overflow-wrap:anywhere]">{item.error}</span>}
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ol>
         ) : (
-          <div className="workflow-run-empty">
-            <span className="flow-empty">{t("workflow.noRunsYet")}</span>
-          </div>
+          <p className="px-4 pb-4 text-13 text-muted">{t("workflow.selectRunItem")}</p>
         )}
-      </div>
-      <div className="workflow-run-inspector" aria-label={t("workflow.inspector")}>
-        {workflowRuns.length > 0 && selectedItem ? (
+      </Card>
+      <Card className="flex min-h-[22rem] flex-col overflow-hidden" aria-label={t("workflow.inspector")} role="region">
+        {selectedRun && selectedItem ? (
           <>
-            <div className="workflow-run-inspector-header">
-              <Text weight="semibold">{selectedItem.title}</Text>
-              {selectedItem.subtitle && <Text size={200}>{selectedItem.subtitle}</Text>}
-              {selectedItem.error && <Text size={200}>{selectedItem.error}</Text>}
+            <div className="shrink-0 border-b border-border-soft px-4 py-3">
+              <p className="text-14 font-medium text-fg">{selectedItem.title}</p>
+              {selectedItem.subtitle && <p className="font-mono text-12 text-muted">{selectedItem.subtitle}</p>}
+              {selectedItem.error && <p className="mt-1 text-12 text-error [overflow-wrap:anywhere]">{selectedItem.error}</p>}
             </div>
             <RunPayloadTabs item={selectedItem} />
           </>
         ) : (
-          <Text size={200}>{t("workflow.selectRunItem")}</Text>
+          <p className="p-4 text-13 text-muted">{t("workflow.selectRunItem")}</p>
         )}
-      </div>
+      </Card>
     </div>
   );
 }
@@ -334,23 +412,24 @@ function WorkflowHistoryView({
 const historyRetentionOptions = [1, 7, 30, 90, 365];
 
 function HistoryRetentionSelect({
-  canWriteWorkflow,
   onSetHistoryRetention,
-  workflow
+  workflow,
+  ...props
 }: {
-  canWriteWorkflow: boolean;
+  id: string;
+  disabled: boolean;
   onSetHistoryRetention: (days: number | null) => void;
   workflow?: WorkflowDefinition;
 }) {
   const { t } = useTranslation();
   const retention = workflow?.history_retention_days ?? null;
   return (
-    <Select
+    <NativeSelect
+      {...props}
+      selectSize="sm"
       aria-label={t("workflow.historyRetention")}
-      title={t("workflow.historyRetention")}
       value={retention === null ? "forever" : String(retention)}
-      onChange={(_, data) => onSetHistoryRetention(data.value === "forever" ? null : Number(data.value))}
-      disabled={!workflow?.id || !canWriteWorkflow}
+      onChange={(event) => onSetHistoryRetention(event.target.value === "forever" ? null : Number(event.target.value))}
     >
       <option value="forever">{t("workflow.historyRetentionForever")}</option>
       <option value="0">{t("workflow.historyRetentionNone")}</option>
@@ -362,18 +441,19 @@ function HistoryRetentionSelect({
       {retention !== null && retention !== 0 && !historyRetentionOptions.includes(retention) && (
         <option value={String(retention)}>{t("workflow.historyRetentionDays", { days: retention })}</option>
       )}
-    </Select>
+    </NativeSelect>
   );
 }
 
 const timeoutOptions = [60, 300, 1800, 21600, 86400];
 
 function TimeoutSelect({
-  canWriteWorkflow,
   onSetTimeoutSeconds,
-  workflow
+  workflow,
+  ...props
 }: {
-  canWriteWorkflow: boolean;
+  id: string;
+  disabled: boolean;
   onSetTimeoutSeconds: (seconds: number | null) => void;
   workflow?: WorkflowDefinition;
 }) {
@@ -384,12 +464,12 @@ function TimeoutSelect({
       ? t("workflow.timeoutHours", { hours: seconds / 3600 })
       : t("workflow.timeoutMinutes", { minutes: Math.max(1, Math.round(seconds / 60)) });
   return (
-    <Select
+    <NativeSelect
+      {...props}
+      selectSize="sm"
       aria-label={t("workflow.timeout")}
-      title={t("workflow.timeout")}
       value={timeout === null ? "default" : String(timeout)}
-      onChange={(_, data) => onSetTimeoutSeconds(data.value === "default" ? null : Number(data.value))}
-      disabled={!workflow?.id || !canWriteWorkflow}
+      onChange={(event) => onSetTimeoutSeconds(event.target.value === "default" ? null : Number(event.target.value))}
     >
       <option value="default">{t("workflow.timeoutDefault")}</option>
       {timeoutOptions.map((seconds) => (
@@ -400,10 +480,15 @@ function TimeoutSelect({
       {timeout !== null && !timeoutOptions.includes(timeout) && (
         <option value={String(timeout)}>{t("workflow.timeoutSeconds", { seconds: timeout })}</option>
       )}
-    </Select>
+    </NativeSelect>
   );
 }
 
+function nodeKind(node: WorkflowNodeInfo, t: ReturnType<typeof useTranslation>["t"]): string {
+  return node.trigger ? t("workflow.nodeKinds.trigger") : node.stateless ? t("workflow.nodeKinds.stateless") : t("workflow.nodeKinds.stateful");
+}
+
+/** The node catalog: every node type on the left, its documentation on the right. */
 function NodeCatalogDialog({ language, workflowNodes }: { language: string; workflowNodes: WorkflowNodeInfo[] }) {
   const { t } = useTranslation();
   const [selectedType, setSelectedType] = useState(workflowNodes[0]?.type ?? "");
@@ -412,80 +497,73 @@ function NodeCatalogDialog({ language, workflowNodes }: { language: string; work
 
   return (
     <Dialog>
-      <DialogTrigger disableButtonEnhancement>
-        <Button icon={<InfoRegular />} aria-label={t("workflow.nodesButton")}>
+      <DialogTrigger asChild>
+        <Button size="sm" aria-label={t("workflow.nodesButton")}>
+          <BookOpen aria-hidden />
           {t("workflow.nodes")}
         </Button>
       </DialogTrigger>
-      <DialogSurface
-        className="node-catalog-dialog"
-        aria-label={t("workflow.nodeCatalog")}
-        style={{
-          width: "calc(100vw - 24px)",
-          maxWidth: "none"
-        }}
+      <DialogContent
+        title={t("workflow.nodeCatalog")}
+        description={t("workflow.nodeCatalogDescription")}
+        className="h-[85vh] w-[calc(100vw-1.5rem)] max-w-none"
+        bodyClassName="flex flex-1 flex-col pb-5 md:grid md:grid-cols-[17rem_minmax(0,1fr)] md:gap-5"
       >
-        <DialogBody>
-          <DialogTitle>{t("workflow.nodeCatalog")}</DialogTitle>
-          <DialogContent className="node-catalog-dialog-content">
-            <div className="node-catalog-menu" aria-label={t("workflow.nodeCatalogList")}>
-              {workflowNodes.map((node) => (
-                <Button
-                  key={node.type}
-                  appearance={node.type === selectedNode?.type ? "secondary" : "subtle"}
-                  className={node.trigger ? "node-catalog-menu-item trigger" : "node-catalog-menu-item"}
-                  onClick={() => setSelectedType(node.type)}
-                >
-                  <span>{node.type}</span>
-                </Button>
-              ))}
-            </div>
-            <div className="node-doc-panel" aria-label={t("workflow.nodeDocumentation")}>
-              {selectedNode ? (
-                <>
-                  <div className="node-doc-heading">
-                    <Text weight="semibold">{selectedNode.type}</Text>
-                    <Text size={200}>
-                      {selectedNode.trigger
-                        ? t("workflow.nodeKinds.trigger")
-                        : selectedNode.stateless
-                          ? t("workflow.nodeKinds.stateless")
-                          : t("workflow.nodeKinds.stateful")}
-                    </Text>
-                  </div>
-                  <MarkdownDocument content={documentation} />
-                </>
-              ) : (
-                <Text size={200}>{t("workflow.noNodesAvailable")}</Text>
-              )}
-            </div>
-          </DialogContent>
-        </DialogBody>
-      </DialogSurface>
+        <nav
+          aria-label={t("workflow.nodeCatalogList")}
+          className="scroll-quiet flex max-h-48 shrink-0 flex-col gap-px overflow-y-auto rounded-container border border-border-soft p-1.5 md:max-h-none md:min-h-0"
+        >
+          {workflowNodes.map((node) => {
+            const active = node.type === selectedNode?.type;
+            return (
+              <button
+                key={node.type}
+                type="button"
+                aria-current={active ? "true" : undefined}
+                onClick={() => setSelectedType(node.type)}
+                className={cn(
+                  "flex items-center gap-2 rounded-inner px-2.5 py-1.5 text-left font-mono text-12 transition-colors duration-150",
+                  active ? "bg-chip font-medium text-fg" : "text-description hover:bg-hover hover:text-fg"
+                )}
+              >
+                <span className="min-w-0 flex-1 truncate">{node.type}</span>
+                {node.trigger && <Zap className="size-3.5 shrink-0 text-running" aria-hidden />}
+              </button>
+            );
+          })}
+        </nav>
+        <div aria-label={t("workflow.nodeDocumentation")} role="region" className="mt-4 min-h-0 flex-1 overflow-y-auto md:mt-0">
+          {selectedNode ? (
+            <>
+              <div className="mb-3 flex flex-wrap items-center gap-2">
+                <p className="font-mono text-15 font-medium text-fg">{selectedNode.type}</p>
+                <Badge>{nodeKind(selectedNode, t)}</Badge>
+              </div>
+              <MarkdownDocument content={documentation} />
+            </>
+          ) : (
+            <p className="text-13 text-muted">{t("workflow.noNodesAvailable")}</p>
+          )}
+        </div>
+      </DialogContent>
     </Dialog>
   );
 }
 
-function runListItems(
-  runResponse: WorkflowRunResponse | null,
-  t: ReturnType<typeof useTranslation>["t"]
-): WorkflowRunListItem[] {
+function runListItems(runResponse: WorkflowRunResponse | null, t: ReturnType<typeof useTranslation>["t"]): WorkflowRunListItem[] {
   if (!runResponse) {
     return [];
   }
-  const runInputTitle = t("workflow.runInput");
-  const runOutputTitle = t("workflow.runOutput");
   return [
     {
       id: "run-input",
-      title: runInputTitle,
+      title: t("workflow.runInput"),
       input: runResponse.run.inputs ?? {}
     },
     ...runResponse.run.steps.map((step, index): WorkflowRunListItem => {
-      const id = `step-${index}`;
       const subtitleParts = [step.node_type, step.runner ? `@ ${step.runner}` : ""].filter(Boolean);
       return {
-        id,
+        id: `step-${index}`,
         title: step.node_id,
         subtitle: subtitleParts.length > 0 ? subtitleParts.join(" ") : undefined,
         input: step.input ?? {},
@@ -495,19 +573,11 @@ function runListItems(
     }),
     {
       id: "run-output",
-      title: runOutputTitle,
+      title: t("workflow.runOutput"),
       output: runResponse.run.outputs ?? {},
       error: runResponse.run.error
     }
   ];
-}
-
-function runNodeItemClassName(item: WorkflowRunListItem, selected: boolean): string {
-  return [
-    "workflow-run-node-item",
-    selected ? "selected" : "",
-    item.error ? "error" : ""
-  ].filter(Boolean).join(" ");
 }
 
 function nodeDocumentation(node: WorkflowNodeInfo, language: string): string {
@@ -600,6 +670,7 @@ function renderInlineMarkdown(text: string): ReactNode[] {
   });
 }
 
+/** Variables, secrets and the runner of one declared instance, edited in a panel next to it. */
 function InstanceConfigPopover({
   canWriteWorkflow,
   instanceID,
@@ -630,116 +701,148 @@ function InstanceConfigPopover({
   const [secretDrafts, setSecretDrafts] = useState<Record<string, string>>({});
   const [dirtySecrets, setDirtySecrets] = useState<Record<string, boolean>>({});
   const [runnerDraft, setRunnerDraft] = useState("");
+  const [saving, setSaving] = useState(false);
 
   const boundRunner = workflow?.runners?.[instanceID] ?? "";
   const connectedNames = [...new Set((runnersInfo?.runners ?? []).map((runner) => runner.name))];
-  const runnerOptions = connectedNames.includes(boundRunner) || boundRunner === ""
-    ? connectedNames
-    : [boundRunner, ...connectedNames];
+  const runnerOptions = connectedNames.includes(boundRunner) || boundRunner === "" ? connectedNames : [boundRunner, ...connectedNames];
 
   function resetDrafts() {
     setVariableDrafts(
-      Object.fromEntries(
-        ports.variables.map((port) => [port.name, workflow?.variables?.[instanceConfigKey(instanceID, port.name)] ?? ""])
-      )
+      Object.fromEntries(ports.variables.map((port) => [port.name, workflow?.variables?.[instanceConfigKey(instanceID, port.name)] ?? ""]))
     );
     setSecretDrafts(
-      Object.fromEntries(
-        ports.secrets.map((port) => [
-          port.name,
-          secretMask(workflow?.secrets?.[instanceConfigKey(instanceID, port.name)] ?? 0)
-        ])
-      )
+      Object.fromEntries(ports.secrets.map((port) => [port.name, secretMask(workflow?.secrets?.[instanceConfigKey(instanceID, port.name)] ?? 0)]))
     );
     setDirtySecrets({});
     setRunnerDraft(boundRunner);
   }
 
   async function saveDrafts() {
-    const changedSecrets = Object.fromEntries(
-      Object.entries(secretDrafts).filter(([name, value]) => dirtySecrets[name] && value !== "")
-    );
-    await onSaveInstanceConfig(instanceID, variableDrafts, changedSecrets, remoteCapable ? runnerDraft : boundRunner);
-    setOpen(false);
+    const changedSecrets = Object.fromEntries(Object.entries(secretDrafts).filter(([name, value]) => dirtySecrets[name] && value !== ""));
+    setSaving(true);
+    try {
+      await onSaveInstanceConfig(instanceID, variableDrafts, changedSecrets, remoteCapable ? runnerDraft : boundRunner);
+      setOpen(false);
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
     <Popover
       open={open}
-      onOpenChange={(_, data) => {
-        if (data.open) {
+      onOpenChange={(next) => {
+        if (next) {
           resetDrafts();
         }
-        setOpen(data.open);
+        setOpen(next);
       }}
     >
-      <PopoverTrigger disableButtonEnhancement>
-        <Button icon={<EditRegular />} aria-label={t("workflow.editConfig", { id: instanceID })} disabled={!canWriteWorkflow} />
+      <PopoverTrigger asChild>
+        <Button variant="quiet" size="icon-sm" aria-label={t("workflow.editConfig", { id: instanceID })} disabled={!canWriteWorkflow} className="-mr-1 -mt-0.5">
+          <Pencil />
+        </Button>
       </PopoverTrigger>
-      <PopoverSurface className="instance-config-popover" aria-label={t("workflow.instanceConfig", { id: instanceID })}>
-        <div className="instance-config-popover-header">
-          <div>
-            <span>{instanceID}</span>
-            <span>{instanceNode}</span>
+      <PopoverContent align="end" aria-label={t("workflow.instanceConfig", { id: instanceID })} className="w-80 p-0">
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            void saveDrafts();
+          }}
+        >
+          <div className="border-b border-border-soft px-4 py-3">
+            <p className="font-mono text-13 font-medium text-fg">{instanceID}</p>
+            <p className="font-mono text-12 text-muted">{instanceNode}</p>
           </div>
-        </div>
-        {remoteCapable && (
-          <FluentField label={t("workflow.runnerLabel")}>
-            <Select
-              aria-label={t("workflow.runnerSelect", { instance: instanceID })}
-              value={runnerDraft}
-              onChange={(_, data) => setRunnerDraft(data.value)}
-              disabled={!canWriteWorkflow}
-            >
-              <option value="">{t("workflow.runnerServer")}</option>
-              {runnerOptions.map((name) => (
-                <option key={name} value={name}>
-                  {connectedNames.includes(name) ? name : t("workflow.runnerOffline", { name })}
-                </option>
-              ))}
-            </Select>
-          </FluentField>
-        )}
-        {ports.variables.map((port) => (
-          <FluentField key={`variable-${instanceID}-${port.name}`} label={port.name}>
-            <Input
-              aria-label={t("workflow.variableLabel", { instance: instanceID, name: port.name })}
-              value={variableDrafts[port.name] ?? ""}
-              onChange={(_, data) => setVariableDrafts((current) => ({ ...current, [port.name]: data.value }))}
-              disabled={!canWriteWorkflow}
-            />
-          </FluentField>
-        ))}
-        {ports.secrets.map((port) => {
-          const length = workflow?.secrets?.[instanceConfigKey(instanceID, port.name)] ?? 0;
-          return (
-            <FluentField key={`secret-${instanceID}-${port.name}`} label={port.name}>
-              <Input
-                aria-label={t("workflow.secretLabel", { instance: instanceID, name: port.name })}
-                type="password"
-                placeholder={t("workflow.enterSecretValue")}
-                value={secretDrafts[port.name] ?? ""}
-                onFocus={() => {
-                  if (!dirtySecrets[port.name] && length > 0) {
-                    setSecretDrafts((current) => ({ ...current, [port.name]: "" }));
-                  }
-                }}
-                onChange={(_, data) => {
-                  setDirtySecrets((current) => ({ ...current, [port.name]: true }));
-                  setSecretDrafts((current) => ({ ...current, [port.name]: data.value }));
-                }}
-                disabled={!canWriteWorkflow}
-              />
-            </FluentField>
-          );
-        })}
-        <div className="instance-config-actions">
-          <Button appearance="primary" icon={<SaveRegular />} onClick={saveDrafts} disabled={!canWriteWorkflow}>
-            {t("workflow.saveConfig")}
-          </Button>
-        </div>
-      </PopoverSurface>
+          <div className="flex flex-col gap-3 px-4 py-3">
+            {remoteCapable && (
+              <Field label={t("workflow.runnerLabel")}>
+                {(field) => (
+                  <NativeSelect
+                    {...field}
+                    selectSize="sm"
+                    aria-label={t("workflow.runnerSelect", { instance: instanceID })}
+                    value={runnerDraft}
+                    onChange={(event) => setRunnerDraft(event.target.value)}
+                    disabled={!canWriteWorkflow}
+                  >
+                    <option value="">{t("workflow.runnerServer")}</option>
+                    {runnerOptions.map((name) => (
+                      <option key={name} value={name}>
+                        {connectedNames.includes(name) ? name : t("workflow.runnerOffline", { name })}
+                      </option>
+                    ))}
+                  </NativeSelect>
+                )}
+              </Field>
+            )}
+            {ports.variables.length > 0 && <p className="text-12 font-medium text-subtle">{t("workflow.variables")}</p>}
+            {ports.variables.map((port) => (
+              <Field key={`variable-${instanceID}-${port.name}`} label={<PortLabel port={port} />}>
+                {(field) => (
+                  <Input
+                    {...field}
+                    inputSize="sm"
+                    aria-label={t("workflow.variableLabel", { instance: instanceID, name: port.name })}
+                    value={variableDrafts[port.name] ?? ""}
+                    onChange={(event) => {
+                      const value = event.target.value;
+                      setVariableDrafts((current) => ({ ...current, [port.name]: value }));
+                    }}
+                    disabled={!canWriteWorkflow}
+                  />
+                )}
+              </Field>
+            ))}
+            {ports.secrets.length > 0 && <p className="text-12 font-medium text-subtle">{t("workflow.secretsTitle")}</p>}
+            {ports.secrets.map((port) => {
+              const length = workflow?.secrets?.[instanceConfigKey(instanceID, port.name)] ?? 0;
+              return (
+                <Field key={`secret-${instanceID}-${port.name}`} label={<PortLabel port={port} />}>
+                  {(field) => (
+                    <Input
+                      {...field}
+                      inputSize="sm"
+                      aria-label={t("workflow.secretLabel", { instance: instanceID, name: port.name })}
+                      type="password"
+                      autoComplete="new-password"
+                      placeholder={t("workflow.enterSecretValue")}
+                      value={secretDrafts[port.name] ?? ""}
+                      onFocus={() => {
+                        if (!dirtySecrets[port.name] && length > 0) {
+                          setSecretDrafts((current) => ({ ...current, [port.name]: "" }));
+                        }
+                      }}
+                      onChange={(event) => {
+                        const value = event.target.value;
+                        setDirtySecrets((current) => ({ ...current, [port.name]: true }));
+                        setSecretDrafts((current) => ({ ...current, [port.name]: value }));
+                      }}
+                      disabled={!canWriteWorkflow}
+                    />
+                  )}
+                </Field>
+              );
+            })}
+          </div>
+          <div className="flex justify-end border-t border-border-soft px-4 py-3">
+            <Button type="submit" size="sm" variant="cta" disabled={!canWriteWorkflow} loading={saving}>
+              {t("workflow.saveConfig")}
+            </Button>
+          </div>
+        </form>
+      </PopoverContent>
     </Popover>
+  );
+}
+
+function PortLabel({ port }: { port: WorkflowPort }) {
+  return (
+    <span className="flex items-center gap-2">
+      <span className="font-mono">{port.name}</span>
+      <span className="font-mono text-11 font-normal text-subtle">{port.type}</span>
+    </span>
   );
 }
 
@@ -793,29 +896,25 @@ function RunPayloadTabs({ item }: { item: WorkflowRunListItem }) {
   }
 
   return (
-    <div className="run-payload-tabs">
-      <TabList
-        selectedValue={activePayload.id}
-        onTabSelect={(_, data) => setSelectedPayload(data.value as "input" | "output")}
-        aria-label={t("workflow.payloadTabs")}
-      >
-        {payloads.map((payload) => (
-          <Tab key={payload.id} value={payload.id}>
-            {payload.label}
-          </Tab>
-        ))}
-      </TabList>
-      <div className="run-payload-editor">
-        <JavaScriptEditor
-          canWrite={false}
-          label={activePayload.label}
-          language="json"
-          onChange={() => undefined}
-          path={`workflow-run-${item.id}-${activePayload.id}.json`}
-          testID={`workflow-run-${activePayload.id}-editor`}
-          value={JSON.stringify(activePayload.value, null, 2)}
-        />
-      </div>
+    <div className="flex min-h-0 flex-1 flex-col gap-3 p-3">
+      <Tabs value={activePayload.id} onValueChange={(value) => setSelectedPayload(value as "input" | "output")}>
+        <TabsList aria-label={t("workflow.payloadTabs")}>
+          {payloads.map((payload) => (
+            <TabsTrigger key={payload.id} value={payload.id}>
+              {payload.label}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+      </Tabs>
+      <JavaScriptEditor
+        canWrite={false}
+        label={activePayload.label}
+        language="json"
+        onChange={() => undefined}
+        path={`workflow-run-${item.id}-${activePayload.id}.json`}
+        testID={`workflow-run-${activePayload.id}-editor`}
+        value={JSON.stringify(activePayload.value, null, 2)}
+      />
     </div>
   );
 }

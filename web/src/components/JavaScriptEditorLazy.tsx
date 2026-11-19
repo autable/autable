@@ -17,7 +17,13 @@ const MonacoBackedEditor = lazy(async () => {
 export function JavaScriptEditor(props: JavaScriptEditorProps) {
   const { t } = useTranslation();
   return (
-    <Suspense fallback={<span className="flow-empty">{t("common.loadingEditor")}</span>}>
+    <Suspense
+      fallback={
+        <div className="flex min-h-[24rem] flex-1 items-center justify-center rounded-container border border-border bg-elevated text-13 text-muted lg:min-h-0">
+          {t("common.loadingEditor")}
+        </div>
+      }
+    >
       <MonacoBackedEditor {...props} />
     </Suspense>
   );

@@ -2,6 +2,7 @@ import { type Browser, type Page, test } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import * as XLSX from "xlsx";
 import { appBundle } from "./appBundle";
 
 // Review captures of the redesigned screens. Not an assertion test: it seeds
@@ -90,6 +91,21 @@ const orders: Array<[string, string, number, string, string]> = [
   ["SO-1049", "Spanning Tree Inc", 3120, "Paid", "2026-11-16"]
 ];
 
+// A spreadsheet as people bring it: the table's columns plus a new one, and
+// one cell that does not fit its column's type.
+function importWorkbook(): Buffer {
+  const sheet = XLSX.utils.aoa_to_sheet([
+    ["name", "email", "company", "status", "city", "score", "region"],
+    ["Joan Clarke", "joan@example.com", "Bletchley & Co", "Lead", "London", 77, "EMEA"],
+    ["Annie Easley", "annie@example.com", "Langley Partners", "Active", "Cleveland", 83, "AMER"],
+    ["张伟", "zhang.wei@example.com", "远山贸易", "Lead", "成都", "seventy", "APAC"],
+    ["Evelyn Boyd Granville", "evelyn@example.com", "Apollo Works", "Active", "Washington", 91, "AMER"]
+  ]);
+  const book = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(book, sheet, "Contacts");
+  return XLSX.write(book, { type: "buffer", bookType: "xlsx" }) as Buffer;
+}
+
 const widgets: Array<[string, string, number, number, string]> = [
   ["Hex bolt M6", "WD-0101", 1240, 0.18, "常用件"],
   ["Hinge, brushed steel", "WD-0144", 86, 3.4, ""],
@@ -106,6 +122,8 @@ async function seed(page: Page) {
     if (response.status() !== 409 && !response.ok()) {
       throw new Error(`member register failed: ${response.status()} ${await response.text()}`);
     }
+    // A colleague who is not in any role yet, to find with the member search.
+    await context.post("/api/auth/register", { data: { email: "noah.patel@example.com", password, display_name: "Noah Patel" } });
     // Registering signs the browser in as the new user; sign back in as the admin.
     const login = await context.post("/api/auth/login", { data: { email: memberEmail, password } });
     const user = (await login.json()) as { id: string };
@@ -205,11 +223,11 @@ async function seed(page: Page) {
   return { admin, member };
 }
 
-async function memberPage(browser: Browser, viewport = { width: 1440, height: 900 }) {
+async function memberPage(browser: Browser, viewport = { width: 1440, height: 900 }, email = memberEmail) {
   const context = await browser.newContext({ viewport, colorScheme: "light" });
   const page = await context.newPage();
   await page.goto("/login");
-  const response = await page.request.post("/api/auth/login", { data: { email: memberEmail, password } });
+  const response = await page.request.post("/api/auth/login", { data: { email, password } });
   if (!response.ok()) {
     throw new Error(`member login failed: ${response.status()}`);
   }
@@ -263,24 +281,83 @@ test("capture redesign review screenshots", async ({ page, browser }) => {
   await page.getByRole("heading", { name: "Manage" }).waitFor();
   await shot(page, "09-admin");
 
-  // Screens still on Fluent, inside the new shell.
+  // Workflow editor: script, settings and instances; then one instance's config.
   await page.goto(`/databases/${database}/workflows`);
-  await page.getByText("Instances", { exact: true }).waitFor();
-  await shot(page, "10-workflow-editor-fluent");
+  await page.getByLabel("Instances").getByText("greet").waitFor();
+  await page.locator(".monaco-editor").first().waitFor();
+  await shot(page, "10-workflow-editor");
+  await page.getByRole("button", { name: "Workflow nodes" }).click();
+  await page.getByRole("dialog", { name: "Workflow node catalog" }).waitFor();
+  await page.getByRole("button", { name: "table.row.update" }).click();
+  await shot(page, "11-workflow-node-catalog");
+  await page.keyboard.press("Escape");
+
+  // A run of the workflow: runs, steps, and the selected step's payload.
+  await page.getByRole("button", { name: "Run", exact: true }).click();
+  await page.getByText(/Workflow run saved/).first().waitFor();
+  await page.getByRole("tab", { name: "History" }).click();
+  await page.getByLabel("Workflow run nodes").getByRole("button", { name: /greet/ }).click();
+  await page.getByTestId("workflow-run-input-editor").locator(".monaco-editor").waitFor();
+  await page.locator('li[data-state="open"]').first().waitFor({ state: "detached", timeout: 8000 }).catch(() => undefined);
+  await shot(page, "12-workflow-run-detail");
+
+  // A role: access by table, members on the side; then the other tabs.
   await page.goto(`/databases/${database}/permissions/sales`);
-  await page.waitForTimeout(800);
-  await shot(page, "11-permissions-fluent");
+  await page.getByRole("button", { name: "email Update" }).waitFor();
+  await shot(page, "13-permissions-tables");
+  await page.getByRole("combobox", { name: "Role member display name" }).fill("noah");
+  await page.getByRole("listbox").waitFor();
+  await shot(page, "14-permissions-members-search");
+  await page.keyboard.press("Escape");
+  await page.getByRole("tab", { name: "Apps" }).click();
+  await page.getByLabel("All apps permission").waitFor();
+  await shot(page, "15-permissions-apps");
+  await page.getByRole("tab", { name: "Workflows" }).click();
+  await page.getByLabel("welcome-new-contact permission").waitFor();
+  await shot(page, "16-permissions-workflows");
+
+  // Remote runners, after generating a token.
+  await page.getByRole("navigation", { name: "Workspace" }).getByRole("button", { name: "Remote runners" }).click();
+  const runners = page.getByRole("dialog", { name: "Remote runners" });
+  await runners.getByRole("button", { name: "Generate token" }).click();
+  await runners.getByText(/will not be shown again/).waitFor();
+  await shot(page, "17-runners");
+  await page.keyboard.press("Escape");
+
+  // Excel import: columns, then the preview.
+  await page.goto(`/databases/${database}/tables/contacts`);
+  await page.getByRole("gridcell", { name: "Ada Lovelace", exact: true }).waitFor();
+  const chooser = page.waitForEvent("filechooser");
+  await page.getByRole("button", { name: "Import" }).click();
+  await (await chooser).setFiles({
+    name: "new-contacts.xlsx",
+    mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    buffer: importWorkbook()
+  });
+  const importDialog = page.getByRole("dialog", { name: /Import into/ });
+  await importDialog.getByRole("heading", { name: "Columns to import" }).waitFor();
+  await shot(page, "18-import-columns");
+  await importDialog.getByRole("button", { name: "Next: preview" }).click();
+  await importDialog.getByRole("table", { name: "Import preview" }).waitFor();
+  await shot(page, "19-import-preview");
+  await importDialog.getByRole("button", { name: "Cancel" }).click();
 
   // Dark mode.
   await page.emulateMedia({ colorScheme: "dark" });
   await page.goto(`/databases/${database}`);
   await page.getByRole("heading", { name: "Apps" }).waitFor();
-  await shot(page, "12-home-admin-dark");
+  await shot(page, "20-home-admin-dark");
   await page.goto(`/databases/${database}/tables/contacts`);
   await page.getByRole("gridcell", { name: "Ada Lovelace", exact: true }).waitFor();
   await page.getByRole("gridcell", { name: "Grace Hopper", exact: true }).click();
   await page.getByRole("toolbar", { name: "Table canvas actions" }).getByRole("button", { name: "Edit Row" }).click();
-  await shot(page, "13-table-dark");
+  await shot(page, "21-table-dark");
+  await page.goto(`/databases/${database}/permissions/sales`);
+  await page.getByRole("button", { name: "email Update" }).waitFor();
+  await shot(page, "22-permissions-dark");
+  await page.goto(`/databases/${database}/workflows`);
+  await page.locator(".monaco-editor").first().waitFor();
+  await shot(page, "23-workflow-editor-dark");
   await page.emulateMedia({ colorScheme: "light" });
 
   // Ordinary user: home with granted apps and tables, and their workflows.
@@ -290,19 +367,25 @@ test("capture redesign review screenshots", async ({ page, browser }) => {
   await shot(member, "03-home-member");
   await member.goto(`/databases/${database}/workflows`);
   await member.getByRole("table", { name: "Runnable workflows" }).waitFor();
-  await shot(member, "14-workflows-member");
+  await shot(member, "24-workflows-member");
   await member.context().close();
 
   // Mobile width.
   const mobile = await memberPage(browser, { width: 390, height: 844 });
   await mobile.goto(`/databases/${database}`);
   await mobile.getByRole("heading", { name: "Apps" }).waitFor();
-  await shot(mobile, "15-mobile-home");
+  await shot(mobile, "25-mobile-home");
   await mobile.goto(`/databases/${database}/tables/contacts`);
   await mobile.getByRole("gridcell", { name: "Ada Lovelace", exact: true }).waitFor();
-  await shot(mobile, "16-mobile-table");
+  await shot(mobile, "26-mobile-table");
   await mobile.getByRole("button", { name: "Open navigation" }).click();
   await mobile.getByRole("dialog", { name: "Navigation" }).waitFor();
-  await shot(mobile, "17-mobile-navigation");
+  await shot(mobile, "27-mobile-navigation");
   await mobile.context().close();
+
+  const mobileAdmin = await memberPage(browser, { width: 390, height: 844 }, adminEmail);
+  await mobileAdmin.goto(`/databases/${database}/workflows`);
+  await mobileAdmin.locator(".monaco-editor").first().waitFor();
+  await shot(mobileAdmin, "28-mobile-workflow");
+  await mobileAdmin.context().close();
 });

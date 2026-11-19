@@ -1,6 +1,5 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { FluentProvider, webLightTheme } from "@fluentui/react-components";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { PermissionPanel, compactRoleGrants } from "./PermissionPanel";
 import type { AppDefinition, PermissionGrant, TableMetadata, WorkflowDefinition } from "../api";
@@ -79,7 +78,6 @@ const workflows: WorkflowDefinition[] = [
 
 function renderPanel(grants: PermissionGrant[], onGrantChange = vi.fn()) {
   render(
-    <FluentProvider theme={webLightTheme}>
       <PermissionPanel
         apps={apps}
         database={{ name: "workspace", tables }}
@@ -98,7 +96,6 @@ function renderPanel(grants: PermissionGrant[], onGrantChange = vi.fn()) {
         role={{ database_name: "workspace", name: "staff", subject_id: "role:workspace:staff", grants, members: [] }}
         workflows={workflows}
       />
-    </FluentProvider>
   );
   return onGrantChange;
 }
@@ -175,5 +172,72 @@ describe("PermissionPanel tables tab", () => {
     expect(screen.queryByText("Schema")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Add fields" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Field definitions/ })).not.toBeInTheDocument();
+    // Structure is explained, not offered as grants.
+    expect(screen.getByText("Fields, formulas and views are changed by admins only and cannot be granted.")).toBeInTheDocument();
+  });
+});
+
+describe("PermissionPanel members", () => {
+  beforeEach(async () => {
+    await i18n.changeLanguage("en-US");
+  });
+
+  const people = [
+    { id: "u1", email: "ada@example.com", display_name: "Ada Lovelace", provider: "password" },
+    { id: "u2", email: "grace@example.com", display_name: "Grace Hopper", provider: "password" }
+  ];
+
+  function renderMembers(props: Partial<Parameters<typeof PermissionPanel>[0]> = {}) {
+    const handlers = { onAddMember: vi.fn(), onAddWorkflowMember: vi.fn(), onMemberRemove: vi.fn(), onNewMemberQueryChange: vi.fn() };
+    render(
+      <PermissionPanel
+        apps={apps}
+        database={{ name: "workspace", tables }}
+        grants={[]}
+        members={[{ type: "user", id: "u1" }, { type: "workflow", id: "3" }]}
+        memberOptions={people}
+        memberUsers={[people[0]]}
+        memberWorkflows={[workflows[0]]}
+        newMemberQuery="gr"
+        onGrantChange={vi.fn()}
+        onSave={vi.fn()}
+        role={{ database_name: "workspace", name: "staff", subject_id: "role:workspace:staff", grants: [], members: [] }}
+        workflows={workflows}
+        {...handlers}
+        {...props}
+      />
+    );
+    return handlers;
+  }
+
+  it("lists people and workflows in the role and removes them", async () => {
+    const { onMemberRemove } = renderMembers();
+    const people = screen.getByRole("list", { name: "Members" });
+    expect(within(people).getByText("Ada Lovelace")).toBeInTheDocument();
+    expect(within(screen.getByRole("list", { name: "Workflow members" })).getByText("nightly-sync")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Remove Ada Lovelace" }));
+    expect(onMemberRemove).toHaveBeenCalledWith({ type: "user", id: "u1" });
+  });
+
+  it("offers matching people who are not members yet and adds the chosen one", async () => {
+    const { onAddMember } = renderMembers();
+    const options = within(screen.getByRole("listbox")).getAllByRole("option");
+    expect(options.map((option) => option.textContent)).toEqual(["Grace Hoppergrace@example.com"]);
+    await userEvent.click(options[0]);
+    expect(onAddMember).toHaveBeenCalledWith(people[1]);
+  });
+
+  it("adds a workflow that is not in the role yet", async () => {
+    const { onAddWorkflowMember } = renderMembers();
+    const select = screen.getByLabelText("Add workflow") as HTMLSelectElement;
+    expect(Array.from(select.options).map((option) => option.text)).toEqual(["Add workflow", "welcome-contact"]);
+    await userEvent.selectOptions(select, "welcome-contact");
+    expect(onAddWorkflowMember).toHaveBeenCalledWith(workflows[1]);
+  });
+
+  it("enables Save only when the draft differs from the saved role", () => {
+    renderMembers();
+    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+    expect(screen.getByText("Unsaved changes")).toBeInTheDocument();
   });
 });

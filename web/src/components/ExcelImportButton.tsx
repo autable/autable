@@ -1,17 +1,4 @@
-import {
-  Button,
-  Checkbox,
-  Dialog,
-  DialogActions,
-  DialogBody,
-  DialogContent,
-  DialogSurface,
-  DialogTitle,
-  ProgressBar,
-  Select,
-  Text
-} from "@fluentui/react-components";
-import { Upload } from "lucide-react";
+import { FileSpreadsheet, Upload } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { createFields, createRow, listRowsPage, upsertRow, type TableMetadata } from "../api";
@@ -29,8 +16,7 @@ import {
   type ParsedSheet,
   type PreparedRow
 } from "../excelImport";
-import { FluentScope } from "../shell/FluentScope";
-import { Button as UIButton } from "../ui";
+import { Badge, Button, Callout, Checkbox, cn, Dialog, DialogContent, Field, NativeSelect } from "../ui";
 
 const PREVIEW_ROW_LIMIT = 20;
 const IMPORT_TYPES: ImportFieldType[] = ["string", "int", "float"];
@@ -205,86 +191,114 @@ export function ExcelImportButton({
     setOpen(false);
   }
 
+  const stepLabel =
+    step === "configure"
+      ? t("import.stepConfigure")
+      : step === "preview"
+        ? t("import.stepPreview")
+        : step === "running"
+          ? t("import.stepRunning")
+          : t("import.stepDone");
+
   return (
     <>
-      <UIButton variant="quiet" size="sm" className="px-2 sm:px-2.5" aria-label={t("import.import")} disabled={disabled} onClick={pickFile}>
+      <Button variant="quiet" size="sm" className="px-2 sm:px-2.5" aria-label={t("import.import")} disabled={disabled} onClick={pickFile}>
         <Upload aria-hidden />
         <span className="hidden lg:inline">{t("import.import")}</span>
-      </UIButton>
-      {/* The import dialog itself still uses Fluent UI (phase 2 converts it). */}
-      <FluentScope className="contents">
-      <Dialog open={open} onOpenChange={(_, data) => (data.open ? setOpen(true) : close())}>
-        <DialogSurface className="import-dialog" style={{ width: "min(960px, calc(100vw - 32px))", maxWidth: "none" }}>
-          <DialogBody>
-            <DialogTitle>
-              {t("import.dialogTitle", { table: table?.display_name || tableName })}
-            </DialogTitle>
-            <DialogContent className="import-content">
-              {!table && <Text className="error-text">{t("import.tableMissing", { table: tableName })}</Text>}
-              {error && <Text className="error-text">{error}</Text>}
-              {table && sheet && step === "configure" && (
-                <ConfigureStep
-                  columns={columns}
-                  fileName={fileName}
-                  matchField={matchField}
-                  onMatchFieldChange={setMatchField}
-                  onSelectSheet={selectSheet}
-                  onStrategyChange={setStrategy}
-                  onUpdateColumn={updateColumn}
-                  sheet={sheet}
-                  sheetIndex={sheetIndex}
-                  sheets={sheets}
-                  strategy={strategy}
-                />
-              )}
-              {table && sheet && step === "preview" && (
-                <PreviewStep columns={includedColumns} fileName={fileName} preparedRows={preparedRows} validCount={validRows.length} />
-              )}
-              {step === "running" && (
-                <div className="import-progress">
-                  <Text>{t("import.importing", { done: progress.done, total: progress.total })}</Text>
-                  <ProgressBar value={progress.total === 0 ? 0 : progress.done / progress.total} max={1} />
-                </div>
-              )}
-              {step === "done" && summary && (
-                <SummaryView cancelled={cancelled} invalidRows={preparedRows.filter((row) => row.problems.length > 0)} summary={summary} />
-              )}
-            </DialogContent>
-            <DialogActions>
+      </Button>
+      <Dialog open={open} onOpenChange={(next) => (next ? setOpen(true) : close())}>
+        <DialogContent
+          title={t("import.dialogTitle", { table: table?.display_name || tableName })}
+          description={stepLabel}
+          className="max-w-4xl"
+          footer={
+            <>
               {step === "configure" && (
                 <>
-                  <Button type="button" onClick={close}>{t("common.cancel")}</Button>
-                  <Button
-                    type="button"
-                    appearance="primary"
-                    disabled={!table || !sheet || includedColumns.length === 0}
-                    onClick={() => setStep("preview")}
-                  >
+                  <Button onClick={close}>{t("common.cancel")}</Button>
+                  <Button variant="cta" disabled={!table || !sheet || includedColumns.length === 0} onClick={() => setStep("preview")}>
                     {t("import.next")}
                   </Button>
                 </>
               )}
               {step === "preview" && (
                 <>
-                  <Button type="button" onClick={() => setStep("configure")}>{t("import.back")}</Button>
-                  <Button type="button" onClick={close}>{t("common.cancel")}</Button>
-                  <Button type="button" appearance="primary" disabled={validRows.length === 0} onClick={() => void startImport()}>
+                  <Button onClick={() => setStep("configure")}>{t("import.back")}</Button>
+                  <Button onClick={close}>{t("common.cancel")}</Button>
+                  <Button variant="cta" disabled={validRows.length === 0} onClick={() => void startImport()}>
                     {t("import.start", { count: validRows.length })}
                   </Button>
                 </>
               )}
-              {step === "running" && (
-                <Button type="button" onClick={() => (cancelRef.current = true)}>{t("import.cancelImport")}</Button>
-              )}
+              {step === "running" && <Button onClick={() => (cancelRef.current = true)}>{t("import.cancelImport")}</Button>}
               {step === "done" && (
-                <Button type="button" appearance="primary" onClick={() => setOpen(false)}>{t("common.close")}</Button>
+                <Button variant="cta" onClick={() => setOpen(false)}>
+                  {t("common.close")}
+                </Button>
               )}
-            </DialogActions>
-          </DialogBody>
-        </DialogSurface>
+            </>
+          }
+        >
+          <div className="flex flex-col gap-4 pb-2">
+            {!table && <Callout tone="danger">{t("import.tableMissing", { table: tableName })}</Callout>}
+            {error && <Callout tone="danger">{error}</Callout>}
+            {table && sheet && step === "configure" && (
+              <ConfigureStep
+                columns={columns}
+                fileName={fileName}
+                matchField={matchField}
+                onMatchFieldChange={setMatchField}
+                onSelectSheet={selectSheet}
+                onStrategyChange={setStrategy}
+                onUpdateColumn={updateColumn}
+                sheet={sheet}
+                sheetIndex={sheetIndex}
+                sheets={sheets}
+                strategy={strategy}
+              />
+            )}
+            {table && sheet && step === "preview" && (
+              <PreviewStep columns={includedColumns} fileName={fileName} preparedRows={preparedRows} validCount={validRows.length} />
+            )}
+            {step === "running" && (
+              <div className="flex flex-col gap-2 py-6" role="status">
+                <p className="text-13 tabular-nums text-description">{t("import.importing", { done: progress.done, total: progress.total })}</p>
+                <div
+                  className="h-1.5 overflow-hidden rounded-full bg-chip"
+                  role="progressbar"
+                  aria-valuemin={0}
+                  aria-valuemax={progress.total}
+                  aria-valuenow={progress.done}
+                >
+                  <div
+                    className="h-full rounded-full bg-fg transition-[width] duration-300"
+                    style={{ width: `${progress.total === 0 ? 0 : (progress.done / progress.total) * 100}%` }}
+                  />
+                </div>
+              </div>
+            )}
+            {step === "done" && summary && (
+              <SummaryView cancelled={cancelled} invalidRows={preparedRows.filter((row) => row.problems.length > 0)} summary={summary} />
+            )}
+          </div>
+        </DialogContent>
       </Dialog>
-      </FluentScope>
     </>
+  );
+}
+
+function FileSummary({ fileName, rows }: { fileName: string; rows: number }) {
+  const { t } = useTranslation();
+  return (
+    <div className="flex min-w-0 items-center gap-3">
+      <span className="flex size-9 shrink-0 items-center justify-center rounded-inner bg-chip text-description" aria-hidden>
+        <FileSpreadsheet className="size-4.5" strokeWidth={1.75} />
+      </span>
+      <span className="min-w-0">
+        <span className="block truncate text-13 font-medium text-fg">{fileName}</span>
+        <span className="block text-12 text-muted">{t("import.rowCount", { count: rows })}</span>
+      </span>
+    </div>
   );
 }
 
@@ -316,91 +330,91 @@ function ConfigureStep({
   const { t } = useTranslation();
   const includedHeaders = columns.filter((column) => column.include).map((column) => column.header);
   return (
-    <div className="import-configure">
-      <div className="import-file-summary">
-        <Text size={200}>{t("import.fileSummary", { file: fileName, rows: sheet.rows.length })}</Text>
+    <>
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <FileSummary fileName={fileName} rows={sheet.rows.length} />
         {sheets.length > 1 && (
-          <label className="field-stack">
-            <span>{t("import.sheet")}</span>
-            <Select value={String(sheetIndex)} onChange={(_, data) => onSelectSheet(Number(data.value))}>
-              {sheets.map((candidate, index) => (
-                <option key={candidate.name} value={index}>
-                  {candidate.name}
-                </option>
-              ))}
-            </Select>
-          </label>
+          <Field label={t("import.sheet")} className="w-56">
+            {(field) => (
+              <NativeSelect {...field} selectSize="sm" value={String(sheetIndex)} onChange={(event) => onSelectSheet(Number(event.target.value))}>
+                {sheets.map((candidate, index) => (
+                  <option key={candidate.name} value={index}>
+                    {candidate.name}
+                  </option>
+                ))}
+              </NativeSelect>
+            )}
+          </Field>
         )}
       </div>
       {sheet.duplicateHeaders.length > 0 && (
-        <Text size={200} className="error-text">
-          {t("import.duplicateHeaders", { headers: sheet.duplicateHeaders.join(", ") })}
-        </Text>
+        <Callout tone="warning">{t("import.duplicateHeaders", { headers: sheet.duplicateHeaders.join(", ") })}</Callout>
       )}
-      <Text weight="semibold">{t("import.columnsTitle")}</Text>
-      <div className="import-columns">
-        {columns.map((column) => (
-          <div key={column.header} className="import-column-row">
-            <Checkbox
-              checked={column.include}
-              disabled={column.locked}
-              label={column.header}
-              onChange={(_, data) => onUpdateColumn(column.header, { include: Boolean(data.checked) })}
-            />
-            <span className="import-column-target">
-              {column.target.kind === "existing" && (
-                <Text size={200}>{t("import.existingField", { type: t(`import.type.${column.target.type}`) })}</Text>
-              )}
-              {column.target.kind === "new" && (
-                <span className="import-new-field">
-                  <Text size={200}>{t("import.newField")}</Text>
-                  <Select
-                    aria-label={t("import.newFieldType", { header: column.header })}
-                    disabled={column.locked || !column.include}
-                    size="small"
-                    value={column.type}
-                    onChange={(_, data) => onUpdateColumn(column.header, { type: data.value as ImportFieldType })}
-                  >
-                    {IMPORT_TYPES.map((type) => (
-                      <option key={type} value={type}>
-                        {t(`import.type.${type}`)}
-                      </option>
-                    ))}
-                  </Select>
-                </span>
-              )}
-              {column.target.kind === "blocked" && (
-                <Text size={200} className="import-blocked">
-                  {t(`import.blocked.${column.target.reason}`)}
-                </Text>
-              )}
-            </span>
-          </div>
-        ))}
-      </div>
-      <div className="import-dedup">
-        <label className="field-stack">
-          <span>{t("import.matchField")}</span>
-          <Select value={matchField} onChange={(_, data) => onMatchFieldChange(data.value)}>
-            <option value="">{t("import.noDedup")}</option>
-            {includedHeaders.map((header) => (
-              <option key={header} value={header}>
-                {header}
-              </option>
-            ))}
-          </Select>
-        </label>
+      <section className="flex flex-col gap-2">
+        <h3 className="text-13 font-medium text-fg">{t("import.columnsTitle")}</h3>
+        <ul className="divide-y divide-border-soft rounded-container border border-border">
+          {columns.map((column) => (
+            <li key={column.header} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5 px-3.5 py-2">
+              <Checkbox
+                checked={column.include}
+                disabled={column.locked}
+                label={column.header}
+                onChange={(event) => onUpdateColumn(column.header, { include: event.target.checked })}
+              />
+              <span className="flex items-center gap-2">
+                {column.target.kind === "existing" && (
+                  <Badge>{t("import.existingField", { type: t(`import.type.${column.target.type}`) })}</Badge>
+                )}
+                {column.target.kind === "new" && (
+                  <>
+                    <Badge className="bg-[color-mix(in_oklab,var(--chip),var(--success)_12%)] text-success">{t("import.newField")}</Badge>
+                    <NativeSelect
+                      selectSize="sm"
+                      className="w-32"
+                      aria-label={t("import.newFieldType", { header: column.header })}
+                      disabled={column.locked || !column.include}
+                      value={column.type}
+                      onChange={(event) => onUpdateColumn(column.header, { type: event.target.value as ImportFieldType })}
+                    >
+                      {IMPORT_TYPES.map((type) => (
+                        <option key={type} value={type}>
+                          {t(`import.type.${type}`)}
+                        </option>
+                      ))}
+                    </NativeSelect>
+                  </>
+                )}
+                {column.target.kind === "blocked" && <span className="text-12 text-warning">{t(`import.blocked.${column.target.reason}`)}</span>}
+              </span>
+            </li>
+          ))}
+        </ul>
+      </section>
+      <section className="grid gap-3 sm:grid-cols-2">
+        <Field label={t("import.matchField")}>
+          {(field) => (
+            <NativeSelect {...field} selectSize="sm" value={matchField} onChange={(event) => onMatchFieldChange(event.target.value)}>
+              <option value="">{t("import.noDedup")}</option>
+              {includedHeaders.map((header) => (
+                <option key={header} value={header}>
+                  {header}
+                </option>
+              ))}
+            </NativeSelect>
+          )}
+        </Field>
         {matchField && (
-          <label className="field-stack">
-            <span>{t("import.strategy")}</span>
-            <Select value={strategy} onChange={(_, data) => onStrategyChange(data.value as DuplicateStrategy)}>
-              <option value="update">{t("import.strategyUpdate")}</option>
-              <option value="skip">{t("import.strategySkip")}</option>
-            </Select>
-          </label>
+          <Field label={t("import.strategy")}>
+            {(field) => (
+              <NativeSelect {...field} selectSize="sm" value={strategy} onChange={(event) => onStrategyChange(event.target.value as DuplicateStrategy)}>
+                <option value="update">{t("import.strategyUpdate")}</option>
+                <option value="skip">{t("import.strategySkip")}</option>
+              </NativeSelect>
+            )}
+          </Field>
         )}
-      </div>
-    </div>
+      </section>
+    </>
   );
 }
 
@@ -418,29 +432,29 @@ function PreviewStep({
   const { t } = useTranslation();
   const invalidCount = preparedRows.length - validCount;
   return (
-    <div className="import-preview">
-      <Text size={200}>
-        {t("import.previewSummary", { file: fileName, valid: validCount, invalid: invalidCount })}
-      </Text>
-      <div className="import-preview-scroll">
-        <table className="import-preview-table">
-          <thead>
+    <>
+      <p className="text-13 text-description">{t("import.previewSummary", { file: fileName, valid: validCount, invalid: invalidCount })}</p>
+      <div className="max-h-[45vh] overflow-auto rounded-container border border-border">
+        <table className="w-full border-collapse text-left text-13" aria-label={t("import.preview")}>
+          <thead className="sticky top-0 bg-[color-mix(in_oklab,var(--surface-elevated),var(--text-primary)_2.5%)] text-12 text-muted">
             <tr>
-              <th>#</th>
+              <th className="h-8 border-b border-border px-3 font-medium">#</th>
               {columns.map((column) => (
-                <th key={column.header}>{column.header}</th>
+                <th key={column.header} className="h-8 whitespace-nowrap border-b border-border px-3 font-medium">
+                  {column.header}
+                </th>
               ))}
             </tr>
           </thead>
-          <tbody>
+          <tbody className="[&>tr+tr]:border-t [&>tr+tr]:border-border-soft">
             {preparedRows.slice(0, PREVIEW_ROW_LIMIT).map((row) => (
-              <tr key={row.index} className={row.problems.length > 0 ? "import-row-invalid" : undefined}>
-                <td>{row.index}</td>
+              <tr key={row.index} className={row.problems.length > 0 ? "bg-error-bg/40" : undefined}>
+                <td className="h-9 px-3 tabular-nums text-subtle">{row.index}</td>
                 {columns.map((column) => {
                   const problem = row.problems.find((candidate) => candidate.header === column.header);
                   const value = row.values[column.header];
                   return (
-                    <td key={column.header} className={problem ? "import-cell-invalid" : undefined}>
+                    <td key={column.header} className={cn("h-9 whitespace-nowrap px-3", problem ? "text-error" : "text-fg")}>
                       {problem ? problemText(problem, t) : value === undefined ? "" : String(value)}
                     </td>
                   );
@@ -451,10 +465,10 @@ function PreviewStep({
         </table>
       </div>
       {preparedRows.length > PREVIEW_ROW_LIMIT && (
-        <Text size={200}>{t("import.previewTruncated", { shown: PREVIEW_ROW_LIMIT, total: preparedRows.length })}</Text>
+        <p className="text-12 text-muted">{t("import.previewTruncated", { shown: PREVIEW_ROW_LIMIT, total: preparedRows.length })}</p>
       )}
-      {invalidCount > 0 && <Text size={200} className="error-text">{t("import.invalidRowsHint", { count: invalidCount })}</Text>}
-    </div>
+      {invalidCount > 0 && <Callout tone="warning">{t("import.invalidRowsHint", { count: invalidCount })}</Callout>}
+    </>
   );
 }
 
@@ -469,31 +483,30 @@ function SummaryView({
 }) {
   const { t } = useTranslation();
   return (
-    <div className="import-summary">
-      {cancelled && <Text className="error-text">{t("import.cancelledHint")}</Text>}
-      {summary.fieldsCreated.length > 0 && (
-        <Text>{t("import.summaryFields", { count: summary.fieldsCreated.length, names: summary.fieldsCreated.join(", ") })}</Text>
-      )}
-      <Text>
-        {t("import.summaryRows", {
-          created: summary.created,
-          updated: summary.updated,
-          unchanged: summary.unchanged,
-          skipped: summary.skipped
-        })}
-      </Text>
-      {invalidRows.length > 0 && <Text className="error-text">{t("import.summaryInvalid", { count: invalidRows.length })}</Text>}
+    <div className="flex flex-col gap-3">
+      {cancelled && <Callout tone="warning">{t("import.cancelledHint")}</Callout>}
+      <Callout>
+        <p className="text-fg">
+          {t("import.summaryRows", {
+            created: summary.created,
+            updated: summary.updated,
+            unchanged: summary.unchanged,
+            skipped: summary.skipped
+          })}
+        </p>
+        {summary.fieldsCreated.length > 0 && (
+          <p className="mt-1">{t("import.summaryFields", { count: summary.fieldsCreated.length, names: summary.fieldsCreated.join(", ") })}</p>
+        )}
+      </Callout>
+      {invalidRows.length > 0 && <Callout tone="warning">{t("import.summaryInvalid", { count: invalidRows.length })}</Callout>}
       {summary.failed.length > 0 && (
-        <div className="import-failed">
-          <Text className="error-text">{t("import.summaryFailed", { count: summary.failed.length })}</Text>
-          <ul>
+        <Callout tone="danger" title={t("import.summaryFailed", { count: summary.failed.length })}>
+          <ul className="mt-1 list-disc pl-4">
             {summary.failed.slice(0, 10).map((failure) => (
-              <li key={failure.index}>
-                <Text size={200}>{t("import.failedRow", { index: failure.index, error: failure.error })}</Text>
-              </li>
+              <li key={failure.index}>{t("import.failedRow", { index: failure.index, error: failure.error })}</li>
             ))}
           </ul>
-        </div>
+        </Callout>
       )}
     </div>
   );

@@ -981,7 +981,8 @@ describe("App", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Remote runners" }));
 
     const dialog = await findDialog("Remote runners");
-    expect(within(dialog).getByText(/Remote runners · workspace/)).toBeInTheDocument();
+    // The dialog is scoped to the current database.
+    expect(within(dialog).getByText(/for workspace from machines in other networks/)).toBeInTheDocument();
     expect(await within(dialog).findByText("intranet")).toBeInTheDocument();
     expect(within(dialog).getByText(/v1\.0\.0/)).toBeInTheDocument();
     expect(within(dialog).queryByText(/atr_/)).not.toBeInTheDocument();
@@ -1030,8 +1031,9 @@ describe("App", () => {
     expect(await within(await sidebar()).findByRole("link", { name: "Workflows" })).toHaveAttribute("aria-current", "page");
     expect(await within(await sidebar()).findByRole("link", { name: /record-review/ })).toHaveAttribute("aria-current", "page");
     expect(await screen.findByRole("tab", { name: "History", selected: true })).toBeInTheDocument();
-    await waitFor(() => expect(screen.getByRole("button", { name: "Workflow run history" })).toBeInTheDocument());
-    expect(screen.getByRole("button", { name: "Workflow run history" })).toHaveTextContent(
+    const runHistory = await screen.findByRole("navigation", { name: "Workflow run history" });
+    await waitFor(() => expect(within(runHistory).getByRole("button", { current: true })).toBeInTheDocument());
+    expect(within(runHistory).getByRole("button", { current: true })).toHaveTextContent(
       new Date(1781604000000).toLocaleString()
     );
     expect(window.location.pathname).toBe("/databases/workspace/workflows/1/history");
@@ -1115,7 +1117,7 @@ describe("App", () => {
       )
     );
     expect(await screen.findByRole("tab", { name: "History", selected: true })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Workflow run history" })).toHaveTextContent(
+    expect(within(await screen.findByRole("navigation", { name: "Workflow run history" })).getByRole("button", { current: true })).toHaveTextContent(
       new Date(1781604000000).toLocaleString()
     );
   });
