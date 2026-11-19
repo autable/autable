@@ -45,6 +45,26 @@ export type ImportRunSummary = {
   failed: { index: number; error: string }[];
 };
 
+// xlsx/ods files are zip archives and xls files are OLE compound documents;
+// anything else is treated as delimited text.
+function isSpreadsheetContainer(bytes: Uint8Array): boolean {
+  const zip = bytes[0] === 0x50 && bytes[1] === 0x4b;
+  const ole = bytes[0] === 0xd0 && bytes[1] === 0xcf && bytes[2] === 0x11 && bytes[3] === 0xe0;
+  return zip || ole;
+}
+
+// SheetJS reads text without a byte-order mark as Latin-1, which garbles
+// UTF-8 exports. Decode text ourselves: UTF-8 (with or without BOM) when it
+// is valid UTF-8, otherwise GB18030, the encoding of CSVs saved by Chinese
+// Excel.
+function decodeText(bytes: Uint8Array): string {
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    return new TextDecoder("gb18030").decode(bytes);
+  }
+}
+
 export type ImportApi = {
   createFields(fields: { name: string; type: string }[]): Promise<unknown>;
   createRow(values: Record<string, unknown>): Promise<unknown>;
@@ -55,7 +75,9 @@ export type ImportApi = {
 // SheetJS is loaded on demand so the parser stays out of the main bundle.
 export async function parseWorkbook(data: ArrayBuffer | Uint8Array): Promise<ParsedSheet[]> {
   const XLSX = await import("xlsx");
-  const workbook = XLSX.read(data, { type: "array", cellDates: true });
+  const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
+  const text = isSpreadsheetContainer(bytes) ? null : decodeText(bytes);
+  const workbook = text === null ? XLSX.read(bytes, { type: "array", cellDates: true }) : XLSX.read(text, { type: "string", cellDates: true });
   return workbook.SheetNames.flatMap((name) => {
     const sheet = workbook.Sheets[name];
     if (!sheet) {
