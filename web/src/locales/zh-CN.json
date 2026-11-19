@@ -44,29 +44,6 @@
     "password": "密码",
     "registerTitle": "注册"
   },
-  "ai": {
-    "allowChanges": "允许修改",
-    "applying": "正在应用 AI 建议",
-    "authenticated": "已登录：{{account}}",
-    "button": "AI",
-    "existingResourceRequired": "请先保存当前工作流或表单，再使用 AI 修改。",
-    "generate": "生成建议",
-    "generating": "正在生成",
-    "instruction": "AI 修改要求",
-    "instructionPlaceholder": "描述你希望如何修改当前 JS 文件",
-    "login": "ChatGPT 登录",
-    "model": "模型",
-    "notAuthenticated": "未登录 ChatGPT/Codex",
-    "reasoning": {
-      "low": "低",
-      "medium": "中",
-      "high": "高",
-      "xhigh": "超高"
-    },
-    "reasoningEffort": "思考强度",
-    "title": "AI 修改当前脚本",
-    "working": "AI 正在处理，请稍候"
-  },
   "empty": {
     "noDatabaseTitle": "未选择数据库",
     "noDatabaseDescription": "在左侧创建或选择一个数据库开始。",

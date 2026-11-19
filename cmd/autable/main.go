@@ -173,24 +173,12 @@ func run(ctx context.Context, configPath string) error {
 	}
 	server.SetFileUploadLimit(cfg.Files.MaxUploadSizeMB << 20)
 	server.EnableMetadataWrites(metadataPath)
-	server.SetRepositoryPath(cfg.Repository.Path)
 	server.SetDatabaseOpener(func(ctx context.Context, name string) error {
 		return rowRepository.OpenDatabase(ctx, name, cfg.DatabasePath(name))
 	})
 	server.SetCodeFileStore(codefiles.NewStore(cfg.Repository.Path))
 	if repoSync != nil {
 		server.SetRepositorySync(repoSync)
-	}
-	if cfg.AI.Enabled {
-		aiWorkerURL := cfg.AI.WorkerURL
-		if aiWorkerURL == "" {
-			aiWorkerURL = os.Getenv("AUTABLE_AI_WORKER_URL")
-		}
-		if aiWorkerURL != "" {
-			server.SetAIClient(api.NewAIHTTPClient(aiWorkerURL))
-		} else {
-			slog.Warn("AI is enabled but no worker URL is configured")
-		}
 	}
 	server.StartWorkflowWorkers(ctx)
 	server.StartWorkflowScheduler(ctx, 15*time.Second)

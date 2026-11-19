@@ -44,29 +44,6 @@
     "password": "Password",
     "registerTitle": "Register"
   },
-  "ai": {
-    "allowChanges": "Allow changes",
-    "applying": "Applying AI suggestion",
-    "authenticated": "Signed in: {{account}}",
-    "button": "AI",
-    "existingResourceRequired": "Save the current workflow or form before editing it with AI.",
-    "generate": "Generate suggestion",
-    "generating": "Generating",
-    "instruction": "AI edit request",
-    "instructionPlaceholder": "Describe how to modify the current JS file",
-    "login": "ChatGPT login",
-    "model": "Model",
-    "notAuthenticated": "Not signed in to ChatGPT/Codex",
-    "reasoning": {
-      "low": "Low",
-      "medium": "Medium",
-      "high": "High",
-      "xhigh": "Extra high"
-    },
-    "reasoningEffort": "Reasoning",
-    "title": "AI edit current script",
-    "working": "AI is working. Please wait."
-  },
   "empty": {
     "noDatabaseTitle": "No database selected",
     "noDatabaseDescription": "Create or pick a database on the left to start building.",

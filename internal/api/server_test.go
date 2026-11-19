@@ -259,9 +259,6 @@ func TestAuthConfigExposesPublicConfig(t *testing.T) {
 	if response["password_enabled"] != true || response["oidc_enabled"] != true {
 		t.Fatalf("unexpected auth flags: %#v", response)
 	}
-	if response["ai_enabled"] != false {
-		t.Fatalf("unexpected ai flag: %#v", response)
-	}
 	providers, ok := response["oidc_providers"].([]any)
 	if !ok {
 		t.Fatalf("unexpected oidc providers: %#v", response["oidc_providers"])

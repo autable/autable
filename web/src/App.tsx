@@ -71,7 +71,6 @@ function WorkspaceApp() {
   const [authReady, setAuthReady] = useState(false);
   const [metadataReady, setMetadataReady] = useState(false);
   const [passwordAuthEnabled, setPasswordAuthEnabled] = useState(true);
-  const [aiEnabled, setAIEnabled] = useState(false);
   const [oidcProviders, setOIDCProviders] = useState<OIDCProvider[]>([]);
   const [authDialogOpen, setAuthDialogOpen] = useState(false);
   const [newDatabaseName, setNewDatabaseName] = useState("");
@@ -296,7 +295,6 @@ function WorkspaceApp() {
       .then((authConfig) => {
         if (!cancelled) {
           setPasswordAuthEnabled(authConfig.password_enabled);
-          setAIEnabled(Boolean(authConfig.ai_enabled));
           setOIDCProviders(authConfig.oidc_providers);
         }
       })
@@ -826,7 +824,6 @@ function WorkspaceApp() {
           {view === "workflow" &&
             (selectedWorkflow ? (
             <WorkflowWorkspace
-              aiEnabled={aiEnabled}
               activeTab={selectedWorkflowTab}
               databaseName={database.name}
               onExecute={executeWorkflowFromWorkspace}
@@ -857,7 +854,6 @@ function WorkspaceApp() {
           {view === "form" &&
             (selectedForm ? (
             <FormWorkspace
-              aiEnabled={aiEnabled}
               databaseName={database.name}
               form={selectedForm}
               formResult={workflowFormWorkspace.formResult}

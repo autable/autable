@@ -27,9 +27,6 @@ auth:
       - name: main
         issuer_url: https://issuer.example
         client_id: autable
-ai:
-  enabled: true
-  worker_url: http://ai-worker:3090
 debug:
   pprof_address: 127.0.0.1:6060
 `)
@@ -55,9 +52,6 @@ debug:
 	}
 	if got := cfg.Server.PublicURL; got != "https://app.example" {
 		t.Fatalf("unexpected server public url: %q", got)
-	}
-	if !cfg.AI.Enabled || cfg.AI.WorkerURL != "http://ai-worker:3090" {
-		t.Fatalf("unexpected AI config: %#v", cfg.AI)
 	}
 	if cfg.Debug.PprofAddress != "127.0.0.1:6060" {
 		t.Fatalf("unexpected debug config: %#v", cfg.Debug)

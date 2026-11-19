@@ -258,49 +258,6 @@ export type AuthConfig = {
   password_enabled: boolean;
   oidc_enabled: boolean;
   oidc_providers: OIDCProvider[];
-  ai_enabled?: boolean;
-};
-
-export type AIAuthStatus = {
-  authenticated: boolean;
-  account?: string;
-  message?: string;
-};
-
-export type AIAuthStart = {
-  type: string;
-  login_id?: string;
-  verification_url?: string;
-  user_code?: string;
-  auth_url?: string;
-  message?: string;
-};
-
-export type AIReasoningEffortOption = {
-  reasoning_effort: string;
-  description?: string;
-};
-
-export type AIModelOption = {
-  id: string;
-  model?: string;
-  display_name: string;
-  description?: string;
-  supported_reasoning_efforts?: AIReasoningEffortOption[];
-  default_reasoning_effort?: string;
-  is_default?: boolean;
-};
-
-export type AIOptions = {
-  models: AIModelOption[];
-};
-
-export type AIScriptKind = "workflow" | "form";
-
-export type AIScriptSuggestion = {
-  content: string;
-  summary?: string;
-  diagnostics?: string[];
 };
 
 export async function loadMetadata(): Promise<Catalog> {
@@ -600,54 +557,6 @@ export async function loadAuthConfig(): Promise<AuthConfig> {
     throw new Error(`auth config failed: ${response.status}`);
   }
   return response.json() as Promise<AuthConfig>;
-}
-
-export async function loadAIAuthStatus(): Promise<AIAuthStatus> {
-  const response = await fetch("/api/ai/auth/status");
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: response.statusText }));
-    throw new Error(error.error ?? `AI auth status failed: ${response.status}`);
-  }
-  return response.json() as Promise<AIAuthStatus>;
-}
-
-export async function startAIAuth(): Promise<AIAuthStart> {
-  const response = await fetch("/api/ai/auth/start", { method: "POST" });
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: response.statusText }));
-    throw new Error(error.error ?? `AI auth start failed: ${response.status}`);
-  }
-  return response.json() as Promise<AIAuthStart>;
-}
-
-export async function loadAIOptions(): Promise<AIOptions> {
-  const response = await fetch("/api/ai/options");
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: response.statusText }));
-    throw new Error(error.error ?? `AI options failed: ${response.status}`);
-  }
-  return response.json() as Promise<AIOptions>;
-}
-
-export async function suggestScriptWithAI(request: {
-  kind: AIScriptKind;
-  resource_id: number;
-  instruction: string;
-  script: string;
-  language?: string;
-  model?: string;
-  reasoning_effort?: string;
-}): Promise<AIScriptSuggestion> {
-  const response = await fetch("/api/ai/suggest-script", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(request)
-  });
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: response.statusText }));
-    throw new Error(error.error ?? `AI script suggestion failed: ${response.status}`);
-  }
-  return response.json() as Promise<AIScriptSuggestion>;
 }
 
 export function oidcStartURL(providerName: string, redirect?: string): string {

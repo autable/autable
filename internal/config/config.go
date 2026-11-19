@@ -19,18 +19,12 @@ type Config struct {
 	Files      FilesConfig      `yaml:"files"`
 	Backup     BackupConfig     `yaml:"backup"`
 	Auth       AuthConfig       `yaml:"auth"`
-	AI         AIConfig         `yaml:"ai"`
 	Debug      DebugConfig      `yaml:"debug"`
 }
 
 type ServerConfig struct {
 	Address   string `yaml:"address"`
 	PublicURL string `yaml:"public_url"`
-}
-
-type AIConfig struct {
-	Enabled   bool   `yaml:"enabled"`
-	WorkerURL string `yaml:"worker_url"`
 }
 
 type DebugConfig struct {

@@ -30,8 +30,5 @@ auth:
   oidc:
     enabled: false
     providers: []
-ai:
-  enabled: false
-  worker_url: ""
 debug:
   pprof_address: ""
