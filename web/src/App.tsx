@@ -4,23 +4,22 @@ import {
   ArrowClockwiseRegular,
   DatabaseRegular,
   DocumentFlowchartRegular,
-  DocumentTableRegular,
-  FormRegular
+  DocumentTableRegular
 } from "@fluentui/react-icons";
 import { useTranslation } from "react-i18next";
+import { AppWorkspace } from "./components/AppWorkspace";
 import { AuthDialog } from "./components/AuthDialog";
-import { FormWorkspace } from "./components/FormWorkspace";
 import { PermissionPanel } from "./components/PermissionPanel";
-import { PublishedFormPage } from "./components/PublishedFormPage";
 import { LoginPage } from "./components/LoginPage";
 import { TableWorkspace } from "./components/TableWorkspace";
 import { WorkflowWorkspace, type WorkflowTab } from "./components/WorkflowWorkspace";
 import { WorkspaceEmptyState } from "./components/WorkspaceEmptyState";
 import { WorkspaceNavigation, type WorkspaceView } from "./components/WorkspaceNavigation";
 import { useNotifier } from "./notifications";
+import { useAppWorkspace } from "./hooks/useAppWorkspace";
 import { usePermissionWorkspace } from "./hooks/usePermissionWorkspace";
 import { useTableWorkspace } from "./hooks/useTableWorkspace";
-import { useWorkflowFormWorkspace } from "./hooks/useWorkflowFormWorkspace";
+import { useWorkflowWorkspace } from "./hooks/useWorkflowWorkspace";
 import { buildWorkspacePath, parseWorkspaceRoute, type WorkspaceRoute } from "./appState";
 import {
   createDatabase,
@@ -51,8 +50,7 @@ export function App() {
   if (window.location.pathname === "/login") {
     return <LoginPage />;
   }
-  const publishedFormToken = publishedFormTokenFromPath();
-  return publishedFormToken ? <PublishedFormPage token={publishedFormToken} /> : <WorkspaceApp />;
+  return <WorkspaceApp />;
 }
 
 function WorkspaceApp() {
@@ -113,21 +111,15 @@ function WorkspaceApp() {
     },
     onStatus: notify
   });
-  const workflowFormWorkspace = useWorkflowFormWorkspace({
+  const workflowWorkspace = useWorkflowWorkspace({
     currentUserID: currentUser?.id,
     databaseName: database.name,
     tableName: table.name,
-    onStatus: notify,
-    onSubmittedRow: tableWorkspace.addSubmittedRow
+    onStatus: notify
   });
   const {
-    forms,
-    formValues,
-    newFormName,
     newWorkflowName,
-    renderedForm,
     resourcesReady,
-    selectedForm,
     selectedWorkflow,
     selectedWorkflowRun,
     workflowTrigger,
@@ -135,7 +127,17 @@ function WorkspaceApp() {
     workflowNodes,
     workflowRuns,
     workflows,
-  } = workflowFormWorkspace;
+  } = workflowWorkspace;
+  const selectedAppName =
+    workspaceRoute?.databaseName === database.name && workspaceRoute.view === "app" ? workspaceRoute.appName ?? "" : "";
+  const appWorkspace = useAppWorkspace({
+    currentUserID: currentUser?.id,
+    databaseName: database.name,
+    appName: selectedAppName,
+    onStatus: notify
+  });
+  const { apps, appsReady } = appWorkspace;
+  const selectedApp = apps.find((item) => item.name === selectedAppName);
   const permissionWorkspace = usePermissionWorkspace({
     currentUserID: currentUser?.id,
     database,
@@ -225,8 +227,8 @@ function WorkspaceApp() {
       navigateWorkspace(null, "replace");
       return;
     }
-    if (workspaceRoute.view === "form" && workspaceRoute.formID && resourcesReady && !forms.some((item) => item.id === workspaceRoute.formID)) {
-      navigateWorkspace(null, "replace");
+    if (workspaceRoute.view === "app" && workspaceRoute.appName && appsReady && !apps.some((item) => item.name === workspaceRoute.appName)) {
+      navigateWorkspace({ databaseName: database.name, view: "app" }, "replace");
       return;
     }
     if (workspaceRoute.view === "permission" && workspaceRoute.roleName && rolesReady && !roles.some((item) => item.name === workspaceRoute.roleName)) {
@@ -234,7 +236,7 @@ function WorkspaceApp() {
       return;
     }
     if (workspaceRoute.view === "workflow" && workspaceRoute.workflowID && workflows.some((item) => item.id === workspaceRoute.workflowID)) {
-      workflowFormWorkspace.setSelectedWorkflowID(workspaceRoute.workflowID);
+      workflowWorkspace.setSelectedWorkflowID(workspaceRoute.workflowID);
     }
     if (
       workspaceRoute.view === "workflow" &&
@@ -242,15 +244,12 @@ function WorkspaceApp() {
       workspaceRoute.workflowRunKey &&
       workflowRuns.some((run) => run.history_key === workspaceRoute.workflowRunKey)
     ) {
-      workflowFormWorkspace.setSelectedWorkflowRunKey(workspaceRoute.workflowRunKey);
-    }
-    if (workspaceRoute.view === "form" && workspaceRoute.formID && forms.some((item) => item.id === workspaceRoute.formID)) {
-      workflowFormWorkspace.setSelectedFormID(workspaceRoute.formID);
+      workflowWorkspace.setSelectedWorkflowRunKey(workspaceRoute.workflowRunKey);
     }
     if (workspaceRoute.view === "permission" && workspaceRoute.roleName && roles.some((item) => item.name === workspaceRoute.roleName)) {
       permissionWorkspace.setSelectedRoleName(workspaceRoute.roleName);
     }
-  }, [database.name, forms, locationPath, resourcesReady, roles, rolesReady, workflowRuns, workflows, workspaceRoute]);
+  }, [apps, appsReady, database.name, locationPath, resourcesReady, roles, rolesReady, workflowRuns, workflows, workspaceRoute]);
 
   useEffect(() => {
     if (selectedWorkflowTab !== "history" || !selectedWorkflow?.id) {
@@ -266,7 +265,7 @@ function WorkspaceApp() {
     ) {
       return;
     }
-    void workflowFormWorkspace.refreshWorkflowRuns(workspaceRoute?.workflowRunKey ?? "", selectedWorkflow.id);
+    void workflowWorkspace.refreshWorkflowRuns(workspaceRoute?.workflowRunKey ?? "", selectedWorkflow.id);
   }, [selectedWorkflow?.id, selectedWorkflowTab]);
 
   useEffect(() => {
@@ -315,7 +314,7 @@ function WorkspaceApp() {
       setMetadataReady(false);
       applyCatalogSelection(emptyCatalog, "");
       permissionWorkspace.clearRoles();
-      workflowFormWorkspace.clearResources();
+      workflowWorkspace.clearResources();
       return () => {
         cancelled = true;
       };
@@ -349,7 +348,8 @@ function WorkspaceApp() {
       if (dbName) {
         await Promise.all([
           permissionWorkspace.refreshRoles(dbName),
-          workflowFormWorkspace.refreshResources(dbName)
+          workflowWorkspace.refreshResources(dbName),
+          appWorkspace.refreshApps(dbName)
         ]);
       }
       notify(t("status.metadataRefreshed"));
@@ -520,7 +520,7 @@ function WorkspaceApp() {
   }
 
   function selectWorkflowFromNavigation(id: number) {
-    workflowFormWorkspace.setSelectedWorkflowID(id);
+    workflowWorkspace.setSelectedWorkflowID(id);
     navigateWorkspace({
       databaseName: database.name,
       view: "workflow",
@@ -530,7 +530,7 @@ function WorkspaceApp() {
   }
 
   async function executeWorkflowFromWorkspace() {
-    const response = await workflowFormWorkspace.executeWorkflow();
+    const response = await workflowWorkspace.executeWorkflow();
     if (response?.history_key && selectedWorkflow?.id) {
       navigateWorkspace({
         databaseName: database.name,
@@ -557,7 +557,7 @@ function WorkspaceApp() {
   }
 
   function selectWorkflowRunFromWorkspace(historyKey: string) {
-    workflowFormWorkspace.setSelectedWorkflowRunKey(historyKey);
+    workflowWorkspace.setSelectedWorkflowRunKey(historyKey);
     if (!selectedWorkflow?.id) {
       return;
     }
@@ -570,9 +570,14 @@ function WorkspaceApp() {
     }, "push");
   }
 
-  function selectFormFromNavigation(id: number) {
-    workflowFormWorkspace.setSelectedFormID(id);
-    navigateWorkspace({ databaseName: database.name, view: "form", formID: id }, "push");
+  function selectAppFromNavigation(name: string) {
+    navigateWorkspace({ databaseName: database.name, view: "app", appName: name }, "push");
+  }
+
+  async function deleteSelectedApp() {
+    if (await appWorkspace.removeApp()) {
+      navigateWorkspace({ databaseName: database.name, view: "app" }, "replace");
+    }
   }
 
   function selectRoleFromNavigation(name: string) {
@@ -610,8 +615,8 @@ function WorkspaceApp() {
     if (nextView === "workflow") {
       return { databaseName, view: "workflow", workflowID: selectedWorkflow?.id };
     }
-    if (nextView === "form") {
-      return { databaseName, view: "form", formID: selectedForm?.id };
+    if (nextView === "app") {
+      return { databaseName, view: "app" };
     }
     if (nextView === "permission") {
       return { databaseName, view: "permission", roleName: selectedRole?.name };
@@ -620,18 +625,10 @@ function WorkspaceApp() {
   }
 
   async function createWorkflowFromSidebar() {
-    const saved = await workflowFormWorkspace.createWorkflow();
+    const saved = await workflowWorkspace.createWorkflow();
     if (saved?.id) {
       setView("workflow");
       navigateWorkspace({ databaseName: database.name, view: "workflow", workflowID: saved.id }, "push");
-    }
-  }
-
-  async function createFormFromSidebar() {
-    const saved = await workflowFormWorkspace.createForm();
-    if (saved?.id) {
-      setView("form");
-      navigateWorkspace({ databaseName: database.name, view: "form", formID: saved.id }, "push");
     }
   }
 
@@ -674,47 +671,42 @@ function WorkspaceApp() {
   return (
     <div className={primaryNavCollapsed ? "app-shell primary-collapsed" : "app-shell"}>
       <WorkspaceNavigation
+        apps={apps}
         catalog={catalog}
         collapsed={primaryNavCollapsed}
         onToggleCollapsed={() => setPrimaryNavCollapsed((value) => !value)}
         currentUser={currentUser}
         database={database}
-        forms={forms}
         newDatabaseName={newDatabaseName}
-        newFormName={newFormName}
         newRoleName={newRoleName}
         newTableName={newTableName}
         newWorkflowName={newWorkflowName}
         onCreateDatabase={createDatabaseFromSidebar}
-        onCreateForm={createFormFromSidebar}
         onCreateRole={permissionWorkspace.createRoleFromSidebar}
         onCreateTable={createTableFromSidebar}
         onCreateWorkflow={createWorkflowFromSidebar}
         onLogout={logoutUser}
         onNewDatabaseNameChange={setNewDatabaseName}
-        onNewFormNameChange={workflowFormWorkspace.setNewFormName}
         onNewRoleNameChange={permissionWorkspace.setNewRoleName}
         onNewTableNameChange={setNewTableName}
-        onNewWorkflowNameChange={workflowFormWorkspace.setNewWorkflowName}
+        onNewWorkflowNameChange={workflowWorkspace.setNewWorkflowName}
         onOpenLogin={() => setAuthDialogOpen(true)}
         onCreateTableView={createTableViewFromSidebar}
         onSelectDatabaseSection={selectDatabaseSection}
-        onSelectFormID={selectFormFromNavigation}
+        onSelectAppName={selectAppFromNavigation}
         onSelectRoleName={selectRoleFromNavigation}
         onSelectTableView={selectTableViewFromNavigation}
         onSelectWorkflowID={selectWorkflowFromNavigation}
         roles={roles}
-        selectedForm={selectedForm}
+        selectedAppName={selectedAppName}
         selectedRole={selectedRole}
         selectedTableView={selectedTableView}
         selectedWorkflow={selectedWorkflow}
         table={table}
         view={view}
         workflows={workflows}
-        onDeleteForm={workflowFormWorkspace.deleteSelectedForm}
-        onDeleteWorkflow={workflowFormWorkspace.deleteSelectedWorkflow}
-        onRenameForm={workflowFormWorkspace.renameSelectedForm}
-        onRenameWorkflow={workflowFormWorkspace.renameSelectedWorkflow}
+        onDeleteWorkflow={workflowWorkspace.deleteSelectedWorkflow}
+        onRenameWorkflow={workflowWorkspace.renameSelectedWorkflow}
       />
 
       <main className="workspace">
@@ -724,7 +716,7 @@ function WorkspaceApp() {
               {database.name || t("common.noDatabase")}
               {view === "table" && table.name ? ` / ${table.display_name || table.name}` : ""}
               {view === "workflow" && selectedWorkflow ? ` / ${selectedWorkflow.name}` : ""}
-              {view === "form" && selectedForm ? ` / ${selectedForm.name}` : ""}
+              {view === "app" ? ` / ${selectedApp ? selectedApp.title || selectedApp.name : t("app.apps").toLowerCase()}` : ""}
               {view === "permission" ? ` / ${t("common.permission").toLowerCase()}` : ""}
             </Text>
           </div>
@@ -827,14 +819,14 @@ function WorkspaceApp() {
               activeTab={selectedWorkflowTab}
               databaseName={database.name}
               onExecute={executeWorkflowFromWorkspace}
-              onSave={workflowFormWorkspace.persistWorkflow}
-              onSaveInstanceConfig={workflowFormWorkspace.saveSelectedWorkflowInstanceConfig}
+              onSave={workflowWorkspace.persistWorkflow}
+              onSaveInstanceConfig={workflowWorkspace.saveSelectedWorkflowInstanceConfig}
               onSelectRunKey={selectWorkflowRunFromWorkspace}
               onSelectTab={selectWorkflowTabFromWorkspace}
-              onUpdateScript={workflowFormWorkspace.updateSelectedWorkflowScript}
-              onSetHistoryRetention={workflowFormWorkspace.setSelectedWorkflowHistoryRetention}
-              onSetTimeoutSeconds={workflowFormWorkspace.setSelectedWorkflowTimeoutSeconds}
-              onToggleEnabled={workflowFormWorkspace.toggleSelectedWorkflowEnabled}
+              onUpdateScript={workflowWorkspace.updateSelectedWorkflowScript}
+              onSetHistoryRetention={workflowWorkspace.setSelectedWorkflowHistoryRetention}
+              onSetTimeoutSeconds={workflowWorkspace.setSelectedWorkflowTimeoutSeconds}
+              onToggleEnabled={workflowWorkspace.toggleSelectedWorkflowEnabled}
               language={language}
               workflowTrigger={workflowTrigger}
               workflowInstances={workflowInstances}
@@ -851,35 +843,26 @@ function WorkspaceApp() {
               />
             ))}
 
-          {view === "form" &&
-            (selectedForm ? (
-            <FormWorkspace
+          {view === "app" && (
+            <AppWorkspace
+              apps={apps}
+              appsReady={appsReady}
+              busy={appWorkspace.busy}
+              canDelete={(database.permission_level ?? 0) >= 2}
+              currentUser={currentUser}
               databaseName={database.name}
-              form={selectedForm}
-              formResult={workflowFormWorkspace.formResult}
-              formValues={formValues}
-              onAction={workflowFormWorkspace.executeFormAction}
-              onFormValueChange={workflowFormWorkspace.updateFormValue}
-              onPublish={workflowFormWorkspace.publishSelectedForm}
-              onSave={workflowFormWorkspace.persistForm}
-              onSubmit={workflowFormWorkspace.submitRenderedForm}
-              onUnpublish={workflowFormWorkspace.unpublishSelectedForm}
-              onUpdateScript={workflowFormWorkspace.updateSelectedFormScript}
-              renderedForm={renderedForm}
-              tables={database.tables}
+              detail={appWorkspace.detail}
+              onDelete={deleteSelectedApp}
+              onPublish={appWorkspace.publishVersion}
+              onSelectApp={selectAppFromNavigation}
+              selectedAppName={selectedAppName}
             />
-            ) : (
-              <WorkspaceEmptyState
-                icon={<FormRegular />}
-                title={t("empty.noFormTitle")}
-                description={t("empty.noFormDescription")}
-              />
-            ))}
+          )}
 
           {view === "permission" && (
             <PermissionPanel
+              apps={apps}
               database={database}
-              forms={forms}
               grants={roleDraftGrants}
               members={roleDraftMembers}
               memberOptions={memberSearchResults}
@@ -934,9 +917,4 @@ function tableHasView(table: TableMetadata | undefined, viewName: string | undef
     return true;
   }
   return Boolean(table?.views.some((item) => item.name === viewName));
-}
-
-function publishedFormTokenFromPath(): string {
-  const match = /^\/forms\/([^/]+)$/.exec(window.location.pathname);
-  return match ? decodeURIComponent(match[1]) : "";
 }

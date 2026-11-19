@@ -3,6 +3,7 @@ package systemdb
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -293,77 +294,64 @@ func TestWorkflowDefinitionStoresSecretsAndVariablesAsJSON(t *testing.T) {
 	}
 }
 
-func TestFormDefinitionAutoincrementsID(t *testing.T) {
+func TestAppVersionsPublishAndDelete(t *testing.T) {
 	ctx := context.Background()
 	db := openTestDB(t)
 
-	saved, err := db.SaveForm(ctx, FormDefinition{
-		DatabaseName: "workspace",
-		Name:         "contact-intake",
-		Script:       "function render(api, root) { root.append(api.input({ field: 'email' }), api.submit('Save')); return { table: 'contacts' }; }",
-	})
+	app, err := db.CreateApp(ctx, AppDefinition{DatabaseName: "workspace", Name: "intake", Title: "Intake", CreatorID: "u1"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if saved.ID != 1 {
-		t.Fatalf("expected first form id to be 1, got %d", saved.ID)
+	if app.ID == 0 || app.LatestVersion != 0 || app.PublishedVersion != 0 || app.CreatedAt <= 0 {
+		t.Fatalf("unexpected new app: %#v", app)
 	}
-	if saved.CreatedAt <= 0 || saved.UpdatedAt <= 0 {
-		t.Fatalf("expected form millisecond timestamps, got %#v", saved)
-	}
-	list, err := db.Forms(ctx, "workspace")
+	app, first, err := db.AddAppVersion(ctx, app.ID, "", AppVersion{SDK: "1.0", Message: "first", CreatedBy: "u1"}, []byte("one"), false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(list) != 1 || list[0].ID != saved.ID {
-		t.Fatalf("unexpected form list: %#v", list)
+	if first.Version != 1 || first.Size != 3 || app.LatestVersion != 1 || app.PublishedVersion != 0 || app.Title != "Intake" {
+		t.Fatalf("unexpected first version: %#v %#v", app, first)
 	}
-}
-
-func TestFormPublishTokenPersists(t *testing.T) {
-	ctx := context.Background()
-	db := openTestDB(t)
-
-	saved, err := db.SaveForm(ctx, FormDefinition{
-		DatabaseName: "workspace",
-		Name:         "contact-intake",
-		Script:       "function render(api, root) { root.append(api.input({ field: 'email' }), api.submit('Save')); return { table: 'contacts' }; }",
-	})
+	app, second, err := db.AddAppVersion(ctx, app.ID, "Intake 2", AppVersion{SDK: "1.0", CreatedBy: "u2"}, []byte("two!"), true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	published, err := db.PublishForm(ctx, saved.ID)
+	if second.Version != 2 || app.PublishedVersion != 2 || app.Title != "Intake 2" {
+		t.Fatalf("expected publishing upload, got %#v %#v", app, second)
+	}
+	versions, err := db.AppVersions(ctx, app.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if published.PublishedToken == "" {
-		t.Fatal("expected published token")
+	if len(versions) != 2 || versions[0].Version != 2 || versions[1].Message != "first" {
+		t.Fatalf("expected newest-first versions, got %#v", versions)
 	}
-	republished, err := db.PublishForm(ctx, saved.ID)
+	bundle, err := db.AppVersionBundle(ctx, app.ID, 1)
+	if err != nil || string(bundle) != "one" {
+		t.Fatalf("unexpected bundle %q, %v", bundle, err)
+	}
+	app, err = db.PublishAppVersion(ctx, app.ID, 1)
+	if err != nil || app.PublishedVersion != 1 {
+		t.Fatalf("expected rollback to version 1, got %#v, %v", app, err)
+	}
+	if _, err := db.PublishAppVersion(ctx, app.ID, 9); !errors.Is(err, ErrAppVersionNotFound) {
+		t.Fatalf("expected missing version error, got %v", err)
+	}
+	if err := db.SaveGrant(ctx, permission.Grant{SubjectID: "u2", Scope: permission.ScopeApp, Resource: fmt.Sprint(app.ID), Level: permission.Read}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.DeleteApp(ctx, app.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.AppVersionBundle(ctx, app.ID, 1); !errors.Is(err, ErrAppVersionNotFound) {
+		t.Fatalf("expected versions to be deleted, got %v", err)
+	}
+	grants, err := db.GrantListForSubject(ctx, "u2")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if republished.PublishedToken != published.PublishedToken {
-		t.Fatalf("expected publish to be stable, got %q then %q", published.PublishedToken, republished.PublishedToken)
-	}
-	loaded, err := db.FormByPublishedToken(ctx, published.PublishedToken)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if loaded.ID != saved.ID {
-		t.Fatalf("unexpected published form lookup: %#v", loaded)
-	}
-	updated, err := db.SaveForm(ctx, FormDefinition{
-		ID:           saved.ID,
-		DatabaseName: "workspace",
-		Name:         "contact-intake",
-		Script:       "function render(api, root) { root.append(api.input({ field: 'name' }), api.submit('Save')); return { table: 'contacts' }; }",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if updated.PublishedToken != published.PublishedToken {
-		t.Fatalf("expected update to preserve published token, got %#v", updated)
+	if len(grants) != 0 {
+		t.Fatalf("expected app grants to be deleted, got %#v", grants)
 	}
 }
 
@@ -448,12 +436,12 @@ func TestRoleDefinitionStoresReplaceableGrants(t *testing.T) {
 	}
 
 	role, err = db.ReplaceRoleGrants(ctx, "workspace", "editor", []permission.Grant{
-		{Scope: permission.ScopeForm, Resource: "3", Level: permission.Read},
+		{Scope: permission.ScopeApp, Resource: "3", Level: permission.Read},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(role.Grants) != 1 || role.Grants[0].Scope != permission.ScopeForm {
+	if len(role.Grants) != 1 || role.Grants[0].Scope != permission.ScopeApp {
 		t.Fatalf("expected replacement grants, got %#v", role.Grants)
 	}
 	roles, err := db.Roles(ctx, "workspace")
@@ -471,7 +459,7 @@ func TestRoleDefinitionStoresReplaceableGrants(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if effectivePerms.CanReadResource("u1", permission.ScopeForm, "3") {
+	if effectivePerms.CanReadResource("u1", permission.ScopeApp, "3") {
 		t.Fatal("expected removed role member to lose role grants")
 	}
 }

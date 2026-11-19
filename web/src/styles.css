@@ -820,15 +820,6 @@ select {
   min-height: 0;
 }
 
-.form-editor-pane {
-  grid-template-rows: auto minmax(0, 1fr);
-}
-
-.form-section-header {
-  min-height: 0;
-  padding-block: 0;
-}
-
 .javascript-editor-shell {
   min-width: 0;
   min-height: 520px;
@@ -861,73 +852,30 @@ select {
   border-top: 1px solid var(--colorNeutralStroke2);
 }
 
-.form-actions {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  flex-direction: row;
-  flex-wrap: nowrap;
-  gap: 8px;
-}
-
-.section-header > .form-actions {
-  flex-direction: row;
-  align-items: center;
-  gap: 8px;
-}
-
-.form-actions > * {
-  flex: 0 0 auto;
-}
-
-.form-editor-body {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  min-width: 0;
-  min-height: 0;
-}
-
-.form-editor-body > .javascript-editor-shell {
-  flex: 1 1 auto;
-  min-height: 0;
-}
-
-.history-pane,
-.form-preview {
+.history-pane {
   display: flex;
   flex-direction: column;
   gap: 14px;
   min-width: 0;
   min-height: 0;
+  overflow: hidden;
   padding: 16px;
   border: 1px solid var(--colorNeutralStroke2);
   background: var(--colorNeutralBackground1);
 }
 
-/* The editor preview pane scrolls internally; the published page instead
-   scrolls at the shell level (see .published-form-shell), so the card
-   there overrides this back to visible. */
-.form-preview {
-  overflow: auto;
-}
-
-.history-pane {
-  overflow: hidden;
-}
-
-/* The published form page lives inside the FluentProvider div that the
-   app shell locks to the viewport (#root > * is overflow hidden), so the
+/* Standalone pages (the login page) live inside the FluentProvider div that
+   the app shell locks to the viewport (#root > * is overflow hidden), so the
    shell itself is the scroll container: viewport-high, content-sized
    children, page-level scrolling. */
-.published-form-shell {
+.standalone-shell {
   min-width: 0;
   height: 100%;
   overflow-y: auto;
   background: var(--colorNeutralBackground2);
 }
 
-.published-form-main {
+.standalone-main {
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -935,152 +883,6 @@ select {
   min-width: 0;
   margin: 0 auto;
   padding: 32px 0;
-}
-
-.published-form-card {
-  min-height: auto;
-  /* Page-level scrolling; no nested scrollbar inside the card. */
-  overflow: visible;
-}
-
-.form-record-detail {
-  display: grid;
-  gap: 8px;
-  padding: 10px;
-  border: 1px solid var(--colorNeutralStroke2);
-  background: var(--colorNeutralBackground1);
-}
-
-.form-record-detail-row {
-  display: grid;
-  grid-template-columns: minmax(120px, 180px) minmax(0, 1fr);
-  gap: 10px;
-  align-items: start;
-}
-
-.form-result-json {
-  max-height: 260px;
-  overflow: auto;
-  padding: 10px;
-  border: 1px solid var(--colorNeutralStroke2);
-  background: var(--colorNeutralBackground1);
-}
-
-.form-result-dialog {
-  width: min(1280px, calc(100vw - 32px));
-  max-width: none;
-}
-
-.form-result-content {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  max-height: min(760px, calc(100vh - 180px));
-  min-height: 0;
-}
-
-.form-result-grid {
-  width: 100%;
-  height: min(640px, calc(100vh - 260px));
-  min-height: 360px;
-}
-
-.scanner-input {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px;
-  align-items: center;
-}
-
-.scanner-dialog {
-  width: min(720px, calc(100vw - 32px));
-  max-width: none;
-}
-
-.scanner-content {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.scanner-video-frame {
-  position: relative;
-  overflow: hidden;
-  border-radius: 6px;
-  border: 1px solid var(--colorNeutralStroke2);
-  background: var(--colorNeutralBackground3);
-  aspect-ratio: 4 / 3;
-}
-
-.scanner-video {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-}
-
-.scanner-reticle {
-  position: absolute;
-  inset: 20%;
-  border: 2px solid var(--colorBrandForeground1);
-  border-radius: 6px;
-  box-shadow: 0 0 0 999px rgba(0, 0, 0, 0.18);
-  pointer-events: none;
-}
-
-.scanner-overlay {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-}
-
-.scanner-overlay polygon {
-  fill: rgba(16, 124, 16, 0.18);
-  stroke: #107c10;
-  stroke-width: 8;
-  vector-effect: non-scaling-stroke;
-}
-
-.scanner-detected-value {
-  display: grid;
-  gap: 4px;
-  padding: 10px;
-  border: 1px solid var(--colorNeutralStroke2);
-  border-radius: 6px;
-  background: var(--colorNeutralBackground1);
-}
-
-.scanner-detected-value code {
-  overflow-wrap: anywhere;
-  font-family: var(--fontFamilyMonospace);
-  font-size: 13px;
-}
-
-.relation-input {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  gap: 8px;
-  align-items: center;
-}
-
-.relation-picker-dialog {
-  width: min(1280px, calc(100vw - 32px));
-  max-width: calc(100vw - 32px);
-}
-
-.relation-picker-content {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  max-height: min(760px, calc(100vh - 180px));
-  min-height: 0;
-}
-
-.relation-picker-grid {
-  height: min(640px, calc(100vh - 260px));
-  min-height: 360px;
 }
 
 .workflow-workspace {
@@ -1464,7 +1266,7 @@ select {
   gap: 6px;
 }
 
-.form-error {
+.error-text {
   color: var(--colorStatusDangerForeground1);
 }
 
@@ -1718,6 +1520,123 @@ select {
 .workspace-empty-icon svg {
   width: 40px;
   height: 40px;
+}
+
+/* Hosted apps: a list or one app's versions, laid out like the workflow
+   workspace (header row, then cards that scroll on their own). */
+.app-workspace {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  height: 100%;
+  min-height: 0;
+  overflow: auto;
+}
+
+.app-section-header {
+  flex: 0 0 auto;
+  min-height: 48px;
+}
+
+.app-header-actions {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+.app-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  overflow-x: auto;
+  padding: 14px;
+  border: 1px solid var(--colorNeutralStroke2);
+  background: var(--colorNeutralBackground1);
+}
+
+.app-card-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.app-card-heading > span:last-child,
+.app-muted {
+  color: var(--colorNeutralForeground3);
+}
+
+.app-help-card {
+  max-width: 720px;
+}
+
+.app-empty-card {
+  max-width: 560px;
+}
+
+.app-command-help {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  text-align: left;
+}
+
+.app-command {
+  margin: 0 0 6px;
+  padding: 8px 10px;
+  overflow-x: auto;
+  border: 1px solid var(--colorNeutralStroke2);
+  border-radius: 4px;
+  background: var(--colorNeutralBackground3);
+  font-family: var(--fontFamilyMonospace);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre;
+}
+
+.app-version-cell {
+  white-space: nowrap;
+}
+
+.app-message-cell {
+  min-width: 160px;
+}
+
+.app-version-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.app-actions-cell {
+  width: 1%;
+  white-space: nowrap;
+}
+
+.app-row-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.app-title-link {
+  font-weight: var(--fontWeightSemibold);
+}
+
+.app-nowrap {
+  white-space: nowrap;
+}
+
+.app-uploader {
+  display: inline-block;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
 }
 
 @media (max-width: 820px) {

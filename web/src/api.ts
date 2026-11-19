@@ -59,7 +59,7 @@ export type DatabaseMetadata = {
   tables: TableMetadata[];
   permission_level?: 0 | 1 | 2;
   workflow_permission_level?: 0 | 1 | 2;
-  form_permission_level?: 0 | 1 | 2;
+  app_permission_level?: 0 | 1 | 2;
 };
 
 export type Catalog = {
@@ -160,15 +160,40 @@ export type WorkflowRunResponse = {
   summary?: boolean;
 };
 
-export type FormDefinition = {
-  id?: number;
+// AppDefinition is a hosted web app: a versioned static bundle uploaded with
+// `autablectl app push` and served at `url`. published_version is 0 while
+// no version is published.
+export type AppDefinition = {
+  id: number;
   database_name: string;
   name: string;
-  script: string;
-  published_token?: string;
+  title: string;
+  published_version: number;
+  latest_version: number;
+  creator_id?: string;
   permission_level?: 0 | 1 | 2;
-  created_at?: number;
-  updated_at?: number;
+  created_at: number;
+  updated_at: number;
+  url: string;
+};
+
+export type AppVersion = {
+  app_id: number;
+  version: number;
+  sdk: string;
+  message: string;
+  size: number;
+  created_by: string;
+  created_at: number;
+  supported: boolean;
+  sdk_error?: string;
+  preview_url: string;
+};
+
+export type AppDetail = {
+  app: AppDefinition;
+  versions: AppVersion[];
+  sdk: { version: string; min_major: number };
 };
 
 export type PermissionGrant = {
@@ -183,8 +208,8 @@ export type PermissionGrant = {
     | "view"
     | "workflow_set"
     | "workflow"
-    | "form_set"
-    | "form"
+    | "app_set"
+    | "app"
     | "file";
   resource: string;
   field: string;
@@ -718,59 +743,51 @@ export async function loadWorkflowRun(workflowID: number, historyKey: string): P
   return response.json() as Promise<WorkflowRunResponse>;
 }
 
-export async function listForms(dbName: string): Promise<FormDefinition[]> {
-  const response = await fetch(`/api/databases/${dbName}/forms`);
+export async function listApps(dbName: string): Promise<AppDefinition[]> {
+  const response = await fetch(`/api/databases/${encodeURIComponent(dbName)}/apps`);
   if (!response.ok) {
-    throw new Error(`form list failed: ${response.status}`);
+    const error = await response.json().catch(() => ({ error: response.statusText }));
+    throw new Error(error.error ?? `app list failed: ${response.status}`);
   }
-  return response.json() as Promise<FormDefinition[]>;
+  return response.json() as Promise<AppDefinition[]>;
 }
 
-export async function saveForm(dbName: string, form: FormDefinition): Promise<FormDefinition> {
-  const response = await fetch(`/api/databases/${dbName}/forms`, {
+function appPath(dbName: string, appName: string): string {
+  return `/api/databases/${encodeURIComponent(dbName)}/apps/${encodeURIComponent(appName)}`;
+}
+
+export async function loadApp(dbName: string, appName: string): Promise<AppDetail> {
+  const response = await fetch(appPath(dbName, appName));
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: response.statusText }));
+    throw new Error(error.error ?? `app load failed: ${response.status}`);
+  }
+  return response.json() as Promise<AppDetail>;
+}
+
+export async function publishAppVersion(dbName: string, appName: string, version: number): Promise<AppDefinition> {
+  const response = await fetch(`${appPath(dbName, appName)}/publish`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(form)
+    body: JSON.stringify({ version })
   });
   if (!response.ok) {
-    throw new Error(`form save failed: ${response.status}`);
+    const error = await response.json().catch(() => ({ error: response.statusText }));
+    throw new Error(error.error ?? `app publish failed: ${response.status}`);
   }
-  return response.json() as Promise<FormDefinition>;
+  return response.json() as Promise<AppDefinition>;
 }
 
-export async function publishForm(formID: number): Promise<FormDefinition> {
-  const response = await fetch(`/api/forms/${formID}/publish`, { method: "POST" });
+export async function deleteApp(dbName: string, appName: string): Promise<void> {
+  const response = await fetch(appPath(dbName, appName), { method: "DELETE" });
   if (!response.ok) {
     const error = await response.json().catch(() => ({ error: response.statusText }));
-    throw new Error(error.error ?? `form publish failed: ${response.status}`);
-  }
-  return response.json() as Promise<FormDefinition>;
-}
-
-export async function unpublishForm(formID: number): Promise<FormDefinition> {
-  const response = await fetch(`/api/forms/${formID}/unpublish`, { method: "POST" });
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: response.statusText }));
-    throw new Error(error.error ?? `form unpublish failed: ${response.status}`);
-  }
-  return response.json() as Promise<FormDefinition>;
-}
-
-export async function deleteForm(formID: number): Promise<void> {
-  const response = await fetch(`/api/forms/${formID}`, { method: "DELETE" });
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: response.statusText }));
-    throw new Error(error.error ?? `form delete failed: ${response.status}`);
+    throw new Error(error.error ?? `app delete failed: ${response.status}`);
   }
 }
 
-export async function loadPublishedForm(token: string): Promise<FormDefinition> {
-  const response = await fetch(`/api/published/forms/${encodeURIComponent(token)}`);
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: response.statusText }));
-    throw new Error(error.error ?? `published form load failed: ${response.status}`);
-  }
-  return response.json() as Promise<FormDefinition>;
+export function appSourceURL(dbName: string, appName: string, version: number): string {
+  return `${appPath(dbName, appName)}/versions/${version}/source`;
 }
 
 export async function listRoles(dbName: string): Promise<RoleDefinition[]> {

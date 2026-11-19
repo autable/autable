@@ -39,13 +39,20 @@ func init() {
 		"workflow run":     {"workflow run DATABASE WORKFLOW [--inputs JSON]", "run a workflow now and print the run", runWorkflowRun},
 		"workflow runs":    {"workflow runs DATABASE WORKFLOW [--limit N]", "list recent runs (newest first)", runWorkflowRuns},
 		"workflow run-log": {"workflow run-log DATABASE WORKFLOW HISTORY_KEY", "show the steps, inputs, and outputs of one run", runWorkflowRunLog},
-		"form list":        {"form list DATABASE", "list forms", runFormList},
-		"form get":         {"form get DATABASE FORM [--script]", "show a form", runFormGet},
 		"file upload":      {"file upload PATH [--database DB --table TABLE [--record ID]]", "upload a file; prints its id for file fields", runFileUpload},
 		"file download":    {"file download FILE_ID --output PATH", "download a stored file", runFileDownload},
-		"pull":             {"pull [--dir DIR] [--database DB]... [--force]", "write workflow and form scripts into DIR", runPull},
+		"pull":             {"pull [--dir DIR] [--database DB]... [--force]", "write workflow scripts into DIR", runPull},
 		"status":           {"status [--dir DIR]", "show scripts changed locally since the last pull/push", runStatus},
 		"push":             {"push [--dir DIR] [--dry-run] [--force]", "save changed and new scripts to the server", runPush},
+		"app init":         {"app init DIR --database DB --name NAME [--title T]", "create an app project (Vite, React, TypeScript, the SDK)", runAppInit},
+		"app sdk":          {"app sdk [DIR]", "refresh the vendored SDK and the schema types", runAppSDK},
+		"app dev":          {"app dev [DIR]", "run npm run dev with /api proxied to the server as you", runAppDev},
+		"app push":         {"app push [DIR] [-m MSG] [--publish] [--no-build]", "build and upload a new version; prints its preview URL", runAppPush},
+		"app list":         {"app list DATABASE", "list apps", runAppList},
+		"app versions":     {"app versions DATABASE NAME", "show an app and its versions", runAppVersions},
+		"app publish":      {"app publish DATABASE NAME VERSION", "make VERSION the one users get", runAppPublish},
+		"app rollback":     {"app rollback DATABASE NAME", "publish the newest version below the current one", runAppRollback},
+		"app pull":         {"app pull DATABASE NAME DIR [--version N]", "download a version's source into an empty DIR", runAppPull},
 		"skill show":       {"skill show", "print the agent skill (rules plus a map of the source)", runSkillShow},
 		"skill install":    {"skill install [--dir DIR]", "write the agent skill to DIR/SKILL.md (default ~/.claude/skills/autable)", runSkillInstall},
 	}
@@ -424,7 +431,7 @@ func runRowsHistory(a *app, args []string) error {
 	return a.get(apiPath("tables", values[0], values[1], "rows", values[2], "history"))
 }
 
-// remoteScript is the part of a workflow or form response the CLI needs.
+// remoteScript is the part of a workflow response the CLI needs.
 // Workflow settings stay raw so saving sends back exactly what was read.
 type remoteScript struct {
 	ID           int64  `json:"id"`
@@ -441,10 +448,6 @@ type remoteWorkflow struct {
 	Runners              map[string]string `json:"runners"`
 	HistoryRetentionDays *int64            `json:"history_retention_days"`
 	TimeoutSeconds       *int64            `json:"timeout_seconds"`
-}
-
-type remoteForm struct {
-	remoteScript
 }
 
 // saveRequest builds a full workflow definition for POST /api/workflows.
@@ -473,25 +476,10 @@ func (workflow remoteWorkflow) saveRequest() map[string]any {
 	}
 }
 
-func (form remoteForm) saveRequest() map[string]any {
-	return map[string]any{
-		"id":            form.ID,
-		"database_name": form.DatabaseName,
-		"name":          form.Name,
-		"script":        form.Script,
-	}
-}
-
 func listWorkflows(c *client, database string) ([]remoteWorkflow, error) {
 	var workflows []remoteWorkflow
 	err := c.call(http.MethodGet, apiPath("databases", database, "workflows"), nil, &workflows)
 	return workflows, err
-}
-
-func listForms(c *client, database string) ([]remoteForm, error) {
-	var forms []remoteForm
-	err := c.call(http.MethodGet, apiPath("databases", database, "forms"), nil, &forms)
-	return forms, err
 }
 
 // findWorkflow resolves a workflow by name, or by id when the reference is
@@ -512,24 +500,6 @@ func findWorkflow(c *client, database, ref string) (remoteWorkflow, error) {
 		}
 	}
 	return remoteWorkflow{}, fmt.Errorf("workflow %q not found in database %q (or not readable)", ref, database)
-}
-
-func findForm(c *client, database, ref string) (remoteForm, error) {
-	forms, err := listForms(c, database)
-	if err != nil {
-		return remoteForm{}, err
-	}
-	for _, form := range forms {
-		if form.Name == ref {
-			return form, nil
-		}
-	}
-	for _, form := range forms {
-		if strconv.FormatInt(form.ID, 10) == ref {
-			return form, nil
-		}
-	}
-	return remoteForm{}, fmt.Errorf("form %q not found in database %q (or not readable)", ref, database)
 }
 
 func runWorkflowList(a *app, args []string) error {
@@ -699,48 +669,6 @@ func runWorkflowRunLog(a *app, args []string) error {
 		return err
 	}
 	return a.get(apiPath("workflows", strconv.FormatInt(workflow.ID, 10), "runs", values[2]))
-}
-
-func runFormList(a *app, args []string) error {
-	values, err := a.parse(a.newFlags("form list"), args, "DATABASE")
-	if err != nil {
-		return err
-	}
-	c, err := a.client()
-	if err != nil {
-		return err
-	}
-	forms, err := listForms(c, values[0])
-	if err != nil {
-		return err
-	}
-	summaries := make([]map[string]any, 0, len(forms))
-	for _, form := range forms {
-		summaries = append(summaries, map[string]any{"id": form.ID, "name": form.Name, "updated_at": form.UpdatedAt})
-	}
-	return a.printJSON(summaries)
-}
-
-func runFormGet(a *app, args []string) error {
-	fs := a.newFlags("form get")
-	scriptOnly := fs.Bool("script", false, "print only the script source")
-	values, err := a.parse(fs, args, "DATABASE", "FORM")
-	if err != nil {
-		return err
-	}
-	c, err := a.client()
-	if err != nil {
-		return err
-	}
-	form, err := findForm(c, values[0], values[1])
-	if err != nil {
-		return err
-	}
-	if *scriptOnly {
-		_, err := io.WriteString(a.stdout, form.Script)
-		return err
-	}
-	return a.get(apiPath("forms", strconv.FormatInt(form.ID, 10)))
 }
 
 func runFileUpload(a *app, args []string) error {

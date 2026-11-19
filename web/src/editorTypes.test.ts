@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formEditorExtraLibs, workflowEditorExtraLibs } from "./editorTypes";
+import { workflowEditorExtraLibs } from "./editorTypes";
 import type { WorkflowNodeInfo } from "./api";
 
 const workflowNodes: WorkflowNodeInfo[] = [
@@ -50,17 +50,5 @@ describe("editorTypes", () => {
     expect(content).toContain("interface AutableWorkflowRunInputs extends AutableNodeTableRecordChangedOutput");
     expect(content).toContain("record?: AutableTriggerRecord;");
     expect(content).toContain("function stableStringify(value: unknown): string;");
-  });
-
-  it("generates form runtime declarations", () => {
-    const content = formEditorExtraLibs().map((lib) => lib.content).join("\n");
-
-    expect(content).toContain("interface AutableFormAPI");
-    expect(content).toContain("type AutableFormScannerConfig = { confirm?: boolean }");
-    expect(content).toContain("scanner?: boolean | AutableFormScannerConfig");
-    expect(content).toContain("relation(config:");
-    expect(content).toContain("fields?: string[]");
-    expect(content).toContain("function stableStringify(value: unknown): string;");
-    expect(content).toContain("function render(api: AutableFormAPI, root: AutableFormRoot): AutableFormDefinition");
   });
 });

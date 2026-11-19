@@ -62,6 +62,17 @@ var migrations = []func(orm *gorm.DB) error{
 	func(orm *gorm.DB) error {
 		return orm.Exec("UPDATE `permission_grant_models` SET `level` = 1 WHERE `scope` IN ('view', 'view_set') AND `level` > 1").Error
 	},
+	// 5 → 6: forms were replaced by hosted apps. Form grants would name
+	// ids of a table that no longer exists, so they go with it. Form
+	// scripts already written to the repository's form/ directory are left
+	// alone. IF EXISTS: a database upgraded straight from version 0 by an
+	// old-shape fixture may never have had the table.
+	func(orm *gorm.DB) error {
+		if err := orm.Exec("DELETE FROM `permission_grant_models` WHERE `scope` IN ('form', 'form_set')").Error; err != nil {
+			return err
+		}
+		return orm.Exec("DROP TABLE IF EXISTS `form_models`").Error
+	},
 }
 
 func currentSchemaVersion() int64 {

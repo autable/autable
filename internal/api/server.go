@@ -41,6 +41,7 @@ type Server struct {
 	metadataPath     string
 	openDatabase     func(context.Context, string) error
 	codeFiles        codeFileStore
+	appBuilds        appBuildCache
 	repositorySync   repositorySyncer
 	system           *systemdb.DB
 	tables           *table.Service
@@ -63,11 +64,7 @@ type codeFileStore interface {
 	SaveWorkflowScript(context.Context, systemdb.WorkflowDefinition) error
 	LoadWorkflowScript(context.Context, systemdb.WorkflowDefinition) (string, bool, error)
 	DeleteWorkflowScript(context.Context, systemdb.WorkflowDefinition) error
-	SaveFormScript(context.Context, systemdb.FormDefinition) error
-	LoadFormScript(context.Context, systemdb.FormDefinition) (string, bool, error)
-	DeleteFormScript(context.Context, systemdb.FormDefinition) error
 	WorkflowScriptPath(systemdb.WorkflowDefinition) string
-	FormScriptPath(systemdb.FormDefinition) string
 }
 
 type repositorySyncer interface {
@@ -392,10 +389,14 @@ func (server *Server) repositoryActorLabel(ctx context.Context, actorID string) 
 }
 
 func (server *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if strings.HasPrefix(r.URL.Path, "/api/") && !checkAppSDKHeader(w, r) {
+		return
+	}
 	server.mux.ServeHTTP(w, r)
 }
 
 func (server *Server) routes() {
+	server.appRoutes()
 	server.mux.HandleFunc("GET /api/auth/config", server.handleAuthConfig)
 	server.mux.HandleFunc("POST /api/auth/register", server.handleRegister)
 	server.mux.HandleFunc("POST /api/auth/login", server.handleLogin)
@@ -436,11 +437,6 @@ func (server *Server) routes() {
 	server.mux.HandleFunc("POST /api/files", server.handleUploadFile)
 	server.mux.HandleFunc("POST /api/files/metadata", server.handleFileMetadata)
 	server.mux.HandleFunc("GET /api/files/{fileID}", server.handleDownloadFile)
-	server.mux.HandleFunc("POST /api/forms", server.handleSaveForm)
-	server.mux.HandleFunc("POST /api/forms/{formID}/{action}", server.handlePostFormAction)
-	server.mux.HandleFunc("GET /api/forms/{formID}", server.handleGetForm)
-	server.mux.HandleFunc("DELETE /api/forms/{formID}", server.handleDeleteForm)
-	server.mux.HandleFunc("GET /api/published/forms/{token}", server.handleGetPublishedForm)
 }
 
 // tableRoute adapts a {database}/{table} handler to the wildcard mux.
@@ -1243,23 +1239,8 @@ func (server *Server) handleGetDatabaseResource(w http.ResponseWriter, r *http.R
 			return
 		}
 		writeJSON(w, http.StatusOK, workflowResponsesFromDefinitions(filtered))
-	case "forms":
-		forms, err := server.system.Forms(r.Context(), dbName)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, err)
-			return
-		}
-		forms, err = server.formDefinitionsWithFileScripts(r.Context(), forms)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, err)
-			return
-		}
-		filtered, err := server.filterReadableForms(r.Context(), actorID, forms)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, err)
-			return
-		}
-		writeJSON(w, http.StatusOK, filtered)
+	case "apps":
+		server.handleListApps(w, r, actorID, dbName)
 	case "roles":
 		if !server.requireDatabaseOwner(w, r, actorID, dbName) {
 			return
@@ -1347,37 +1328,6 @@ func (server *Server) handlePostDatabaseResource(w http.ResponseWriter, r *http.
 		}
 		saved = server.workflowWithPermissionLevel(r.Context(), actorID, saved)
 		writeJSON(w, http.StatusCreated, workflowResponseFromDefinition(saved))
-	case "forms":
-		var form systemdb.FormDefinition
-		if err := readJSON(r, &form); err != nil {
-			writeError(w, http.StatusBadRequest, err)
-			return
-		}
-		if form.ID == 0 && !server.requireDatabaseOrSetWrite(w, r, actorID, dbName, permission.ScopeFormSet) {
-			return
-		}
-		if form.ID != 0 && !server.requireResourceWrite(w, r, actorID, permission.ScopeForm, form.ID) {
-			return
-		}
-		if form.ID != 0 && !server.requireExistingFormDatabase(w, r, form.ID, dbName) {
-			return
-		}
-		form.DatabaseName = dbName
-		if form.ID == 0 {
-			form.CreatorID = actorID
-		}
-		saved, err := server.saveFormDefinition(r.Context(), actorID, form)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, err)
-			return
-		}
-		if form.ID == 0 {
-			if !server.grantResourceOwner(w, r, actorID, permission.ScopeForm, saved.ID) {
-				return
-			}
-		}
-		saved = server.formWithPermissionLevel(r.Context(), actorID, saved)
-		writeJSON(w, http.StatusCreated, saved)
 	case "roles":
 		if !server.requireDatabaseOwner(w, r, actorID, dbName) {
 			return
@@ -2274,76 +2224,6 @@ func triggerInt64Param(params map[string]any, key string) (int64, bool) {
 	}
 }
 
-func (server *Server) handleSaveForm(w http.ResponseWriter, r *http.Request) {
-	actorID, ok := server.requireUserID(w, r)
-	if !ok {
-		return
-	}
-	var form systemdb.FormDefinition
-	if err := readJSON(r, &form); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	if form.ID == 0 && !server.requireDatabaseOrSetWrite(w, r, actorID, form.DatabaseName, permission.ScopeFormSet) {
-		return
-	}
-	if form.ID != 0 && !server.requireResourceWrite(w, r, actorID, permission.ScopeForm, form.ID) {
-		return
-	}
-	if form.ID != 0 && !server.requireExistingFormDatabase(w, r, form.ID, form.DatabaseName) {
-		return
-	}
-	if form.ID == 0 {
-		form.CreatorID = actorID
-	}
-	saved, err := server.saveFormDefinition(r.Context(), actorID, form)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	if form.ID == 0 {
-		if !server.grantResourceOwner(w, r, actorID, permission.ScopeForm, saved.ID) {
-			return
-		}
-	}
-	saved = server.formWithPermissionLevel(r.Context(), actorID, saved)
-	writeJSON(w, http.StatusCreated, saved)
-}
-
-func (server *Server) handlePostFormAction(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(r, "formID")
-	action := r.PathValue("action")
-	if !ok || (action != "publish" && action != "unpublish") {
-		http.NotFound(w, r)
-		return
-	}
-	actorID, ok := server.requireUserID(w, r)
-	if !ok {
-		return
-	}
-	if _, ok := server.requireAuthorized(w, r, actorID, accessRequest{Action: accessWriteForm, FormID: id}); !ok {
-		return
-	}
-	var form systemdb.FormDefinition
-	var err error
-	if action == "publish" {
-		form, err = server.system.PublishForm(r.Context(), id)
-	} else {
-		form, err = server.system.UnpublishForm(r.Context(), id)
-	}
-	if err != nil {
-		writeError(w, http.StatusNotFound, err)
-		return
-	}
-	form, err = server.formDefinitionWithFileScript(r.Context(), form)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	form = server.formWithPermissionLevel(r.Context(), actorID, form)
-	writeJSON(w, http.StatusOK, form)
-}
-
 func (server *Server) handleDeleteWorkflow(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(r, "workflowID")
 	if !ok {
@@ -2375,101 +2255,6 @@ func (server *Server) handleDeleteWorkflow(w http.ResponseWriter, r *http.Reques
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
-
-func (server *Server) handleDeleteForm(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(r, "formID")
-	if !ok {
-		http.NotFound(w, r)
-		return
-	}
-	actorID, ok := server.requireUserID(w, r)
-	if !ok {
-		return
-	}
-	if _, ok := server.requireAuthorized(w, r, actorID, accessRequest{Action: accessDeleteForm, FormID: id}); !ok {
-		return
-	}
-	form, err := server.system.Form(r.Context(), id)
-	if err != nil {
-		writeError(w, http.StatusNotFound, err)
-		return
-	}
-	if err := server.system.DeleteForm(r.Context(), id); err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	if server.codeFiles != nil {
-		if err := server.codeFiles.DeleteFormScript(r.Context(), form); err != nil {
-			writeError(w, http.StatusInternalServerError, err)
-			return
-		}
-		server.notifyRepositoryChange(r.Context(), actorID, "form.delete", "deleted form "+form.DatabaseName+"/"+form.Name, server.codeFiles.FormScriptPath(form))
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-func (server *Server) handleGetForm(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(r, "formID")
-	if !ok {
-		http.NotFound(w, r)
-		return
-	}
-	actorID, ok := server.requireUserID(w, r)
-	if !ok {
-		return
-	}
-	if !server.requireResourceRead(w, r, actorID, permission.ScopeForm, id) {
-		return
-	}
-	form, err := server.system.Form(r.Context(), id)
-	if err != nil {
-		writeError(w, http.StatusNotFound, err)
-		return
-	}
-	form, err = server.formDefinitionWithFileScript(r.Context(), form)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	form = server.formWithPermissionLevel(r.Context(), actorID, form)
-	writeJSON(w, http.StatusOK, form)
-}
-
-func (server *Server) handleGetPublishedForm(w http.ResponseWriter, r *http.Request) {
-	token := r.PathValue("token")
-	if token == "" {
-		http.NotFound(w, r)
-		return
-	}
-	actorID, ok := server.requireUserID(w, r)
-	if !ok {
-		return
-	}
-	form, err := server.system.FormByPublishedToken(r.Context(), token)
-	if err != nil {
-		writeError(w, http.StatusNotFound, err)
-		return
-	}
-	if !server.requireExplicitResourceRead(w, r, actorID, permission.ScopeForm, form.ID) {
-		return
-	}
-	form, err = server.formDefinitionWithFileScript(r.Context(), form)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	form = server.formWithPermissionLevel(r.Context(), actorID, form)
-	writeJSON(w, http.StatusOK, form)
-}
-
-
-
-
-
-
-
-
-
 
 const maxWebhookBodyBytes = 1 << 20
 
@@ -2559,13 +2344,6 @@ func (server *Server) handleWorkflowWebhook(w http.ResponseWriter, r *http.Reque
 	writeJSON(w, http.StatusOK, map[string]any{"accepted": true})
 }
 
-
-
-
-
-
-
-
 func readJSON(r *http.Request, target any) error {
 	defer r.Body.Close()
 	decoder := json.NewDecoder(r.Body)
@@ -2602,7 +2380,7 @@ func (server *Server) visibleCatalog(ctx context.Context, actorID string, perms 
 			dbLevel = permission.Write
 		}
 		workflowSetLevel := perms.ResourceLevel(actorID, permission.ScopeWorkflowSet, database.Name)
-		formSetLevel := perms.ResourceLevel(actorID, permission.ScopeFormSet, database.Name)
+		appSetLevel := perms.ResourceLevel(actorID, permission.ScopeAppSet, database.Name)
 		dbVisible := isOwner
 		tables := make([]metadata.Table, 0, len(database.Tables))
 		for _, tableMeta := range database.Tables {
@@ -2621,7 +2399,7 @@ func (server *Server) visibleCatalog(ctx context.Context, actorID string, perms 
 		if dbVisible {
 			database.PermissionLevel = int(dbLevel)
 			database.WorkflowPermissionLevel = int(maxPermissionLevel(dbLevel, workflowSetLevel))
-			database.FormPermissionLevel = int(maxPermissionLevel(dbLevel, formSetLevel))
+			database.AppPermissionLevel = int(maxPermissionLevel(dbLevel, appSetLevel))
 			database.Tables = tables
 			visible.Databases = append(visible.Databases, database)
 		}
@@ -2801,13 +2579,13 @@ func (server *Server) hasVisibleDatabaseResource(ctx context.Context, actorID st
 			return true, nil
 		}
 	}
-	forms, err := server.system.Forms(ctx, dbName)
+	apps, err := server.system.Apps(ctx, dbName)
 	if err != nil {
 		return false, err
 	}
-	for _, form := range forms {
-		if perms.CanReadResource(actorID, permission.ScopeFormSet, dbName) ||
-			perms.CanReadResource(actorID, permission.ScopeForm, resourceID(form.ID)) {
+	for _, app := range apps {
+		if perms.CanReadResource(actorID, permission.ScopeAppSet, dbName) ||
+			perms.CanReadResource(actorID, permission.ScopeApp, resourceID(app.ID)) {
 			return true, nil
 		}
 	}
@@ -2831,26 +2609,6 @@ func (server *Server) requireResourceRead(w http.ResponseWriter, r *http.Request
 	return server.requireResourceLevel(w, r, actorID, scope, id, permission.Read)
 }
 
-func (server *Server) requireExplicitResourceRead(w http.ResponseWriter, r *http.Request, actorID string, scope permission.Scope, id int64) bool {
-	switch scope {
-	case permission.ScopeWorkflow:
-	case permission.ScopeForm:
-	default:
-		writeError(w, http.StatusBadRequest, fmt.Errorf("unsupported resource scope %q", scope))
-		return false
-	}
-	perms, err := server.system.EffectiveGrantsForSubject(r.Context(), actorID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return false
-	}
-	if perms.CanReadResource(actorID, scope, resourceID(id)) {
-		return true
-	}
-	writeError(w, http.StatusForbidden, table.ErrPermissionDenied)
-	return false
-}
-
 func (server *Server) requireDatabaseOwner(w http.ResponseWriter, r *http.Request, actorID string, dbName string) bool {
 	_, ok := server.requireAuthorized(w, r, actorID, accessRequest{Action: accessManageDatabase, Database: dbName})
 	return ok
@@ -2864,7 +2622,7 @@ func (server *Server) grantDatabaseName(ctx context.Context, grant permission.Gr
 			return "", fmt.Errorf("grant resource %q must be db.table", grant.Resource)
 		}
 		return dbName, nil
-	case permission.ScopeWorkflowSet, permission.ScopeFormSet:
+	case permission.ScopeWorkflowSet, permission.ScopeAppSet:
 		if grant.Resource == "" {
 			return "", fmt.Errorf("grant %s resource is required", grant.Scope)
 		}
@@ -2879,16 +2637,16 @@ func (server *Server) grantDatabaseName(ctx context.Context, grant permission.Gr
 			return "", err
 		}
 		return workflow.DatabaseName, nil
-	case permission.ScopeForm:
+	case permission.ScopeApp:
 		id, err := strconv.ParseInt(grant.Resource, 10, 64)
 		if err != nil {
-			return "", fmt.Errorf("grant form resource %q must be an id", grant.Resource)
+			return "", fmt.Errorf("grant app resource %q must be an id", grant.Resource)
 		}
-		form, err := server.system.Form(ctx, id)
+		app, err := server.system.App(ctx, id)
 		if err != nil {
 			return "", err
 		}
-		return form.DatabaseName, nil
+		return app.DatabaseName, nil
 	default:
 		return "", fmt.Errorf("unsupported grant scope %q", grant.Scope)
 	}
@@ -2949,26 +2707,26 @@ func (server *Server) deleteConflictingGrants(ctx context.Context, grant permiss
 			return err
 		}
 		return server.system.DeleteGrant(ctx, grant.SubjectID, permission.ScopeWorkflowSet, workflow.DatabaseName)
-	case permission.ScopeFormSet:
-		forms, err := server.system.Forms(ctx, grant.Resource)
+	case permission.ScopeAppSet:
+		apps, err := server.system.Apps(ctx, grant.Resource)
 		if err != nil {
 			return err
 		}
-		for _, form := range forms {
-			if err := server.system.DeleteGrant(ctx, grant.SubjectID, permission.ScopeForm, resourceID(form.ID)); err != nil {
+		for _, app := range apps {
+			if err := server.system.DeleteGrant(ctx, grant.SubjectID, permission.ScopeApp, resourceID(app.ID)); err != nil {
 				return err
 			}
 		}
-	case permission.ScopeForm:
+	case permission.ScopeApp:
 		id, err := parseGrantResourceID(grant.Resource)
 		if err != nil {
 			return err
 		}
-		form, err := server.system.Form(ctx, id)
+		app, err := server.system.App(ctx, id)
 		if err != nil {
 			return err
 		}
-		return server.system.DeleteGrant(ctx, grant.SubjectID, permission.ScopeFormSet, form.DatabaseName)
+		return server.system.DeleteGrant(ctx, grant.SubjectID, permission.ScopeAppSet, app.DatabaseName)
 	}
 	return nil
 }
@@ -2980,8 +2738,8 @@ func (server *Server) validateExclusiveGrants(ctx context.Context, grants []perm
 	views := map[string]struct{}{}
 	workflowSets := map[string]struct{}{}
 	workflows := map[string]struct{}{}
-	formSets := map[string]struct{}{}
-	forms := map[string]struct{}{}
+	appSets := map[string]struct{}{}
+	apps := map[string]struct{}{}
 	for _, grant := range grants {
 		if grant.Level == permission.None {
 			continue
@@ -3007,18 +2765,18 @@ func (server *Server) validateExclusiveGrants(ctx context.Context, grants []perm
 				return err
 			}
 			workflows[workflow.DatabaseName] = struct{}{}
-		case permission.ScopeFormSet:
-			formSets[grant.Resource] = struct{}{}
-		case permission.ScopeForm:
+		case permission.ScopeAppSet:
+			appSets[grant.Resource] = struct{}{}
+		case permission.ScopeApp:
 			id, err := parseGrantResourceID(grant.Resource)
 			if err != nil {
 				return err
 			}
-			form, err := server.system.Form(ctx, id)
+			app, err := server.system.App(ctx, id)
 			if err != nil {
 				return err
 			}
-			forms[form.DatabaseName] = struct{}{}
+			apps[app.DatabaseName] = struct{}{}
 		}
 	}
 	if overlapKey(fieldSets, fields) != "" {
@@ -3030,8 +2788,8 @@ func (server *Server) validateExclusiveGrants(ctx context.Context, grants []perm
 	if overlapKey(workflowSets, workflows) != "" {
 		return errors.New("workflow set and workflow grants are mutually exclusive")
 	}
-	if overlapKey(formSets, forms) != "" {
-		return errors.New("form set and form grants are mutually exclusive")
+	if overlapKey(appSets, apps) != "" {
+		return errors.New("app set and app grants are mutually exclusive")
 	}
 	return nil
 }
@@ -3225,12 +2983,12 @@ func (server *Server) validateGrantResource(ctx context.Context, dbName string, 
 		if grant.Field != "" {
 			return errors.New("workflow set grant cannot include field")
 		}
-	case permission.ScopeFormSet:
+	case permission.ScopeAppSet:
 		if grant.Resource != dbName {
-			return fmt.Errorf("form set grant resource must be %q", dbName)
+			return fmt.Errorf("app set grant resource must be %q", dbName)
 		}
 		if grant.Field != "" {
-			return errors.New("form set grant cannot include field")
+			return errors.New("app set grant cannot include field")
 		}
 	case permission.ScopeWorkflow:
 		workflow, err := workflowByGrantResource(ctx, server.system, grant.Resource)
@@ -3240,13 +2998,13 @@ func (server *Server) validateGrantResource(ctx context.Context, dbName string, 
 		if workflow.DatabaseName != dbName {
 			return fmt.Errorf("workflow %s belongs to database %q, not %q", grant.Resource, workflow.DatabaseName, dbName)
 		}
-	case permission.ScopeForm:
-		form, err := formByGrantResource(ctx, server.system, grant.Resource)
+	case permission.ScopeApp:
+		app, err := appByGrantResource(ctx, server.system, grant.Resource)
 		if err != nil {
 			return err
 		}
-		if form.DatabaseName != dbName {
-			return fmt.Errorf("form %s belongs to database %q, not %q", grant.Resource, form.DatabaseName, dbName)
+		if app.DatabaseName != dbName {
+			return fmt.Errorf("app %s belongs to database %q, not %q", grant.Resource, app.DatabaseName, dbName)
 		}
 	default:
 		return fmt.Errorf("unsupported grant scope %q", grant.Scope)
@@ -3262,12 +3020,12 @@ func workflowByGrantResource(ctx context.Context, system *systemdb.DB, resource 
 	return system.Workflow(ctx, id)
 }
 
-func formByGrantResource(ctx context.Context, system *systemdb.DB, resource string) (systemdb.FormDefinition, error) {
+func appByGrantResource(ctx context.Context, system *systemdb.DB, resource string) (systemdb.AppDefinition, error) {
 	id, err := strconv.ParseInt(resource, 10, 64)
 	if err != nil {
-		return systemdb.FormDefinition{}, fmt.Errorf("grant form resource %q must be an id", resource)
+		return systemdb.AppDefinition{}, fmt.Errorf("grant app resource %q must be an id", resource)
 	}
-	return system.Form(ctx, id)
+	return system.App(ctx, id)
 }
 
 func (server *Server) requireResourceWrite(w http.ResponseWriter, r *http.Request, actorID string, scope permission.Scope, id int64) bool {
@@ -3291,23 +3049,6 @@ func (server *Server) requireExistingWorkflowDatabase(w http.ResponseWriter, r *
 	return true
 }
 
-func (server *Server) requireExistingFormDatabase(w http.ResponseWriter, r *http.Request, id int64, dbName string) bool {
-	if dbName == "" {
-		writeError(w, http.StatusBadRequest, errors.New("database_name is required"))
-		return false
-	}
-	form, err := server.system.Form(r.Context(), id)
-	if err != nil {
-		writeError(w, http.StatusNotFound, err)
-		return false
-	}
-	if form.DatabaseName != dbName {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("form %d belongs to database %q, not %q", id, form.DatabaseName, dbName))
-		return false
-	}
-	return true
-}
-
 func (server *Server) requireResourceLevel(w http.ResponseWriter, r *http.Request, actorID string, scope permission.Scope, id int64, level permission.Level) bool {
 	action := accessReadWorkflow
 	switch scope {
@@ -3315,10 +3056,10 @@ func (server *Server) requireResourceLevel(w http.ResponseWriter, r *http.Reques
 		if level >= permission.Write {
 			action = accessWriteWorkflow
 		}
-	case permission.ScopeForm:
-		action = accessReadForm
+	case permission.ScopeApp:
+		action = accessReadApp
 		if level >= permission.Write {
-			action = accessWriteForm
+			action = accessWriteApp
 		}
 	default:
 		writeError(w, http.StatusBadRequest, fmt.Errorf("unsupported resource scope %q", scope))
@@ -3327,7 +3068,7 @@ func (server *Server) requireResourceLevel(w http.ResponseWriter, r *http.Reques
 	_, ok := server.requireAuthorized(w, r, actorID, accessRequest{
 		Action:     action,
 		WorkflowID: id,
-		FormID:     id,
+		AppID:      id,
 	})
 	return ok
 }
@@ -3353,22 +3094,22 @@ func (server *Server) filterReadableWorkflows(ctx context.Context, actorID strin
 	return filtered, nil
 }
 
-func (server *Server) filterReadableForms(ctx context.Context, actorID string, forms []systemdb.FormDefinition) ([]systemdb.FormDefinition, error) {
+func (server *Server) filterReadableApps(ctx context.Context, actorID string, apps []systemdb.AppDefinition) ([]systemdb.AppDefinition, error) {
 	perms, err := server.system.EffectiveGrantsForSubject(ctx, actorID)
 	if err != nil {
 		return nil, err
 	}
-	filtered := make([]systemdb.FormDefinition, 0, len(forms))
-	for _, form := range forms {
-		isOwner, err := server.system.IsDatabaseOwner(ctx, actorID, form.DatabaseName)
+	filtered := make([]systemdb.AppDefinition, 0, len(apps))
+	for _, app := range apps {
+		isOwner, err := server.system.IsDatabaseOwner(ctx, actorID, app.DatabaseName)
 		if err != nil {
 			return nil, err
 		}
 		if isOwner ||
-			perms.ResourceLevel(actorID, permission.ScopeFormSet, form.DatabaseName) >= permission.Read ||
-			perms.CanReadResource(actorID, permission.ScopeForm, resourceID(form.ID)) {
-			form.PermissionLevel = server.formPermissionLevel(ctx, perms, actorID, form)
-			filtered = append(filtered, form)
+			perms.ResourceLevel(actorID, permission.ScopeAppSet, app.DatabaseName) >= permission.Read ||
+			perms.CanReadResource(actorID, permission.ScopeApp, resourceID(app.ID)) {
+			app.PermissionLevel = server.appPermissionLevel(ctx, perms, actorID, app)
+			filtered = append(filtered, app)
 		}
 	}
 	return filtered, nil
@@ -3383,15 +3124,6 @@ func (server *Server) workflowWithPermissionLevel(ctx context.Context, actorID s
 	return workflow
 }
 
-func (server *Server) formWithPermissionLevel(ctx context.Context, actorID string, form systemdb.FormDefinition) systemdb.FormDefinition {
-	perms, err := server.system.EffectiveGrantsForSubject(ctx, actorID)
-	if err != nil {
-		return form
-	}
-	form.PermissionLevel = server.formPermissionLevel(ctx, perms, actorID, form)
-	return form
-}
-
 func (server *Server) workflowPermissionLevel(ctx context.Context, perms permission.Set, actorID string, workflow systemdb.WorkflowDefinition) permission.Level {
 	if server.isDatabaseOwner(ctx, actorID, workflow.DatabaseName) {
 		return permission.Write
@@ -3402,13 +3134,13 @@ func (server *Server) workflowPermissionLevel(ctx context.Context, perms permiss
 	)
 }
 
-func (server *Server) formPermissionLevel(ctx context.Context, perms permission.Set, actorID string, form systemdb.FormDefinition) permission.Level {
-	if server.isDatabaseOwner(ctx, actorID, form.DatabaseName) {
+func (server *Server) appPermissionLevel(ctx context.Context, perms permission.Set, actorID string, app systemdb.AppDefinition) permission.Level {
+	if server.isDatabaseOwner(ctx, actorID, app.DatabaseName) {
 		return permission.Write
 	}
 	return maxPermissionLevel(
-		perms.ResourceLevel(actorID, permission.ScopeFormSet, form.DatabaseName),
-		perms.ResourceLevel(actorID, permission.ScopeForm, resourceID(form.ID)),
+		perms.ResourceLevel(actorID, permission.ScopeAppSet, app.DatabaseName),
+		perms.ResourceLevel(actorID, permission.ScopeApp, resourceID(app.ID)),
 	)
 }
 
@@ -3585,74 +3317,6 @@ func secretLengths(secrets map[string]string) map[string]int {
 		lengths[key] = len(value)
 	}
 	return lengths
-}
-
-func (server *Server) formDefinitionsWithFileScripts(ctx context.Context, forms []systemdb.FormDefinition) ([]systemdb.FormDefinition, error) {
-	if server.codeFiles == nil {
-		return forms, nil
-	}
-	loaded := make([]systemdb.FormDefinition, 0, len(forms))
-	for _, form := range forms {
-		updated, err := server.formDefinitionWithFileScript(ctx, form)
-		if err != nil {
-			return nil, err
-		}
-		loaded = append(loaded, updated)
-	}
-	return loaded, nil
-}
-
-func (server *Server) formDefinitionWithFileScript(ctx context.Context, form systemdb.FormDefinition) (systemdb.FormDefinition, error) {
-	if server.codeFiles == nil {
-		return form, nil
-	}
-	script, ok, err := server.codeFiles.LoadFormScript(ctx, form)
-	if err != nil {
-		return systemdb.FormDefinition{}, err
-	}
-	if ok {
-		form.Script = script
-	}
-	return form, nil
-}
-
-func (server *Server) saveFormDefinition(ctx context.Context, actorID string, form systemdb.FormDefinition) (systemdb.FormDefinition, error) {
-	var previous *systemdb.FormDefinition
-	if form.ID != 0 {
-		existing, err := server.system.Form(ctx, form.ID)
-		if err != nil {
-			return systemdb.FormDefinition{}, err
-		}
-		previous = &existing
-	}
-	saved, err := server.system.SaveForm(ctx, form)
-	if err != nil {
-		return systemdb.FormDefinition{}, err
-	}
-	if server.codeFiles == nil {
-		return saved, nil
-	}
-	paths := []string{server.codeFiles.FormScriptPath(saved)}
-	if err := server.codeFiles.SaveFormScript(ctx, saved); err != nil {
-		return systemdb.FormDefinition{}, err
-	}
-	if previous != nil && (previous.DatabaseName != saved.DatabaseName || previous.Name != saved.Name) {
-		paths = append(paths, server.codeFiles.FormScriptPath(*previous))
-		if err := server.codeFiles.DeleteFormScript(ctx, *previous); err != nil {
-			return systemdb.FormDefinition{}, err
-		}
-	}
-	summary := "saved form " + saved.DatabaseName + "/" + saved.Name
-	action := "form.save"
-	if previous == nil {
-		summary = "created form " + saved.DatabaseName + "/" + saved.Name
-		action = "form.create"
-	} else if previous.DatabaseName != saved.DatabaseName || previous.Name != saved.Name {
-		summary = "renamed form " + previous.DatabaseName + "/" + previous.Name + " to " + saved.DatabaseName + "/" + saved.Name
-		action = "form.rename"
-	}
-	server.notifyRepositoryChange(ctx, actorID, action, summary, paths...)
-	return saved, nil
 }
 
 func (server *Server) grantResourceOwner(w http.ResponseWriter, r *http.Request, actorID string, scope permission.Scope, id int64) bool {

@@ -24,8 +24,8 @@ import {
 import { useState, type ReactElement, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import {
+  type AppDefinition,
   type DatabaseMetadata,
-  type FormDefinition,
   type PermissionGrant,
   type RoleDefinition,
   type RoleMember,
@@ -43,8 +43,8 @@ const permissionLevels = [0, 1, 2] as const;
 const fieldBits = [1, 2, 4] as const;
 
 type PermissionPanelProps = {
+  apps: AppDefinition[];
   database: DatabaseMetadata;
-  forms: FormDefinition[];
   grants: PermissionGrant[];
   members: RoleMember[];
   memberOptions: AuthUser[];
@@ -67,8 +67,8 @@ type PermissionPanelProps = {
 };
 
 export function PermissionPanel({
+  apps,
   database,
-  forms,
   grants,
   members,
   memberOptions,
@@ -124,8 +124,8 @@ export function PermissionPanel({
       </div>
       <PermissionMatrix
         key={role.name}
+        apps={apps}
         database={database}
-        forms={forms}
         grants={grants}
         onGrantChange={onGrantChange}
         workflows={workflows}
@@ -299,24 +299,26 @@ function MemberPopover({
   );
 }
 
+type MatrixTab = "tables" | "workflows" | "apps";
+
 function PermissionMatrix({
+  apps,
   database,
-  forms,
   grants,
   onGrantChange,
   workflows
-}: Pick<PermissionPanelProps, "database" | "forms" | "grants" | "onGrantChange" | "workflows">) {
+}: Pick<PermissionPanelProps, "apps" | "database" | "grants" | "onGrantChange" | "workflows">) {
   const { t } = useTranslation();
-  const [tab, setTab] = useState<"tables" | "workflows" | "forms">("tables");
+  const [tab, setTab] = useState<MatrixTab>("tables");
   const [selectedTableName, setSelectedTableName] = useState("");
   const selectedTable = database.tables.find((table) => table.name === selectedTableName) ?? database.tables[0];
 
   return (
     <div className="permission-card permission-matrix">
-      <TabList selectedValue={tab} onTabSelect={(_, data) => setTab(data.value as "tables" | "workflows" | "forms")}>
+      <TabList selectedValue={tab} onTabSelect={(_, data) => setTab(data.value as MatrixTab)}>
         <Tab value="tables">{t("permission.tables")}</Tab>
         <Tab value="workflows">{t("permission.workflows")}</Tab>
-        <Tab value="forms">{t("permission.forms")}</Tab>
+        <Tab value="apps">{t("permission.apps")}</Tab>
       </TabList>
       {tab === "tables" &&
         (selectedTable ? (
@@ -359,19 +361,24 @@ function PermissionMatrix({
           onGrantChange={onGrantChange}
         />
       )}
-      {tab === "forms" && (
+      {tab === "apps" && (
         <ResourceLevelSection
-          allLabel={t("permission.formSet")}
-          setScope="form_set"
+          allLabel={t("permission.appSet")}
+          setScope="app_set"
           setResource={database.name}
-          itemScope="form"
+          itemScope="app"
           grants={grants}
-          items={forms.map((form) => ({
-            key: String(form.id ?? form.name),
-            label: form.name,
-            resource: String(form.id ?? 0),
+          items={apps.map((app) => ({
+            key: String(app.id),
+            label: app.title || app.name,
+            resource: String(app.id),
             field: ""
           }))}
+          levelLabels={{
+            0: t("permission.appLevels.none"),
+            1: t("permission.appLevels.read"),
+            2: t("permission.appLevels.write")
+          }}
           onGrantChange={onGrantChange}
         />
       )}
@@ -559,10 +566,13 @@ function ReadToggleRow(props: { label: string; checked: boolean; onChange: (next
   );
 }
 
+type LevelLabels = Record<(typeof permissionLevels)[number], string>;
+
 // ResourceLevelSection is the flat none/read/write editor for workflows and
-// forms: an "all" preset row plus one row per resource, mutually exclusive.
+// apps: an "all" preset row plus one row per resource, mutually exclusive.
 function ResourceLevelSection(props: {
   allLabel: string;
+  levelLabels?: LevelLabels;
   setScope: PermissionGrant["scope"];
   setResource: string;
   itemScope: PermissionGrant["scope"];
@@ -588,7 +598,7 @@ function ResourceLevelSection(props: {
   return (
     <div className="permission-table-detail">
       <div className="permission-block">
-        <PermissionLevelSelect label={props.allLabel} value={setLevel} onChange={chooseAll} />
+        <PermissionLevelSelect label={props.allLabel} levelLabels={props.levelLabels} value={setLevel} onChange={chooseAll} />
         {props.items.length === 0 ? (
           <Text size={200}>{t("permission.noPartialItems")}</Text>
         ) : (
@@ -596,6 +606,7 @@ function ResourceLevelSection(props: {
             <PermissionLevelSelect
               key={item.key}
               label={item.label}
+              levelLabels={props.levelLabels}
               value={grantLevel(props.grants, props.itemScope, item.resource, item.field)}
               onChange={(level) => changeItem(item, level)}
             />
@@ -659,11 +670,12 @@ function normalizeMembers(members: RoleMember[]): string {
 function PermissionLevelSelect(props: {
   ariaLabel?: string;
   label: string;
+  levelLabels?: LevelLabels;
   value: PermissionGrant["level"];
   onChange: (level: PermissionGrant["level"]) => void;
 }) {
   const { t } = useTranslation();
-  const permissionLevelLabels: Record<(typeof permissionLevels)[number], string> = {
+  const permissionLevelLabels: LevelLabels = props.levelLabels ?? {
     0: t("permission.levels.none"),
     1: t("permission.levels.read"),
     2: t("permission.levels.write")

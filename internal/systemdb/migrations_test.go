@@ -274,3 +274,72 @@ func TestMigrateRewritesLegacyFieldGrantLevels(t *testing.T) {
 		t.Fatalf("expected seeded field_add grant for full field_set holders, got %#v", levels)
 	}
 }
+
+// formModel is the form table as shipped before apps replaced forms.
+type formModel struct {
+	ID             int64  `gorm:"primaryKey;autoIncrement"`
+	DatabaseName   string `gorm:"uniqueIndex:idx_form_database_name;not null"`
+	Name           string `gorm:"uniqueIndex:idx_form_database_name;not null"`
+	Script         string `gorm:"not null"`
+	PublishedToken string `gorm:"index"`
+	CreatorID      string `gorm:"index;not null;default:''"`
+	CreatedAt      int64  `gorm:"autoCreateTime:milli"`
+	UpdatedAt      int64  `gorm:"autoUpdateTime:milli"`
+}
+
+func TestMigrateDropsFormsAndTheirGrants(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "system.sqlite")
+
+	// A version-5 database: the current models minus apps, plus forms.
+	previous := migrations
+	migrations = migrations[:5]
+	orm, err := gorm.Open(sqlite.Open(path), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	db := &DB{orm: orm}
+	if err := db.runSchemaMigrations(ctx); err != nil {
+		t.Fatal(err)
+	}
+	migrations = previous
+	if err := orm.AutoMigrate(&userModel{}, &permissionGrantModel{}, &workflowModel{}, &formModel{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := orm.Create(&formModel{DatabaseName: "db", Name: "intake", Script: "function render() {}", CreatorID: "u1"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	grants := []permissionGrantModel{
+		{SubjectID: "u1", Scope: "form", Resource: "1", Level: permission.Write},
+		{SubjectID: "u2", Scope: "form_set", Resource: "db", Level: permission.Read},
+		{SubjectID: "u2", Scope: permission.ScopeWorkflowSet, Resource: "db", Level: permission.Read},
+	}
+	if err := orm.Create(&grants).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	upgraded, err := Open(ctx, path)
+	if err != nil {
+		t.Fatalf("expected version-5 database to open, got %v", err)
+	}
+	defer upgraded.Close()
+	if got := schemaVersion(t, upgraded); got != currentSchemaVersion() {
+		t.Fatalf("expected schema version %d, got %d", currentSchemaVersion(), got)
+	}
+	if upgraded.orm.Migrator().HasTable("form_models") {
+		t.Fatal("expected form_models to be dropped")
+	}
+	var remaining []permissionGrantModel
+	if err := upgraded.orm.Order("id").Find(&remaining).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(remaining) != 1 || remaining[0].Scope != permission.ScopeWorkflowSet {
+		t.Fatalf("expected only the workflow grant to survive, got %#v", remaining)
+	}
+	if _, err := upgraded.CreateApp(ctx, AppDefinition{DatabaseName: "db", Name: "intake"}); err != nil {
+		t.Fatalf("expected apps table after upgrade, got %v", err)
+	}
+}

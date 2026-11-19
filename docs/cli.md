@@ -2,10 +2,10 @@
 
 `autablectl` is the command-line client for a running autable server. It talks
 to the same HTTP API as the web UI, with the permissions of the user who signed
-it in, so scripts and coding agents can read and change live tables,
-workflows, and forms instead of editing a repository checkout (the git
-repository autable pushes to is a backup; edits made there are never pulled
-back).
+it in, so scripts and coding agents can read and change live tables and
+workflows, and build hosted apps, instead of editing a repository checkout
+(the git repository autable pushes to is a backup; edits made there are never
+pulled back).
 
 Every command prints JSON on stdout and diagnostics on stderr. Exit codes:
 `0` success, `1` the request failed, `2` the command line was invalid.
@@ -71,7 +71,7 @@ autablectl rows history sales orders 42
 `rows list` prints `{"rows": [...], "total": N}`. A `--query` with a single
 `field` is wrapped into an `and` group.
 
-### Workflows and forms
+### Workflows
 
 ```sh
 autablectl workflow list sales
@@ -81,11 +81,9 @@ autablectl workflow set sales notify --var recipient=alice --unset-var old --ena
 autablectl workflow run sales notify --inputs '{"record_id":42}'
 autablectl workflow runs sales notify --limit 5
 autablectl workflow run-log sales notify <history_key>
-autablectl form list sales
-autablectl form get sales intake --script
 ```
 
-Workflows and forms are addressed by name, or by id. `workflow run` exits `1`
+Workflows are addressed by name, or by id. `workflow run` exits `1`
 when the run fails and still prints the run record with its error.
 
 ### Editing scripts: pull, status, push
@@ -99,8 +97,8 @@ autablectl push --dry-run
 autablectl push
 ```
 
-`pull` writes `workflow/<database>/<name>.js` and `form/<database>/<name>.js`,
-the same layout the server uses in its repository, and records in
+`pull` writes `workflow/<database>/<name>.js`, the same layout the server
+uses in its repository, and records in
 `.autable/state.json` which object each file belongs to, the object's
 `updated_at`, and the file's hash.
 
@@ -108,13 +106,50 @@ the same layout the server uses in its repository, and records in
   script and sends the current settings back unchanged; secrets are never sent
   or overwritten.
 - A new file `workflow/<database>/<name>.js` creates a workflow named
-  `<name>` (likewise for forms). The directory must match a database you can
-  read.
+  `<name>`. The directory must match a database you can read.
 - If the object changed on the server since the last pull (someone edited it
   in the web UI, or `workflow set` ran), `push` refuses with a conflict. `pull`
   never overwrites local edits, so: inspect the server version with
   `workflow get --script`, merge, then `push --force`.
 - Deleting a file does not delete anything on the server.
+
+### Apps
+
+An app is an ordinary frontend project that autable hosts at
+`/apps/<database>/<name>/` and that uses the HTTP API with the permissions of
+whoever opens it. See [design/apps.md](design/apps.md).
+
+```sh
+autablectl app init ./orders --database sales --name orders --title "Orders"
+cd orders && npm install
+autablectl app dev                       # npm run dev, /api proxied to the server as you
+autablectl app push -m "first version"   # npm run build, upload; prints the preview URL
+autablectl app publish sales orders 1
+autablectl app rollback sales orders     # publish the newest version below the current one
+autablectl app list sales
+autablectl app versions sales orders
+autablectl app pull sales orders ./orders-v1 --version 1
+autablectl app sdk                       # after tables change or the server is upgraded
+```
+
+- `app init` writes a Vite + React + TypeScript project (react-router, with
+  the router base name taken from the SDK's `basePath()`), the manifest
+  `autable.app.json`, the SDK from `GET /api/apps/sdk` into `src/autable/`,
+  and `src/autable/schema.ts` with the database's tables and fields as types.
+  The directory must be new or empty.
+- `app sdk` rewrites `src/autable/` from the server and updates `sdk` in the
+  manifest. Do not edit those files.
+- `app dev` runs `npm run dev` with `AUTABLE_SERVER` and `AUTABLE_TOKEN` set
+  from your login; the template's `vite.config.ts` proxies `/api` there with
+  the token.
+- `app push` runs `npm run build` (skip with `--no-build`) and uploads the
+  manifest, `dist/`, and the source. Source files are those
+  `git ls-files --cached --others --exclude-standard` lists when the project is
+  in a git work tree, otherwise everything except `node_modules`, `dist`,
+  `.git`, and `.autable` directories. A push never changes what users see
+  unless `--publish` is given.
+- `app pull` downloads the source of a version (default: the published one,
+  else the newest) into a new or empty directory.
 
 ### Agent skill
 

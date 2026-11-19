@@ -25,10 +25,10 @@ const (
 	accessReadWorkflow   accessAction = "read_workflow"
 	accessWriteWorkflow  accessAction = "write_workflow"
 	accessDeleteWorkflow accessAction = "delete_workflow"
-	accessCreateForm     accessAction = "create_form"
-	accessReadForm       accessAction = "read_form"
-	accessWriteForm      accessAction = "write_form"
-	accessDeleteForm     accessAction = "delete_form"
+	accessCreateApp      accessAction = "create_app"
+	accessReadApp        accessAction = "read_app"
+	accessWriteApp       accessAction = "write_app"
+	accessDeleteApp      accessAction = "delete_app"
 )
 
 type accessRequest struct {
@@ -38,7 +38,7 @@ type accessRequest struct {
 	Field      string
 	View       string
 	WorkflowID int64
-	FormID     int64
+	AppID      int64
 }
 
 func (server *Server) authorize(ctx context.Context, actorID string, request accessRequest) (permission.Set, error) {
@@ -83,14 +83,14 @@ func (server *Server) isAuthorized(ctx context.Context, actorID string, perms pe
 		return server.canAccessWorkflow(ctx, actorID, perms, request.WorkflowID, permission.Write, false)
 	case accessDeleteWorkflow:
 		return server.canAccessWorkflow(ctx, actorID, perms, request.WorkflowID, permission.Write, true)
-	case accessCreateForm:
-		return perms.CanWriteResource(actorID, permission.ScopeFormSet, request.Database)
-	case accessReadForm:
-		return server.canAccessForm(ctx, actorID, perms, request.FormID, permission.Read, false)
-	case accessWriteForm:
-		return server.canAccessForm(ctx, actorID, perms, request.FormID, permission.Write, false)
-	case accessDeleteForm:
-		return server.canAccessForm(ctx, actorID, perms, request.FormID, permission.Write, true)
+	case accessCreateApp:
+		return perms.CanWriteResource(actorID, permission.ScopeAppSet, request.Database)
+	case accessReadApp:
+		return server.canAccessApp(ctx, actorID, perms, request.AppID, permission.Read, false)
+	case accessWriteApp:
+		return server.canAccessApp(ctx, actorID, perms, request.AppID, permission.Write, false)
+	case accessDeleteApp:
+		return server.canAccessApp(ctx, actorID, perms, request.AppID, permission.Write, true)
 	default:
 		return false
 	}
@@ -113,21 +113,21 @@ func (server *Server) canAccessWorkflow(ctx context.Context, actorID string, per
 	return perms.ResourceLevel(actorID, permission.ScopeWorkflow, resourceID(workflowID)) >= level
 }
 
-func (server *Server) canAccessForm(ctx context.Context, actorID string, perms permission.Set, formID int64, level permission.Level, deleteOnly bool) bool {
-	form, err := server.system.Form(ctx, formID)
+func (server *Server) canAccessApp(ctx context.Context, actorID string, perms permission.Set, appID int64, level permission.Level, deleteOnly bool) bool {
+	app, err := server.system.App(ctx, appID)
 	if err != nil {
 		return false
 	}
 	if deleteOnly {
-		return server.isDatabaseOwner(ctx, actorID, form.DatabaseName)
+		return server.isDatabaseOwner(ctx, actorID, app.DatabaseName)
 	}
-	if server.isDatabaseOwner(ctx, actorID, form.DatabaseName) {
+	if server.isDatabaseOwner(ctx, actorID, app.DatabaseName) {
 		return true
 	}
-	if perms.ResourceLevel(actorID, permission.ScopeFormSet, form.DatabaseName) >= level {
+	if perms.ResourceLevel(actorID, permission.ScopeAppSet, app.DatabaseName) >= level {
 		return true
 	}
-	return perms.ResourceLevel(actorID, permission.ScopeForm, resourceID(formID)) >= level
+	return perms.ResourceLevel(actorID, permission.ScopeApp, resourceID(appID)) >= level
 }
 
 func (server *Server) requireAuthorized(w http.ResponseWriter, r *http.Request, actorID string, request accessRequest) (permission.Set, bool) {
@@ -153,8 +153,8 @@ func (server *Server) requireDatabaseOrSetWrite(w http.ResponseWriter, r *http.R
 	switch scope {
 	case permission.ScopeWorkflowSet:
 		action = accessCreateWorkflow
-	case permission.ScopeFormSet:
-		action = accessCreateForm
+	case permission.ScopeAppSet:
+		action = accessCreateApp
 	case permission.ScopeFieldSet:
 		action = accessWriteFieldSet
 	case permission.ScopeViewSet:

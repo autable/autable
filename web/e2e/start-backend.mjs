@@ -11,6 +11,10 @@ const repositoryPath = join(runtimeDir, "workspace");
 const metadataPath = join(repositoryPath, "metadata", "main.yml");
 const configPath = join(runtimeDir, "config.yml");
 
+// JSON strings are valid YAML double-quoted scalars, and escape the
+// backslashes of Windows paths.
+const yamlString = (value) => JSON.stringify(value);
+
 rmSync(runtimeDir, { force: true, recursive: true });
 mkdirSync(join(runtimeDir, "data"), { recursive: true });
 mkdirSync(join(repositoryPath, "metadata"), { recursive: true });
@@ -21,10 +25,10 @@ writeFileSync(
     "server:",
     '  address: "127.0.0.1:18081"',
     "data:",
-    `  path: "${join(runtimeDir, "data")}"`,
+    `  path: ${yamlString(join(runtimeDir, "data"))}`,
     "repository:",
     "  enabled: false",
-    `  path: "${repositoryPath}"`,
+    `  path: ${yamlString(repositoryPath)}`,
     "auth:",
     "  password:",
     "    enabled: true",

@@ -29,8 +29,8 @@ const (
 	ScopeView        Scope = "view"
 	ScopeWorkflowSet Scope = "workflow_set"
 	ScopeWorkflow    Scope = "workflow"
-	ScopeFormSet     Scope = "form_set"
-	ScopeForm        Scope = "form"
+	ScopeAppSet      Scope = "app_set"
+	ScopeApp         Scope = "app"
 	// ScopeFile guards viewing and uploading files bound to a table; the
 	// resource is db.table.
 	ScopeFile Scope = "file"

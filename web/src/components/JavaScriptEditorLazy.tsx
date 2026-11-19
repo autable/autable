@@ -2,7 +2,7 @@ import { Suspense, lazy } from "react";
 import { useTranslation } from "react-i18next";
 import type { JavaScriptEditorProps } from "./JavaScriptEditor";
 
-// Monaco is only needed by the workflow and form editors, so it is fetched on
+// Monaco is only needed by the workflow editor, so it is fetched on
 // first render rather than shipped in the app bundle. setupMonaco resolves
 // before the editor mounts so the bundled copy wins over the CDN loader.
 const MonacoBackedEditor = lazy(async () => {

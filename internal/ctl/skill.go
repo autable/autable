@@ -29,7 +29,8 @@ func skillSource(release string) string {
 }
 
 func renderSkill(release string) string {
-	return strings.NewReplacer("{{SOURCE}}", skillSource(release), "{{VERSION}}", release).Replace(skillTemplate)
+	// A checkout with CRLF line endings embeds them; the skill is always LF.
+	return strings.NewReplacer("{{SOURCE}}", skillSource(release), "{{VERSION}}", release).Replace(strings.ReplaceAll(skillTemplate, "\r\n", "\n"))
 }
 
 func defaultSkillDir() (string, error) {

@@ -18,7 +18,7 @@ import (
 )
 
 // A pulled directory mirrors the repository layout the server writes
-// (workflow/<database>/<name>.js, form/<database>/<name>.js) and records in
+// (workflow/<database>/<name>.js) and records in
 // .autable/state.json which server object each file came from, the
 // object's updated_at at that moment, and the file's hash. The hash tells
 // which files were edited locally; updated_at tells whether someone changed
@@ -26,7 +26,6 @@ import (
 
 const (
 	kindWorkflow = "workflow"
-	kindForm     = "form"
 	stateDir     = ".autable"
 	stateFile    = "state.json"
 )
@@ -187,13 +186,6 @@ func runPull(a *app, args []string) error {
 		for _, workflow := range workflows {
 			add(kindWorkflow, workflow.remoteScript)
 		}
-		forms, err := listForms(c, database)
-		if err != nil {
-			return fmt.Errorf("list forms of %s: %w", database, err)
-		}
-		for _, form := range forms {
-			add(kindForm, form.remoteScript)
-		}
 	}
 
 	paths := make([]string, 0, len(remote))
@@ -270,7 +262,7 @@ type change struct {
 func localChanges(dir string, state syncState, databases []string) ([]change, error) {
 	changes := []change{}
 	seen := map[string]bool{}
-	for _, kind := range []string{kindWorkflow, kindForm} {
+	for _, kind := range []string{kindWorkflow} {
 		root := filepath.Join(dir, kind)
 		err := filepath.WalkDir(root, func(file string, entry fs.DirEntry, err error) error {
 			if errors.Is(err, os.ErrNotExist) && file == root {
@@ -453,27 +445,6 @@ func pushChange(c *client, item change, dryRun, force bool) (remoteScript, error
 			return current.remoteScript, nil
 		}
 		err := c.call(http.MethodPost, "/api/workflows", current.saveRequest(), &saved)
-		return saved, err
-	case kindForm:
-		var current remoteForm
-		if item.Status == "modified" {
-			if err := c.call(http.MethodGet, apiPath("forms", fmt.Sprint(item.ID)), nil, &current); err != nil {
-				return saved, err
-			}
-			if current.UpdatedAt != item.entry.UpdatedAt && !force {
-				return saved, errConflict
-			}
-		} else {
-			if _, err := findForm(c, item.Database, item.Name); err == nil {
-				return saved, errors.New("a form with this name already exists on the server; run pull")
-			}
-			current = remoteForm{remoteScript{DatabaseName: item.Database, Name: item.Name}}
-		}
-		current.Script = item.script
-		if dryRun {
-			return current.remoteScript, nil
-		}
-		err := c.call(http.MethodPost, "/api/forms", current.saveRequest(), &saved)
 		return saved, err
 	}
 	return saved, fmt.Errorf("unknown kind %q", item.Kind)

@@ -21,7 +21,7 @@ type Database struct {
 	Tables                  []Table `yaml:"tables" json:"tables"`
 	PermissionLevel         int     `yaml:"-" json:"permission_level"`
 	WorkflowPermissionLevel int     `yaml:"-" json:"workflow_permission_level"`
-	FormPermissionLevel     int     `yaml:"-" json:"form_permission_level"`
+	AppPermissionLevel      int     `yaml:"-" json:"app_permission_level"`
 }
 
 type Table struct {

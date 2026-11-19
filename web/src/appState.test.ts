@@ -85,10 +85,15 @@ describe("appState", () => {
       workflowTab: "history",
       workflowRunKey: "run/1"
     });
-    expect(parseWorkspaceRoute("/databases/workspace/forms/9")).toEqual({
+    expect(parseWorkspaceRoute("/databases/workspace/apps")).toEqual({
       databaseName: "workspace",
-      view: "form",
-      formID: 9
+      view: "app",
+      appName: undefined
+    });
+    expect(parseWorkspaceRoute("/databases/workspace/apps/orders")).toEqual({
+      databaseName: "workspace",
+      view: "app",
+      appName: "orders"
     });
     expect(parseWorkspaceRoute("/databases/workspace/permissions/admin")).toEqual({
       databaseName: "workspace",
@@ -116,8 +121,9 @@ describe("appState", () => {
       workflowTab: "history",
       workflowRunKey: "run/1"
     })).toBe("/databases/workspace/workflows/3/history/run%2F1");
-    expect(buildWorkspacePath({ databaseName: "workspace", view: "form", formID: 4 })).toBe(
-      "/databases/workspace/forms/4"
+    expect(buildWorkspacePath({ databaseName: "workspace", view: "app" })).toBe("/databases/workspace/apps");
+    expect(buildWorkspacePath({ databaseName: "sales ops", view: "app", appName: "orders" })).toBe(
+      "/databases/sales%20ops/apps/orders"
     );
     expect(buildWorkspacePath({ databaseName: "workspace", view: "permission", roleName: "owner/admin" })).toBe(
       "/databases/workspace/permissions/owner%2Fadmin"

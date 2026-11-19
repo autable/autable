@@ -226,7 +226,7 @@ func (service *Service) setFailed(err error) {
 
 func (service *Service) commit(ctx context.Context, changes []Change) (string, bool, error) {
 	paths := []string{}
-	for _, path := range []string{"metadata", "workflow", "form"} {
+	for _, path := range []string{"metadata", "workflow"} {
 		if _, err := os.Stat(filepath.Join(service.options.Root, path)); err == nil {
 			paths = append(paths, path)
 		} else if err != nil && !os.IsNotExist(err) {

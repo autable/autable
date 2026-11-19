@@ -9,7 +9,7 @@ import (
 	"autable/internal/systemdb"
 )
 
-func TestStoreWritesWorkflowAndFormScripts(t *testing.T) {
+func TestStoreWritesWorkflowScripts(t *testing.T) {
 	ctx := context.Background()
 	store := NewStore(t.TempDir())
 
@@ -30,22 +30,6 @@ func TestStoreWritesWorkflowAndFormScripts(t *testing.T) {
 		t.Fatalf("unexpected workflow script: %s", workflowScript)
 	}
 
-	form := systemdb.FormDefinition{
-		ID:           2,
-		DatabaseName: "workspace",
-		Name:         "quick status",
-		Script:       "function render(api, root) { root.append(api.input({ field: 'email' }), api.submit('Save')); return { table: 'contacts' }; }",
-	}
-	if err := store.SaveFormScript(ctx, form); err != nil {
-		t.Fatal(err)
-	}
-	formScript, err := os.ReadFile(filepath.Join(store.root, "form", "workspace", "quick-status.js"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(formScript) != form.Script {
-		t.Fatalf("unexpected form script: %s", formScript)
-	}
 }
 
 func TestStorePreservesReadableUnicodeNames(t *testing.T) {

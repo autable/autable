@@ -59,24 +59,64 @@ const workflowFixture = [
   }
 ];
 
-const formFixture = [
+const appFixture = [
   {
     id: 1,
     database_name: "workspace",
-    name: "contact-intake",
-    script:
-      'function render(api, root) { root.append(api.input({ field: "name", label: "Name" }), api.submit("Create record")); return { table: "contacts" }; }',
-    permission_level: 2
+    name: "orders",
+    title: "Orders",
+    published_version: 2,
+    latest_version: 3,
+    creator_id: "test-user",
+    permission_level: 2,
+    created_at: 1781600000000,
+    updated_at: 1781603000000,
+    url: "/apps/workspace/orders/"
   },
   {
     id: 2,
     database_name: "workspace",
-    name: "quick-status",
-    script:
-      'function render(api, root) { root.append(api.select({ field: "status", label: "Status", options: ["Active", "Review"] }), api.submit("Update status")); return { table: "contacts" }; }',
-    permission_level: 2
+    name: "stock-check",
+    title: "Stock check",
+    published_version: 0,
+    latest_version: 1,
+    creator_id: "test-user",
+    permission_level: 2,
+    created_at: 1781600000000,
+    updated_at: 1781600000000,
+    url: "/apps/workspace/stock-check/"
   }
 ];
+
+function appVersionFixture(appName: string, version: number, extra: Record<string, unknown> = {}) {
+  return {
+    app_id: 1,
+    version,
+    sdk: "1.0",
+    message: `change ${version}`,
+    size: 2048 * version,
+    created_by: "test-user",
+    created_at: 1781600000000 + version,
+    supported: true,
+    preview_url: `/apps/workspace/${appName}/@${version}/`,
+    ...extra
+  };
+}
+
+function appDetailFixture(app = appFixture[0]) {
+  return {
+    app,
+    versions:
+      app.name === "orders"
+        ? [
+            appVersionFixture("orders", 1),
+            appVersionFixture("orders", 2),
+            appVersionFixture("orders", 3, { sdk: "9.0", supported: false, sdk_error: "app SDK 9.0 is newer than this server's SDK 1.0" })
+          ]
+        : [appVersionFixture(app.name, 1)],
+    sdk: { version: "1.0", min_major: 1 }
+  };
+}
 
 const runnersFixture = {
   token: { exists: true, created_at: 1781600000000 },
@@ -194,8 +234,14 @@ async function defaultFetch(input: RequestInfo | URL, init?: RequestInit): Promi
     }
     return jsonResponse(workflowFixture);
   }
-  if (url === "/api/databases/workspace/forms") {
-    return jsonResponse(formFixture);
+  if (url === "/api/databases/workspace/apps") {
+    return jsonResponse(appFixture);
+  }
+  if (url === "/api/databases/workspace/apps/orders") {
+    return jsonResponse(appDetailFixture(appFixture[0]));
+  }
+  if (url === "/api/databases/workspace/apps/stock-check") {
+    return jsonResponse(appDetailFixture(appFixture[1]));
   }
   if (url === "/api/databases/workspace/roles") {
     return jsonResponse([]);
@@ -308,10 +354,11 @@ describe("App", () => {
     await userEvent.click(await screen.findByRole("button", { name: /welcome-contact/ }));
     expect(window.location.pathname).toBe("/databases/workspace/workflows/2");
 
-    await userEvent.click(await screen.findByRole("button", { name: /^Form$/ }));
-    expect(window.location.pathname).toBe("/databases/workspace/forms");
-    await userEvent.click(await screen.findByRole("button", { name: /quick-status/ }));
-    expect(window.location.pathname).toBe("/databases/workspace/forms/2");
+    await userEvent.click(await screen.findByRole("button", { name: /^App$/ }));
+    expect(window.location.pathname).toBe("/databases/workspace/apps");
+    await userEvent.click(await within(await screen.findByLabelText("App list")).findByRole("button", { name: /Stock check/ }));
+    expect(window.location.pathname).toBe("/databases/workspace/apps/stock-check");
+    expect(await screen.findByRole("table", { name: "Versions" })).toBeInTheDocument();
   });
 
   it("restores a workspace route on initial render", async () => {
@@ -424,7 +471,7 @@ describe("App", () => {
     expect(requests).not.toContain("/api/metadata");
     expect(requests.some((url) => url.includes("/rows"))).toBe(false);
     expect(requests.some((url) => url.includes("/workflows"))).toBe(false);
-    expect(requests.some((url) => url.includes("/forms"))).toBe(false);
+    expect(requests.some((url) => url.includes("/apps"))).toBe(false);
     expect(requests.some((url) => url.includes("/roles"))).toBe(false);
   });
 
@@ -847,14 +894,11 @@ describe("App", () => {
     expect(screen.getByText("echo @ intranet")).toBeInTheDocument();
   });
 
-  it("renders read-only workflow and form resources as non-editable", async () => {
+  it("renders read-only workflow resources as non-editable", async () => {
     vi.mocked(fetch).mockImplementation(async (input, init) => {
       const url = String(input);
       if (url === "/api/databases/workspace/workflows") {
         return jsonResponse([{ ...workflowFixture[0], permission_level: 1 }]);
-      }
-      if (url === "/api/databases/workspace/forms") {
-        return jsonResponse([{ ...formFixture[0], permission_level: 1 }]);
       }
       return defaultFetch(input, init);
     });
@@ -867,12 +911,6 @@ describe("App", () => {
     expect(await screen.findByRole("button", { name: "Run" })).toBeDisabled();
     expect(await screen.findByLabelText("Workflow JavaScript")).toBeDisabled();
     expect(screen.getByRole("button", { name: "Edit config review_echo" })).toBeDisabled();
-
-    await userEvent.click(await screen.findByRole("button", { name: /^Form$/ }));
-    await screen.findByRole("button", { name: /contact-intake/ });
-    expect(await screen.findByRole("button", { name: "Save" })).toBeDisabled();
-    expect(await screen.findByLabelText("Form JavaScript")).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Create record" })).not.toBeDisabled();
   });
 
   it("runs workflows with only the explicit inputs JSON", async () => {
@@ -918,99 +956,128 @@ describe("App", () => {
     );
   });
 
-  it("shows form JavaScript and preview controls", async () => {
-    renderApp();
-    await waitForDefaultTableReady();
-    await userEvent.click(await screen.findByRole("button", { name: /^Form$/ }));
-    expect(await screen.findByRole("button", { name: /quick-status/ })).toBeInTheDocument();
-    await waitFor(() => expect((screen.getByLabelText("Form JavaScript") as HTMLTextAreaElement).value).toContain("root.append"));
-    await userEvent.type(screen.getByRole("textbox", { name: "Name" }), "Margaret Hamilton");
-    expect(screen.getByRole("button", { name: "Create record" })).toBeInTheDocument();
-    await userEvent.click(await findEnabledButton("Create record"));
-    // Submitting opens the modal result dialog; close it before leaving the
-    // form, as a user would, since the page behind a modal is not reachable.
-    const resultDialog = await findDialog("Result");
-    await userEvent.click(within(resultDialog).getByRole("button", { name: "Close" }));
-    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Result" })).not.toBeInTheDocument());
-    await userEvent.click(await screen.findByRole("button", { name: /^Table$/ }));
-    await waitFor(() => expect(screen.getAllByText("4 of 4 records").length).toBeGreaterThan(0));
+  it("lists apps with their published versions", async () => {
+    renderApp("/databases/workspace/apps");
+    await waitForSignedIn();
+    const appTable = await screen.findByRole("table", { name: "Apps" });
+    const rows = within(appTable).getAllByRole("row");
+    expect(rows).toHaveLength(3);
+    expect(within(rows[1]).getByText("orders")).toBeInTheDocument();
+    expect(within(rows[1]).getByText("v2")).toBeInTheDocument();
+    expect(within(rows[1]).getByRole("link", { name: "Open Orders" })).toHaveAttribute("href", "/apps/workspace/orders/");
+    expect(within(rows[2]).getByText("Not published")).toBeInTheDocument();
+    expect(within(rows[2]).queryByRole("link")).not.toBeInTheDocument();
+    expect(screen.getByText("autablectl app init my-app --database workspace --name my-app")).toBeInTheDocument();
 
-    await userEvent.click(await screen.findByRole("button", { name: /^Form$/ }));
-    await userEvent.click(await screen.findByRole("button", { name: /quick-status/ }));
-    expect(screen.getByRole("button", { name: "Update status" })).toBeInTheDocument();
+    await userEvent.click(within(rows[1]).getByRole("button", { name: "Orders" }));
+    expect(window.location.pathname).toBe("/databases/workspace/apps/orders");
   });
 
-  it("submits forms to the table declared by the render definition", async () => {
-    let submittedURL = "";
+  it("explains how to create apps from the command line when there are none", async () => {
     vi.mocked(fetch).mockImplementation(async (input, init) => {
-      const url = String(input);
-      if (url === "/api/auth/me") {
-        return jsonResponse(authUserFixture);
-      }
-      if (url === "/api/auth/config") {
-        return jsonResponse({ password_enabled: true, oidc_enabled: false, oidc_providers: [] });
-      }
-      if (url === "/api/metadata") {
-        return jsonResponse({
-          databases: [
-            {
-              name: "workspace",
-              tables: [
-                {
-                  name: "projects",
-                  display_name: "Projects",
-                  fields: [{ name: "name", type: "string", deleted: false }],
-                  views: []
-                },
-                {
-                  name: "contacts",
-                  display_name: "Contacts",
-                  fields: [{ name: "name", type: "string", deleted: false }],
-                  views: []
-                }
-              ]
-            }
-          ]
-        });
-      }
-      if (url === "/api/tables/workspace/projects/rows") {
+      if (String(input) === "/api/databases/workspace/apps") {
         return jsonResponse([]);
       }
-      if (url === "/api/tables/workspace/contacts/rows" && init?.method === "POST") {
-        submittedURL = url;
-        return jsonResponse({ record_id: 9, values: JSON.parse(String(init.body)).values }, 201);
-      }
-      if (url === "/api/databases/workspace/workflows") {
-        return jsonResponse([]);
-      }
-      if (url === "/api/databases/workspace/forms") {
-        return jsonResponse([
-          {
-            id: 9,
-            database_name: "workspace",
-            name: "targeted-contact",
-            script: "function render(api, root) { root.append(api.input({ field: 'name', label: 'Name' }), api.submit('Create contact')); return { table: 'contacts' }; }"
-          }
-        ]);
-      }
-      if (url === "/api/databases/workspace/roles") {
-        return jsonResponse([]);
-      }
-      if (url === "/api/workflow/nodes") {
-        return jsonResponse(workflowNodeFixture);
-      }
-      return jsonResponse({ error: `unhandled ${url}` }, 404);
+      return defaultFetch(input, init);
     });
 
-    renderApp();
-    await waitForSignedIn();
-    await userEvent.click(await screen.findByRole("button", { name: /^Form$/ }));
-    await screen.findByRole("button", { name: /targeted-contact/ });
-    await userEvent.type(screen.getByRole("textbox", { name: "Name" }), "Ada");
-    await userEvent.click(await findEnabledButton("Create contact"));
+    renderApp("/databases/workspace/apps");
+    expect(await screen.findByText("No apps yet")).toBeInTheDocument();
+    expect(screen.getByText("autablectl app init my-app --database workspace --name my-app")).toBeInTheDocument();
+    expect(screen.getByText(/autablectl app push --publish/)).toBeInTheDocument();
+    expect(screen.getByText("autablectl skill install")).toBeInTheDocument();
+  });
 
-    await waitFor(() => expect(submittedURL).toBe("/api/tables/workspace/contacts/rows"));
-    expect(screen.getAllByText("Form created contacts record 9").length).toBeGreaterThan(0);
+  it("shows app versions newest first with preview, publish, rollback and source actions", async () => {
+    const publishBodies: unknown[] = [];
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url === "/api/databases/workspace/apps/orders/publish" && init?.method === "POST") {
+        publishBodies.push(JSON.parse(String(init.body)));
+        return jsonResponse({ ...appFixture[0], published_version: 1 });
+      }
+      return defaultFetch(input, init);
+    });
+
+    renderApp("/databases/workspace/apps/orders");
+    const versionTable = await screen.findByRole("table", { name: "Versions" });
+    const rows = within(versionTable).getAllByRole("row").slice(1);
+    expect(rows.map((row) => row.getAttribute("aria-label"))).toEqual(["v3", "v2", "v1"]);
+    expect(screen.getByRole("link", { name: "Open Orders" })).toHaveAttribute("href", "/apps/workspace/orders/");
+
+    // v3 was built against an SDK this server does not support.
+    expect(within(rows[0]).getByText("Unsupported")).toBeInTheDocument();
+    expect(within(rows[0]).getByRole("button", { name: "Publish version 3" })).toBeDisabled();
+    // v2 is the published one and carries the marker instead of a publish action.
+    expect(within(rows[1]).getByText("Published")).toBeInTheDocument();
+    expect(within(rows[1]).queryByRole("button", { name: /Publish version 2|Roll back to version 2/ })).not.toBeInTheDocument();
+    expect(within(rows[2]).getByRole("link", { name: "Preview version 1" })).toHaveAttribute("href", "/apps/workspace/orders/@1/");
+    expect(within(rows[2]).getByRole("link", { name: "Download source of version 1" })).toHaveAttribute(
+      "href",
+      "/api/databases/workspace/apps/orders/versions/1/source"
+    );
+
+    await userEvent.click(within(rows[2]).getByRole("button", { name: "Roll back to version 1" }));
+    const dialog = await findDialog("Roll back app");
+    expect(within(dialog).getByText(/Roll back to version 1\?/)).toBeInTheDocument();
+    expect(publishBodies).toEqual([]);
+    await userEvent.click(within(dialog).getByRole("button", { name: "Roll back" }));
+    await waitFor(() => expect(publishBodies).toEqual([{ version: 1 }]));
+    expect((await screen.findAllByText("Rolled back Orders to version 1")).length).toBeGreaterThan(0);
+  });
+
+  it("shows read-only app users the open link but no actions", async () => {
+    const readOnlyApp = { ...appFixture[0], permission_level: 1 };
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url === "/api/metadata") {
+        return jsonResponse({ databases: [{ ...catalogFixture.databases[0], permission_level: 0 }] });
+      }
+      if (url === "/api/databases/workspace/apps") {
+        return jsonResponse([readOnlyApp]);
+      }
+      if (url === "/api/databases/workspace/apps/orders") {
+        return jsonResponse(appDetailFixture(readOnlyApp));
+      }
+      return defaultFetch(input, init);
+    });
+
+    renderApp("/databases/workspace/apps/orders");
+    const versionTable = await screen.findByRole("table", { name: "Versions" });
+    expect(screen.getByRole("link", { name: "Open Orders" })).toBeInTheDocument();
+    expect(within(versionTable).queryByRole("button")).not.toBeInTheDocument();
+    expect(within(versionTable).queryByRole("link")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Delete app" })).not.toBeInTheDocument();
+  });
+
+  it("deletes an app as the database owner after confirmation", async () => {
+    let deleted = false;
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url === "/api/databases/workspace/apps/orders" && init?.method === "DELETE") {
+        deleted = true;
+        return new Response(null, { status: 204 });
+      }
+      if (url === "/api/databases/workspace/apps" && deleted) {
+        return jsonResponse([appFixture[1]]);
+      }
+      return defaultFetch(input, init);
+    });
+
+    renderApp("/databases/workspace/apps/orders");
+    await screen.findByRole("table", { name: "Versions" });
+    await userEvent.click(screen.getByRole("button", { name: "Delete app" }));
+    const dialog = await findDialog("Delete app");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(deleted).toBe(true));
+    await waitFor(() => expect(window.location.pathname).toBe("/databases/workspace/apps"));
+    expect(await screen.findByRole("table", { name: "Apps" })).toBeInTheDocument();
+  });
+
+  it("returns unknown app routes to the app list", async () => {
+    renderApp("/databases/workspace/apps/missing");
+    await waitFor(() => expect(window.location.pathname).toBe("/databases/workspace/apps"));
+    expect(await screen.findByRole("table", { name: "Apps" })).toBeInTheDocument();
   });
 
   it("hides the built-in all view when the server omits it and falls back to the first view", async () => {

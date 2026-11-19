@@ -2,6 +2,7 @@ import { expect, type Page, test } from "@playwright/test";
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { appBundle } from "./appBundle";
 
 type AuthUser = {
   id: string;
@@ -46,7 +47,7 @@ test("does not request protected workspace resources before login", async ({ pag
   expect(apiPaths).not.toContain("/api/metadata");
   expect(apiPaths.some((path) => path.includes("/rows"))).toBe(false);
   expect(apiPaths.some((path) => path.includes("/workflows"))).toBe(false);
-  expect(apiPaths.some((path) => path.includes("/forms"))).toBe(false);
+  expect(apiPaths.some((path) => path.includes("/apps"))).toBe(false);
   expect(apiPaths.some((path) => path.includes("/roles"))).toBe(false);
 });
 
@@ -112,8 +113,8 @@ async function createRows(page: Page, databaseName: string, tableName: string, r
   );
 }
 
-async function fillMonacoEditor(page: Page, label: string, value: string) {
-  const testID = label === "Workflow JavaScript" ? "workflow-js-editor" : "form-js-editor";
+async function fillMonacoEditor(page: Page, value: string) {
+  const testID = "workflow-js-editor";
   const editor = await waitForMonacoEditor(page, testID);
   await editor.evaluate((element, nextValue) => {
     const win = element.ownerDocument.defaultView as Window & {
@@ -138,9 +139,14 @@ async function fillMonacoEditor(page: Page, label: string, value: string) {
   await expect.poll(() => monacoEditorValueByTestID(page, testID)).toBe(value);
 }
 
-async function monacoEditorValue(page: Page, label: string) {
-  const testID = label === "Workflow JavaScript" ? "workflow-js-editor" : "form-js-editor";
-  return monacoEditorValueByTestID(page, testID);
+// uploadApp pushes a hosted app version the way `autablectl app push` does.
+async function uploadApp(page: Page, databaseName: string, name: string, title: string) {
+  const response = await page.request.post(`/api/databases/${databaseName}/apps/${name}/versions`, {
+    headers: { "Content-Type": "application/gzip" },
+    data: appBundle({ database: databaseName, name, title, heading: title })
+  });
+  expect(response.ok(), await response.text()).toBe(true);
+  return ((await response.json()) as { app: { id: number; name: string; title: string } }).app;
 }
 
 async function waitForMonacoEditor(page: Page, testID: string) {
@@ -255,12 +261,6 @@ async function setupWorkspace(page: Page): Promise<WorkspaceSetup> {
     secrets: {},
     variables: {}
   });
-  await api(page, "POST", `/api/databases/${databaseName}/forms`, {
-    database_name: databaseName,
-    name: `quick-status-${suffix}`,
-    script:
-      "function render(api, root) { root.append(api.input({ field: 'name', label: 'Name' }), api.input({ field: 'email', label: 'Email', type: 'email' }), api.select({ field: 'status', label: 'Status', options: ['Active', 'Review'] }), api.submit('Create record')); return { table: 'contacts' }; }"
-  });
   // Selection is scoped to the URL route, so land on the database directly.
   await page.goto(`/databases/${databaseName}`);
   await waitForTableReady(page, databaseName);
@@ -280,20 +280,20 @@ test("covers login modal and workspace navigation through the real backend", asy
   await expect(page.getByRole("button", { name: "Table", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Workflow", exact: true }).click();
   await expect(page.getByRole("button", { name: /welcome-contact/ })).toBeVisible();
-  await page.getByRole("button", { name: "Form", exact: true }).click();
-  await expect(page.getByRole("button", { name: /quick-status/ })).toBeVisible();
+  await page.getByRole("button", { name: "App", exact: true }).click();
+  await expect(page.getByText("No apps yet")).toBeVisible();
   await page.getByRole("button", { name: "Permission", exact: true }).click();
   await expect(page.getByRole("button", { name: "Create Role" })).toBeVisible();
 });
 
-test("shows database-owned workflow and form lists across table owners", async ({ page }) => {
+test("shows database-owned workflow and app lists across table owners", async ({ page }) => {
   const tableOwner = await registerUser(page);
   await api(page, "POST", "/api/auth/logout");
   const dbOwner = await registerUser(page);
   const suffix = `${Date.now()}-${sequence}`;
   const databaseName = `owned${suffix}`;
   const workflowName = `table-workflow-${suffix}`;
-  const formName = `table-form-${suffix}`;
+  const appTitle = `Table app ${suffix}`;
 
   await api(page, "POST", "/api/databases", {
     name: databaseName,
@@ -313,7 +313,7 @@ test("shows database-owned workflow and form lists across table owners", async (
   });
   await api(page, "POST", "/api/permissions/grants", {
     subject_id: tableOwner.id,
-    scope: "form_set",
+    scope: "app_set",
     resource: databaseName,
     field: "",
     level: 2
@@ -327,11 +327,7 @@ test("shows database-owned workflow and form lists across table owners", async (
     secrets: {},
     variables: {}
   });
-  await api(page, "POST", `/api/databases/${databaseName}/forms`, {
-    name: formName,
-    script:
-      "function render(api, root) { root.append(api.input({ field: 'name', label: 'Name' }), api.submit('Save')); return { table: 'contacts' }; }"
-  });
+  await uploadApp(page, databaseName, "table-app", appTitle);
 
   await api(page, "POST", "/api/auth/logout");
   await loginUser(page, dbOwner.email);
@@ -339,18 +335,19 @@ test("shows database-owned workflow and form lists across table owners", async (
   await waitForWorkspaceReady(page, databaseName);
   await page.getByRole("button", { name: "Workflow", exact: true }).click();
   await expect(page.getByRole("button", { name: workflowName })).toBeVisible();
-  await page.getByRole("button", { name: "Form", exact: true }).click();
-  await expect(page.getByRole("button", { name: formName })).toBeVisible();
+  await page.getByRole("button", { name: "App", exact: true }).click();
+  // Listed in the sidebar and in the app table.
+  await expect(page.getByRole("button", { name: appTitle })).toHaveCount(2);
 });
 
-test("hides workflow and form resources without resource permission", async ({ page }) => {
+test("hides workflow and app resources without resource permission", async ({ page }) => {
   const resourceUser = await registerUser(page);
   await api(page, "POST", "/api/auth/logout");
   const dbOwner = await registerUser(page);
   const suffix = `${Date.now()}-${sequence}`;
   const databaseName = `scoped${suffix}`;
   const workflowName = `private-workflow-${suffix}`;
-  const formName = `private-form-${suffix}`;
+  const appTitle = `Private app ${suffix}`;
 
   await api(page, "POST", "/api/databases", {
     name: databaseName,
@@ -367,11 +364,7 @@ test("hides workflow and form resources without resource permission", async ({ p
     secrets: {},
     variables: {}
   });
-  await api(page, "POST", `/api/databases/${databaseName}/forms`, {
-    name: formName,
-    script:
-      "function render(api, root) { root.append(api.input({ field: 'name', label: 'Name' }), api.submit('Save')); return { table: 'contacts' }; }"
-  });
+  await uploadApp(page, databaseName, "private-app", appTitle);
   await api(page, "POST", "/api/permissions/grants", {
     subject_id: resourceUser.id,
     scope: "field_set",
@@ -391,8 +384,9 @@ test("hides workflow and form resources without resource permission", async ({ p
   await expect(tableActions.getByRole("button", { name: "Row", exact: true })).toBeDisabled();
   await page.getByRole("button", { name: "Workflow", exact: true }).click();
   await expect(page.getByRole("button", { name: workflowName })).toHaveCount(0);
-  await page.getByRole("button", { name: "Form", exact: true }).click();
-  await expect(page.getByRole("button", { name: formName })).toHaveCount(0);
+  await page.getByRole("button", { name: "App", exact: true }).click();
+  await expect(page.getByText("No apps yet")).toBeVisible();
+  await expect(page.getByRole("button", { name: appTitle })).toHaveCount(0);
 });
 
 test("prevents partial field readers from mutating table metadata", async ({ page }) => {
@@ -459,14 +453,13 @@ test("prevents partial field readers from mutating table metadata", async ({ pag
   expect(fieldNames).not.toContain("phone");
 });
 
-test("renders read-only workflow and form resources as non-editable", async ({ page }) => {
+test("renders read-only workflow resources as non-editable", async ({ page }) => {
   const readOnlyUser = await registerUser(page);
   await api(page, "POST", "/api/auth/logout");
   await registerUser(page);
   const suffix = `${Date.now()}-${sequence}`;
   const databaseName = `readonly${suffix}`;
   const workflowName = `read-workflow-${suffix}`;
-  const formName = `read-form-${suffix}`;
 
   await api(page, "POST", "/api/databases", {
     name: databaseName,
@@ -484,11 +477,6 @@ test("renders read-only workflow and form resources as non-editable", async ({ p
     secrets: { "notifier.token": "" },
     variables: { "notifier.channel": "ops" }
   })) as { id: number };
-  const form = (await api(page, "POST", `/api/databases/${databaseName}/forms`, {
-    name: formName,
-    script:
-      "function render(api, root) { root.append(api.input({ field: 'name', label: 'Name' }), api.submit('Submit record')); return { table: 'contacts' }; }"
-  })) as { id: number };
   await api(page, "POST", "/api/permissions/grants", {
     subject_id: readOnlyUser.id,
     scope: "field_set",
@@ -503,14 +491,6 @@ test("renders read-only workflow and form resources as non-editable", async ({ p
     field: "",
     level: 1
   });
-  await api(page, "POST", "/api/permissions/grants", {
-    subject_id: readOnlyUser.id,
-    scope: "form",
-    resource: String(form.id),
-    field: "",
-    level: 1
-  });
-
   await api(page, "POST", "/api/auth/logout");
   await loginUser(page, readOnlyUser.email);
   await page.goto(`/databases/${databaseName}`);
@@ -522,12 +502,6 @@ test("renders read-only workflow and form resources as non-editable", async ({ p
   await expect(page.getByRole("button", { name: "Edit config notifier" })).toBeDisabled();
   await expect(page.getByRole("button", { name: "Save" })).toBeDisabled();
   await expect(page.getByRole("button", { name: "Run", exact: true })).toBeDisabled();
-
-  await page.getByRole("button", { name: "Form", exact: true }).click();
-  await expect(page.getByRole("button", { name: formName })).toBeVisible();
-  await expect(page.getByTestId("form-js-editor")).toHaveAttribute("aria-disabled", "true");
-  await expect(page.getByRole("button", { name: "Save" })).toBeDisabled();
-  await expect(page.getByRole("button", { name: "Submit record" })).toBeEnabled();
 });
 
 test("covers database and table creation through the real backend", async ({ page }) => {
@@ -846,7 +820,6 @@ test("covers workflow editor, node list, and run history through the real backen
   await expect(page.getByLabel("Instances").getByText("row_change")).toBeVisible();
   await fillMonacoEditor(
     page,
-    "Workflow JavaScript",
     "function instances(info) {\n  return { ding: { node: 'dingtalk.robot.send' } };\n}\n\nfunction run(info) {\n  return info.instance('ding').exec({ content: 'hello' });\n}"
   );
   await page.waitForTimeout(workflowEvaluationDelayMs);
@@ -855,7 +828,6 @@ test("covers workflow editor, node list, and run history through the real backen
   await page.keyboard.press("Escape");
   await fillMonacoEditor(
     page,
-    "Workflow JavaScript",
     "function instances(info) {\n  return { row_change: { node: 'table.record.changed', variables: [{ name: 'label', type: 'string' }], secrets: [{ name: 'token', type: 'string' }] } };\n}\n\nfunction trigger(info) {\n  return { instance: 'row_change', params: { table: 'contacts', operations: ['create', 'update', 'delete'] } };\n}\n\nfunction run(info) {\n  return { record_id: 1, name: 'Ada Lovelace' };\n}"
   );
   await page.waitForTimeout(workflowEvaluationDelayMs);
@@ -989,7 +961,6 @@ test("runs table row workflow nodes through the real backend", async ({ page }) 
   });
   await fillMonacoEditor(
     page,
-    "Workflow JavaScript",
     "function instances(info) {\n  return {\n    create_contact: 'table.row.create',\n    list_contacts: 'table.row.list',\n    update_contact: 'table.row.update',\n    delete_contact: 'table.row.delete'\n  };\n}\n\nfunction run(info) {\n  const created = info.instance('create_contact').exec({\n    table: 'contacts',\n    values: { name: 'Grace Hopper', email: 'grace@example.com', status: 'Review' }\n  });\n  const beforeUpdate = info.instance('list_contacts').exec({ table: 'contacts' });\n  const updated = info.instance('update_contact').exec({\n    table: 'contacts',\n    record_id: created.record.record_id,\n    values: { status: 'Active' }\n  });\n  const deleted = info.instance('delete_contact').exec({\n    table: 'contacts',\n    record_id: created.record.record_id\n  });\n  return {\n    created_id: created.record.record_id,\n    before_count: beforeUpdate.rows.length,\n    updated_status: updated.record.values.status,\n    deleted_name: deleted.record.values.name\n  };\n}"
   );
   await page.waitForTimeout(workflowEvaluationDelayMs);
@@ -1031,7 +1002,7 @@ test("runs table row workflow nodes through the real backend", async ({ page }) 
     .toContain('"updated_status": "Active"');
 });
 
-test("persists workflow and form JavaScript into the repository path", async ({ page }) => {
+test("persists workflow JavaScript into the repository path", async ({ page }) => {
   await registerUser(page);
   const suffix = `${Date.now()}-${sequence}`;
   const databaseName = `repo${suffix}`;
@@ -1064,139 +1035,6 @@ test("persists workflow and form JavaScript into the repository path", async ({ 
     run: { outputs: { source?: string } };
   };
   expect(run.run.outputs.source).toBe("file");
-
-  const formName = `repo-form-${suffix}`;
-  const formScript =
-    "function render(api, root) { root.append(api.input({ field: 'email', label: 'Email' }), api.submit('Save')); return { table: 'contacts' }; }";
-  const form = (await api(page, "POST", `/api/databases/${databaseName}/forms`, {
-    database_name: databaseName,
-    name: formName,
-    script: formScript
-  })) as { id: number };
-  const formPath = join(
-    runtimeDir,
-    "workspace",
-    "form",
-    databaseName,
-    `${formName}.js`
-  );
-  expect(readFileSync(formPath, "utf8")).toBe(formScript);
-  const editedFormScript =
-    "function render(api, root) { root.append(api.input({ field: 'name', label: 'From file' }), api.submit('Save')); return { table: 'contacts' }; }";
-  writeFileSync(formPath, editedFormScript);
-  const loadedForm = (await api(page, "GET", `/api/forms/${form.id}`)) as { script: string };
-  expect(loadedForm.script).toBe(editedFormScript);
-});
-
-test("covers form runtime preview and submit through the real backend", async ({ page }) => {
-  await setupWorkspace(page);
-
-  await page.getByRole("button", { name: "Form", exact: true }).click();
-  const formName = `ui-form-${Date.now()}`;
-  await createNamedResource(page, "Create Form", "New form name", formName);
-  await expect(page.getByText(`Created form ${formName}`).first()).toBeVisible();
-  await expect(page.getByRole("button", { name: formName })).toBeVisible();
-  const defaultFormScript = await monacoEditorValue(page, "Form JavaScript");
-  expect(defaultFormScript).toContain("@param {AutableFormAPI} api");
-  expect(defaultFormScript).toContain("@param {AutableFormRoot} root");
-  await fillMonacoEditor(
-    page,
-    "Form JavaScript",
-    "function render(api, root) {\n  root.append(\n    api.input({ field: 'name', label: 'Name' }),\n    api.input({ field: 'email', label: 'Email', type: 'email' }),\n    api.submit('Submit')\n  );\n  return { table: 'contacts' };\n}"
-  );
-  await expect(page.getByRole("textbox", { name: "Email", exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "Save" }).click();
-  await expect(page.getByText(/Form saved as #/).first()).toBeVisible();
-  await page.getByRole("textbox", { name: "Name", exact: true }).fill("Margaret Hamilton");
-  await page.getByRole("textbox", { name: "Email", exact: true }).fill("margaret@example.com");
-  await page.getByRole("button", { name: "Submit" }).click();
-  await expect(page.getByText(/Form created contacts record \d+/).first()).toBeVisible();
-});
-
-test("publishes form links that require login and explicit form permission", async ({ page }) => {
-  const workspace = await setupWorkspace(page);
-  await page.getByRole("button", { name: "Form", exact: true }).click();
-  await page.getByRole("button", { name: "Publish" }).click();
-  await expect(page.getByText(/Published form/).first()).toBeVisible();
-  const link = await page.getByLabel("Published form link").inputValue();
-  expect(link).toContain("/forms/");
-  const token = link.split("/forms/").at(-1) ?? "";
-  const forms = (await api(page, "GET", `/api/databases/${workspace.databaseName}/forms`)) as Array<{
-    id: number;
-    published_token?: string;
-    created_at: number;
-    updated_at: number;
-  }>;
-  const form = forms.find((item) => item.published_token === token);
-  expect(form?.id).toBeTruthy();
-  expect(typeof form?.created_at).toBe("number");
-  expect(typeof form?.updated_at).toBe("number");
-
-  const readerEmail = `form-reader-${Date.now()}-${sequence}@example.com`;
-  const reader = (await api(page, "POST", "/api/auth/register", {
-    email: readerEmail,
-    password: "correct horse",
-    display_name: readerEmail
-  })) as AuthUser;
-  await loginUser(page, workspace.user.email);
-  await api(page, "POST", "/api/permissions/grants", {
-    subject_id: reader.id,
-    scope: "form",
-    resource: String(form?.id),
-    field: "",
-    level: 1
-  });
-  // Field levels are a bitmask; the form reader only needs 4 (fill on create)
-  // to submit rows through the published form.
-  await api(page, "POST", "/api/permissions/grants", {
-    subject_id: reader.id,
-    scope: "field_set",
-    resource: `${workspace.databaseName}.${workspace.tableName}`,
-    field: "",
-    level: 4
-  });
-  await api(page, "POST", "/api/permissions/grants", {
-    subject_id: reader.id,
-    scope: "record",
-    resource: `${workspace.databaseName}.${workspace.tableName}`,
-    field: "create",
-    level: 2
-  });
-
-  await page.context().clearCookies();
-  await page.goto(link);
-  const dialog = page.getByRole("dialog");
-  await expect(dialog.getByRole("button", { name: "Login" })).toBeVisible();
-  await dialog.getByLabel("Email").fill(readerEmail);
-  await dialog.getByLabel("Password").fill("correct horse");
-  await dialog.getByRole("button", { name: "Login" }).click();
-  await expect(dialog).toBeHidden();
-  await expect(page.getByLabel("Name")).toBeVisible();
-  await page.getByLabel("Name").fill("Published User");
-  await page.getByLabel("Email").fill("published@example.com");
-  await page.getByLabel("Status").selectOption("Review");
-  await page.getByRole("button", { name: "Create record" }).click();
-  await expect(page.getByText(/Form submitted as record \d+/).first()).toBeVisible();
-
-  await loginUser(page, workspace.user.email);
-  const rows = (await api(page, "GET", `/api/tables/${workspace.databaseName}/${workspace.tableName}/rows`)) as Array<{
-    values: { name?: string; email?: string; status?: string };
-  }>;
-  expect(rows.map((row) => row.values)).toEqual(
-    expect.arrayContaining([
-      expect.objectContaining({ name: "Published User", email: "published@example.com", status: "Review" })
-    ])
-  );
-  await page.goto(`/databases/${workspace.databaseName}`);
-  await waitForWorkspaceReady(page, workspace.databaseName);
-  await page.getByRole("button", { name: "Form", exact: true }).click();
-  await page.getByRole("button", { name: "Unpublish" }).click();
-  await expect(page.getByText(/Unpublished form/).first()).toBeVisible();
-  const unpublishedForms = (await api(page, "GET", `/api/databases/${workspace.databaseName}/forms`)) as Array<{
-    id: number;
-    published_token?: string;
-  }>;
-  expect(unpublishedForms.find((item) => item.id === form?.id)?.published_token).toBeFalsy();
 });
 
 test("covers role members and resource permission grants through the real backend", async ({ page }) => {
@@ -1205,14 +1043,12 @@ test("covers role members and resource permission grants through the real backen
     id: number;
     name: string;
   }>;
-  const forms = (await api(page, "GET", `/api/databases/${databaseName}/forms`)) as Array<{
-    id: number;
-    name: string;
-  }>;
+  const app = await uploadApp(page, databaseName, "role-app", "Role app");
   const workflow = workflows[0];
-  const form = forms[0];
   expect(workflow).toBeTruthy();
-  expect(form).toBeTruthy();
+  // The workspace listed apps before the upload; reload to pick it up.
+  await page.reload();
+  await waitForWorkspaceReady(page, databaseName);
 
   await page.getByRole("button", { name: "Permission", exact: true }).click();
   await createNamedResource(page, "Create Role", "New role name", "editor");
@@ -1230,8 +1066,8 @@ test("covers role members and resource permission grants through the real backen
   await page.getByRole("button", { name: "All views Read" }).click();
   await page.getByRole("tab", { name: "Workflows" }).click();
   await page.getByLabel(`${workflow.name} permission`).selectOption({ label: "Read" });
-  await page.getByRole("tab", { name: "Forms" }).click();
-  await page.getByLabel(`${form.name} permission`).selectOption({ label: "Write" });
+  await page.getByRole("tab", { name: "Apps" }).click();
+  await page.getByLabel(`${app.title} permission`).selectOption({ label: "Manage" });
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.getByText("Saved role editor").first()).toBeVisible();
 
@@ -1253,7 +1089,7 @@ test("covers role members and resource permission grants through the real backen
       expect.objectContaining({ scope: "view_set", resource: `${databaseName}.${tableName}`, field: "", level: 1 }),
       expect.objectContaining({ scope: "field", resource: `${databaseName}.${tableName}`, field: "email", level: 2 }),
       expect.objectContaining({ scope: "workflow", resource: String(workflow.id), field: "", level: 1 }),
-      expect.objectContaining({ scope: "form", resource: String(form.id), field: "", level: 2 })
+      expect.objectContaining({ scope: "app", resource: String(app.id), field: "", level: 2 })
     ])
   );
 });

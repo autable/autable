@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { WorkflowRunResponse } from "../api";
-import { mergeWorkflowRuns } from "./useWorkflowFormWorkspace";
+import { mergeWorkflowRuns } from "./useWorkflowWorkspace";
 
 function summaryRun(key: string): WorkflowRunResponse {
   return { history_key: key, run: { workflow_id: 1, timestamp: 1, steps: [] }, summary: true };

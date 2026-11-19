@@ -2,6 +2,7 @@ import { type Page, test } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { appBundle } from "./appBundle";
 
 // Visual capture spec. Not an assertion test: it drives the real backend + UI
 // and writes screenshots to e2e/.shots so we can eyeball styling.
@@ -43,6 +44,16 @@ async function registerUser(page: Page) {
   await dialog.getByRole("button", { name: "Register" }).click();
   await page.getByRole("button", { name: email }).waitFor();
   return { email };
+}
+
+async function uploadApp(page: Page, databaseName: string, name: string, title: string, query = "") {
+  const response = await page.request.post(`/api/databases/${databaseName}/apps/${name}/versions${query}`, {
+    headers: { "Content-Type": "application/gzip" },
+    data: appBundle({ database: databaseName, name, title, heading: title })
+  });
+  if (!response.ok()) {
+    throw new Error(`app upload failed: ${response.status()} ${await response.text()}`);
+  }
 }
 
 async function shot(page: Page, name: string) {
@@ -127,12 +138,10 @@ test("capture workspace screenshots", async ({ page }) => {
     secrets: {},
     variables: {}
   });
-  await api(page, "POST", `/api/databases/${databaseName}/forms`, {
-    database_name: databaseName,
-    name: `signup-${suffix}`,
-    script:
-      "function render(api, root) {\n  root.append(\n    api.input({ field: 'name', label: 'Name' }),\n    api.input({ field: 'email', label: 'Email', type: 'email' }),\n    api.select({ field: 'status', label: 'Status', options: ['Active', 'Review', 'Backlog'] }),\n    api.submit('Create record')\n  );\n  return { table: 'contacts' };\n}"
-  });
+  await uploadApp(page, databaseName, "orders", "Orders", "?message=First%20version&publish=1");
+  await uploadApp(page, databaseName, "orders", "Orders", "?message=Adds%20a%20totals%20row&publish=1");
+  await uploadApp(page, databaseName, "orders", "Orders", "?message=Work%20in%20progress");
+  await uploadApp(page, databaseName, "stock-check", "Stock check");
   // Selection is scoped to the URL route, so land on the database directly.
   await page.goto(`/databases/${databaseName}`);
   await page.getByRole("button", { name: databaseName }).waitFor();
@@ -205,11 +214,15 @@ test("capture workspace screenshots", async ({ page }) => {
     await page.waitForTimeout(800);
   });
 
-  // Form view.
-  await page.getByRole("button", { name: "Form", exact: true }).click();
-  await page.getByText("Preview").waitFor();
+  // Apps: list, then one app's versions.
+  await page.getByRole("button", { name: "App", exact: true }).click();
+  await page.getByRole("table", { name: "Apps" }).waitFor();
   await page.waitForTimeout(400);
-  await shot(page, "09-form-editor");
+  await shot(page, "09-app-list");
+  await page.getByLabel("App list").getByRole("button", { name: "Orders" }).click();
+  await page.getByRole("table", { name: "Versions" }).waitFor();
+  await page.waitForTimeout(400);
+  await shot(page, "09-app-detail");
 
   // Permission view — capture the empty state before creating a role.
   await page.getByRole("button", { name: "Permission", exact: true }).click();
@@ -267,12 +280,17 @@ test("capture workspace screenshots", async ({ page }) => {
   await shot(page, "11-narrow-permission");
   await page.setViewportSize({ width: 1440, height: 900 });
 
-  // Empty database: table/workflow/form empty states.
+  // Empty database: table and app empty states.
   const emptyDb = `empty${Date.now()}-${sequence}`;
   await api(page, "POST", "/api/databases", { name: emptyDb });
   await page.reload();
   await capture(page, "20-table-empty", async () => {
     await page.getByRole("button", { name: emptyDb }).click(bestEffort);
     await page.waitForTimeout(400);
+  });
+  await capture(page, "21-app-empty", async () => {
+    await page.goto(`/databases/${emptyDb}/apps`);
+    await page.getByText(/No apps yet|还没有应用/).waitFor(bestEffort);
+    await page.waitForTimeout(300);
   });
 });

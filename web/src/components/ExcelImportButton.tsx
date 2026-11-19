@@ -34,21 +34,10 @@ import {
 const PREVIEW_ROW_LIMIT = 20;
 const IMPORT_TYPES: ImportFieldType[] = ["string", "int", "float"];
 
-export type ExcelImportPinned = {
-  // "" pins "no dedup"; undefined lets the user choose.
-  matchField?: string;
-  // header -> field type; when present, only these headers are importable.
-  fields?: Record<string, string>;
-  duplicateStrategy?: DuplicateStrategy;
-};
-
 type ExcelImportButtonProps = {
   databaseName: string;
   tableName: string;
   tables: TableMetadata[];
-  label?: string;
-  pinned?: ExcelImportPinned;
-  toolbar?: boolean;
   disabled?: boolean;
   onImported?: (summary: ImportRunSummary) => void | Promise<void>;
 };
@@ -57,8 +46,7 @@ type ColumnState = {
   header: string;
   target: ColumnTarget;
   include: boolean;
-  // Column selection and new-field types are locked when the form author
-  // pinned the fields config.
+  // Blocked columns cannot be imported.
   locked: boolean;
   type: ImportFieldType;
 };
@@ -69,9 +57,6 @@ export function ExcelImportButton({
   databaseName,
   tableName,
   tables,
-  label,
-  pinned,
-  toolbar = false,
   disabled = false,
   onImported
 }: ExcelImportButtonProps) {
@@ -84,7 +69,6 @@ export function ExcelImportButton({
   const [matchField, setMatchField] = useState("");
   const [strategy, setStrategy] = useState<DuplicateStrategy>("update");
   const [step, setStep] = useState<ImportStep>("configure");
-  const [skippedConfigure, setSkippedConfigure] = useState(false);
   const [progress, setProgress] = useState({ done: 0, total: 0 });
   const [summary, setSummary] = useState<ImportRunSummary | null>(null);
   const [error, setError] = useState("");
@@ -122,18 +106,9 @@ export function ExcelImportButton({
     return nextSheet.headers.map((header) => {
       const values = nextSheet.rows.map((row) => row[header]);
       const target = columnTarget(header, table, values);
-      const pinnedType = pinned?.fields?.[header];
       const blocked = target.kind === "blocked";
-      const include = blocked ? false : pinned?.fields ? header in pinned.fields : true;
-      const type =
-        target.kind === "existing"
-          ? target.type
-          : target.kind === "new"
-            ? isImportType(pinnedType)
-              ? pinnedType
-              : target.inferredType
-            : "string";
-      return { header, target, include, locked: blocked || Boolean(pinned?.fields), type };
+      const type = target.kind === "existing" ? target.type : target.kind === "new" ? target.inferredType : "string";
+      return { header, target, include: !blocked, locked: blocked, type };
     });
   }
 
@@ -154,17 +129,10 @@ export function ExcelImportButton({
         setSummary(null);
         setCancelled(false);
         setProgress({ done: 0, total: 0 });
-        setStrategy(pinned?.duplicateStrategy ?? "update");
-        const nextColumns = parsed.length > 0 ? initializeSheet(parsed, 0) : [];
-        setColumns(nextColumns);
-        const pinnedMatch = pinned?.matchField;
-        const matchUsable =
-          pinnedMatch !== undefined &&
-          (pinnedMatch === "" || nextColumns.some((column) => column.include && column.header === pinnedMatch));
-        setMatchField(matchUsable ? (pinnedMatch as string) : "");
-        const skipConfigure = Boolean(pinned?.fields) && matchUsable && parsed.length === 1;
-        setSkippedConfigure(skipConfigure);
-        setStep(skipConfigure ? "preview" : "configure");
+        setStrategy("update");
+        setColumns(parsed.length > 0 ? initializeSheet(parsed, 0) : []);
+        setMatchField("");
+        setStep("configure");
         setError(parsed.length === 0 ? t("import.noData") : "");
         setOpen(true);
       } catch (parseError) {
@@ -224,7 +192,7 @@ export function ExcelImportButton({
       }
     } catch (importError) {
       setError(importError instanceof Error ? importError.message : t("import.importFailed"));
-      setStep(skippedConfigure ? "preview" : "configure");
+      setStep("configure");
     }
   }
 
@@ -236,20 +204,11 @@ export function ExcelImportButton({
     setOpen(false);
   }
 
-  const buttonLabel = label || t("import.import");
-  const trigger = toolbar ? (
-    <ToolbarButton icon={<ArrowUploadRegular />} disabled={disabled} onClick={pickFile}>
-      {buttonLabel}
-    </ToolbarButton>
-  ) : (
-    <Button type="button" icon={<ArrowUploadRegular />} disabled={disabled} onClick={pickFile}>
-      {buttonLabel}
-    </Button>
-  );
-
   return (
     <>
-      {trigger}
+      <ToolbarButton icon={<ArrowUploadRegular />} disabled={disabled} onClick={pickFile}>
+        {t("import.import")}
+      </ToolbarButton>
       <Dialog open={open} onOpenChange={(_, data) => (data.open ? setOpen(true) : close())}>
         <DialogSurface className="import-dialog" style={{ width: "min(960px, calc(100vw - 32px))", maxWidth: "none" }}>
           <DialogBody>
@@ -257,14 +216,13 @@ export function ExcelImportButton({
               {t("import.dialogTitle", { table: table?.display_name || tableName })}
             </DialogTitle>
             <DialogContent className="import-content">
-              {!table && <Text className="form-error">{t("import.tableMissing", { table: tableName })}</Text>}
-              {error && <Text className="form-error">{error}</Text>}
+              {!table && <Text className="error-text">{t("import.tableMissing", { table: tableName })}</Text>}
+              {error && <Text className="error-text">{error}</Text>}
               {table && sheet && step === "configure" && (
                 <ConfigureStep
                   columns={columns}
                   fileName={fileName}
                   matchField={matchField}
-                  matchLocked={pinned?.matchField !== undefined && matchField === pinned.matchField}
                   onMatchFieldChange={setMatchField}
                   onSelectSheet={selectSheet}
                   onStrategyChange={setStrategy}
@@ -273,7 +231,6 @@ export function ExcelImportButton({
                   sheetIndex={sheetIndex}
                   sheets={sheets}
                   strategy={strategy}
-                  strategyLocked={pinned?.duplicateStrategy !== undefined}
                 />
               )}
               {table && sheet && step === "preview" && (
@@ -305,9 +262,7 @@ export function ExcelImportButton({
               )}
               {step === "preview" && (
                 <>
-                  {!skippedConfigure && (
-                    <Button type="button" onClick={() => setStep("configure")}>{t("import.back")}</Button>
-                  )}
+                  <Button type="button" onClick={() => setStep("configure")}>{t("import.back")}</Button>
                   <Button type="button" onClick={close}>{t("common.cancel")}</Button>
                   <Button type="button" appearance="primary" disabled={validRows.length === 0} onClick={() => void startImport()}>
                     {t("import.start", { count: validRows.length })}
@@ -332,7 +287,6 @@ function ConfigureStep({
   columns,
   fileName,
   matchField,
-  matchLocked,
   onMatchFieldChange,
   onSelectSheet,
   onStrategyChange,
@@ -340,13 +294,11 @@ function ConfigureStep({
   sheet,
   sheetIndex,
   sheets,
-  strategy,
-  strategyLocked
+  strategy
 }: {
   columns: ColumnState[];
   fileName: string;
   matchField: string;
-  matchLocked: boolean;
   onMatchFieldChange: (value: string) => void;
   onSelectSheet: (index: number) => void;
   onStrategyChange: (value: DuplicateStrategy) => void;
@@ -355,7 +307,6 @@ function ConfigureStep({
   sheetIndex: number;
   sheets: ParsedSheet[];
   strategy: DuplicateStrategy;
-  strategyLocked: boolean;
 }) {
   const { t } = useTranslation();
   const includedHeaders = columns.filter((column) => column.include).map((column) => column.header);
@@ -377,7 +328,7 @@ function ConfigureStep({
         )}
       </div>
       {sheet.duplicateHeaders.length > 0 && (
-        <Text size={200} className="form-error">
+        <Text size={200} className="error-text">
           {t("import.duplicateHeaders", { headers: sheet.duplicateHeaders.join(", ") })}
         </Text>
       )}
@@ -425,7 +376,7 @@ function ConfigureStep({
       <div className="import-dedup">
         <label className="field-stack">
           <span>{t("import.matchField")}</span>
-          <Select disabled={matchLocked} value={matchField} onChange={(_, data) => onMatchFieldChange(data.value)}>
+          <Select value={matchField} onChange={(_, data) => onMatchFieldChange(data.value)}>
             <option value="">{t("import.noDedup")}</option>
             {includedHeaders.map((header) => (
               <option key={header} value={header}>
@@ -437,11 +388,7 @@ function ConfigureStep({
         {matchField && (
           <label className="field-stack">
             <span>{t("import.strategy")}</span>
-            <Select
-              disabled={strategyLocked}
-              value={strategy}
-              onChange={(_, data) => onStrategyChange(data.value as DuplicateStrategy)}
-            >
+            <Select value={strategy} onChange={(_, data) => onStrategyChange(data.value as DuplicateStrategy)}>
               <option value="update">{t("import.strategyUpdate")}</option>
               <option value="skip">{t("import.strategySkip")}</option>
             </Select>
@@ -501,7 +448,7 @@ function PreviewStep({
       {preparedRows.length > PREVIEW_ROW_LIMIT && (
         <Text size={200}>{t("import.previewTruncated", { shown: PREVIEW_ROW_LIMIT, total: preparedRows.length })}</Text>
       )}
-      {invalidCount > 0 && <Text size={200} className="form-error">{t("import.invalidRowsHint", { count: invalidCount })}</Text>}
+      {invalidCount > 0 && <Text size={200} className="error-text">{t("import.invalidRowsHint", { count: invalidCount })}</Text>}
     </div>
   );
 }
@@ -518,7 +465,7 @@ function SummaryView({
   const { t } = useTranslation();
   return (
     <div className="import-summary">
-      {cancelled && <Text className="form-error">{t("import.cancelledHint")}</Text>}
+      {cancelled && <Text className="error-text">{t("import.cancelledHint")}</Text>}
       {summary.fieldsCreated.length > 0 && (
         <Text>{t("import.summaryFields", { count: summary.fieldsCreated.length, names: summary.fieldsCreated.join(", ") })}</Text>
       )}
@@ -530,10 +477,10 @@ function SummaryView({
           skipped: summary.skipped
         })}
       </Text>
-      {invalidRows.length > 0 && <Text className="form-error">{t("import.summaryInvalid", { count: invalidRows.length })}</Text>}
+      {invalidRows.length > 0 && <Text className="error-text">{t("import.summaryInvalid", { count: invalidRows.length })}</Text>}
       {summary.failed.length > 0 && (
         <div className="import-failed">
-          <Text className="form-error">{t("import.summaryFailed", { count: summary.failed.length })}</Text>
+          <Text className="error-text">{t("import.summaryFailed", { count: summary.failed.length })}</Text>
           <ul>
             {summary.failed.slice(0, 10).map((failure) => (
               <li key={failure.index}>
@@ -555,8 +502,4 @@ function problemText(problem: CellProblem, t: ReturnType<typeof useTranslation>[
     return t("import.problemEnum", { value: String(problem.value) });
   }
   return t("import.problemMissingMatch");
-}
-
-function isImportType(value: string | undefined): value is ImportFieldType {
-  return value === "string" || value === "int" || value === "float";
 }

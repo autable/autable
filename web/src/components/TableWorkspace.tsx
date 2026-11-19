@@ -452,7 +452,6 @@ export function TableWorkspace({
             {t("common.history")}
           </ToolbarButton>
           <ExcelImportButton
-            toolbar
             databaseName={databaseName}
             tableName={table.name}
             tables={tables}

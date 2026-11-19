@@ -32,13 +32,13 @@ import {
 } from "@fluentui/react-components";
 import {
   AddRegular,
+  AppsRegular,
   CircleFilled,
   DatabaseRegular,
   DeleteRegular,
   DocumentFlowchartRegular,
   DocumentTableRegular,
   EditRegular,
-  FormRegular,
   MoreHorizontalRegular,
   PanelLeftContractRegular,
   PanelLeftExpandRegular,
@@ -50,53 +50,48 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { RunnersPanel } from "./RunnersPanel";
 import type {
+  AppDefinition,
   AuthUser,
   Catalog,
   DatabaseMetadata,
-  FormDefinition,
   RoleDefinition,
   TableMetadata,
   WorkflowDefinition
 } from "../api";
 
-export type WorkspaceView = "table" | "workflow" | "form" | "permission";
+export type WorkspaceView = "table" | "workflow" | "app" | "permission";
 
 type WorkspaceNavigationProps = {
+  apps: AppDefinition[];
   catalog: Catalog;
   collapsed: boolean;
   onToggleCollapsed: () => void;
   currentUser: AuthUser | null;
   database: DatabaseMetadata;
-  forms: FormDefinition[];
   newDatabaseName: string;
-  newFormName: string;
   newRoleName: string;
   newTableName: string;
   newWorkflowName: string;
   onCreateDatabase: () => void;
-  onCreateForm: () => void;
   onCreateRole: () => void;
   onCreateTable: () => void;
   onCreateWorkflow: () => void;
-  onDeleteForm: (id?: number) => void;
   onDeleteWorkflow: (id?: number) => void;
   onLogout: () => void;
   onNewDatabaseNameChange: (value: string) => void;
-  onNewFormNameChange: (value: string) => void;
   onNewRoleNameChange: (value: string) => void;
   onNewTableNameChange: (value: string) => void;
   onNewWorkflowNameChange: (value: string) => void;
   onOpenLogin: () => void;
   onCreateTableView: (tableName: string, viewName: string) => void;
   onSelectDatabaseSection: (databaseName: string, view: WorkspaceView) => void;
-  onSelectFormID: (id: number) => void;
+  onSelectAppName: (name: string) => void;
   onSelectRoleName: (name: string) => void;
   onSelectTableView: (tableName: string, viewName: string) => void;
   onSelectWorkflowID: (id: number) => void;
-  onRenameForm: (name: string, id?: number) => void;
   onRenameWorkflow: (name: string, id?: number) => void;
   roles: RoleDefinition[];
-  selectedForm?: FormDefinition;
+  selectedAppName: string;
   selectedRole?: RoleDefinition;
   selectedTableView: string;
   selectedWorkflow?: WorkflowDefinition;
@@ -106,41 +101,36 @@ type WorkspaceNavigationProps = {
 };
 
 export function WorkspaceNavigation({
+  apps,
   catalog,
   collapsed,
   onToggleCollapsed,
   currentUser,
   database,
-  forms,
   newDatabaseName,
-  newFormName,
   newRoleName,
   newTableName,
   newWorkflowName,
   onCreateDatabase,
-  onCreateForm,
   onCreateRole,
   onCreateTable,
   onCreateWorkflow,
-  onDeleteForm,
   onDeleteWorkflow,
   onLogout,
   onNewDatabaseNameChange,
-  onNewFormNameChange,
   onNewRoleNameChange,
   onNewTableNameChange,
   onNewWorkflowNameChange,
   onOpenLogin,
   onCreateTableView,
   onSelectDatabaseSection,
-  onSelectFormID,
+  onSelectAppName,
   onSelectRoleName,
   onSelectTableView,
   onSelectWorkflowID,
-  onRenameForm,
   onRenameWorkflow,
   roles,
-  selectedForm,
+  selectedAppName,
   selectedRole,
   selectedTableView,
   selectedWorkflow,
@@ -220,7 +210,7 @@ export function WorkspaceNavigation({
                   <NavSubItemGroup>
                   <NavSubItem value={`${item.name}:table`}>{t("common.table")}</NavSubItem>
                   <NavSubItem value={`${item.name}:workflow`}>{t("common.workflow")}</NavSubItem>
-                  <NavSubItem value={`${item.name}:form`}>{t("common.form")}</NavSubItem>
+                  <NavSubItem value={`${item.name}:app`}>{t("common.app")}</NavSubItem>
                   {(item.permission_level ?? 0) >= 2 && (
                     <NavSubItem value={`${item.name}:permission`}>{t("common.permission")}</NavSubItem>
                   )}
@@ -272,7 +262,6 @@ export function WorkspaceNavigation({
               canCreate={(database.workflow_permission_level ?? 2) >= 2}
               createLabel={t("nav.createWorkflow")}
               databaseName={database.name}
-              icon="workflow"
               items={workflows.map((item) => ({ id: item.id ?? 0, name: item.name, enabled: item.enabled ?? true }))}
               newName={newWorkflowName}
               onCreate={onCreateWorkflow}
@@ -285,24 +274,29 @@ export function WorkspaceNavigation({
               title={t("nav.workflows")}
             />
           )}
-          {view === "form" && (
-            <ResourceNav
-              ariaLabel={t("nav.formList")}
-              canCreate={(database.form_permission_level ?? 2) >= 2}
-              createLabel={t("nav.createForm")}
-              databaseName={database.name}
-              icon="form"
-              items={forms.map((item) => ({ id: item.id ?? 0, name: item.name }))}
-              newName={newFormName}
-              onCreate={onCreateForm}
-              onDelete={onDeleteForm}
-              onNewNameChange={onNewFormNameChange}
-              onRename={onRenameForm}
-              onSelect={onSelectFormID}
-              placeholder={t("nav.placeholderForm")}
-              selectedID={selectedForm?.id ?? 0}
-              title={t("nav.forms")}
-            />
+          {view === "app" && (
+            <>
+              <div className="list-heading">
+                <Text size={200} weight="semibold">{t("app.apps")}</Text>
+              </div>
+              <Nav
+                className="resource-nav"
+                aria-label={t("app.appList")}
+                selectedValue={selectedAppName}
+                onNavItemSelect={(_, data) => onSelectAppName(data.value)}
+              >
+                {apps.map((app) => (
+                  <NavItem key={app.id} value={app.name} icon={<AppsRegular />}>
+                    <span className="resource-nav-row">
+                      <span className="resource-nav-name">
+                        <CircleFilled className={app.published_version > 0 ? "enabled-dot" : "disabled-dot"} />
+                        <span>{app.title || app.name}</span>
+                      </span>
+                    </span>
+                  </NavItem>
+                ))}
+              </Nav>
+            </>
           )}
           {view === "permission" && (
             <>
@@ -366,7 +360,7 @@ function PrimaryRail({
   const sections = [
     { key: "table" as WorkspaceView, label: t("common.table"), icon: <DocumentTableRegular /> },
     { key: "workflow" as WorkspaceView, label: t("common.workflow"), icon: <DocumentFlowchartRegular /> },
-    { key: "form" as WorkspaceView, label: t("common.form"), icon: <FormRegular /> }
+    { key: "app" as WorkspaceView, label: t("common.app"), icon: <AppsRegular /> }
   ];
   const visibleSections =
     (database.permission_level ?? 0) >= 2
@@ -479,8 +473,7 @@ function ResourceNav(props: {
   canCreate: boolean;
   createLabel: string;
   databaseName: string;
-  icon: "workflow" | "form";
-  items: Array<{ id: number; name: string; enabled?: boolean }>;
+  items: Array<{ id: number; name: string; enabled: boolean }>;
   newName: string;
   onCreate: () => void;
   onDelete: (id: number) => void;
@@ -492,7 +485,6 @@ function ResourceNav(props: {
   title: string;
 }) {
   const { t } = useTranslation();
-  const Icon = props.icon === "workflow" ? DocumentFlowchartRegular : FormRegular;
   const [renameOpen, setRenameOpen] = useState(false);
   const [renameDraft, setRenameDraft] = useState("");
   const [renameID, setRenameID] = useState(0);
@@ -504,7 +496,7 @@ function ResourceNav(props: {
           ariaLabel={props.createLabel}
           buttonLabel={props.createLabel}
           disabled={!props.databaseName || !props.canCreate}
-          inputLabel={props.icon === "workflow" ? t("nav.newWorkflowName") : t("nav.newFormName")}
+          inputLabel={t("nav.newWorkflowName")}
           name={props.newName}
           onNameChange={props.onNewNameChange}
           onSave={props.onCreate}
@@ -518,12 +510,10 @@ function ResourceNav(props: {
         onNavItemSelect={(_, data) => props.onSelect(Number(data.value))}
       >
         {props.items.map((item) => (
-          <NavItem key={item.id || item.name} value={String(item.id)} icon={<Icon />}>
+          <NavItem key={item.id || item.name} value={String(item.id)} icon={<DocumentFlowchartRegular />}>
             <span className="resource-nav-row">
               <span className="resource-nav-name">
-                {props.icon === "workflow" && (
-                  <CircleFilled className={item.enabled ? "enabled-dot" : "disabled-dot"} />
-                )}
+                <CircleFilled className={item.enabled ? "enabled-dot" : "disabled-dot"} />
                 <span>{item.name}</span>
               </span>
               <Menu>
@@ -532,11 +522,7 @@ function ResourceNav(props: {
                     role="button"
                     tabIndex={0}
                     className="resource-nav-menu-button"
-                    aria-label={
-                      props.icon === "workflow"
-                        ? t("nav.workflowActions", { id: item.id })
-                        : t("nav.formActions", { id: item.id })
-                    }
+                    aria-label={t("nav.workflowActions", { id: item.id })}
                     onClick={(event) => event.stopPropagation()}
                   >
                     <MoreHorizontalRegular />
@@ -572,7 +558,7 @@ function ResourceNav(props: {
       </Nav>
       <RenameDialog
         open={renameOpen}
-        title={props.icon === "workflow" ? t("nav.renameWorkflow") : t("nav.renameForm")}
+        title={t("nav.renameWorkflow")}
         value={renameDraft}
         onOpenChange={setRenameOpen}
         onValueChange={setRenameDraft}
@@ -772,5 +758,5 @@ function RenameDialog({
 }
 
 function isWorkspaceView(value: string): value is WorkspaceView {
-  return value === "table" || value === "workflow" || value === "form" || value === "permission";
+  return value === "table" || value === "workflow" || value === "app" || value === "permission";
 }

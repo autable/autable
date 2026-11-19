@@ -70,8 +70,8 @@ export function LoginPage() {
   }
 
   return (
-    <div className="published-form-shell">
-      <main className="published-form-main">
+    <div className="standalone-shell">
+      <main className="standalone-main">
         <div className="section-header">
           <Text weight="semibold">{t("status.loginRequired")}</Text>
         </div>

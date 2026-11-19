@@ -32,24 +32,8 @@ func (store *Store) DeleteWorkflowScript(ctx context.Context, workflow systemdb.
 	return store.deleteScript(ctx, repository.WorkflowDir, workflow.DatabaseName, workflow.Name)
 }
 
-func (store *Store) SaveFormScript(ctx context.Context, form systemdb.FormDefinition) error {
-	return store.writeScript(ctx, repository.FormDir, form.DatabaseName, form.Name, form.Script)
-}
-
-func (store *Store) LoadFormScript(ctx context.Context, form systemdb.FormDefinition) (string, bool, error) {
-	return store.readScript(ctx, repository.FormDir, form.DatabaseName, form.Name)
-}
-
-func (store *Store) DeleteFormScript(ctx context.Context, form systemdb.FormDefinition) error {
-	return store.deleteScript(ctx, repository.FormDir, form.DatabaseName, form.Name)
-}
-
 func (store *Store) WorkflowScriptPath(workflow systemdb.WorkflowDefinition) string {
 	return store.scriptPath(repository.WorkflowDir, workflow.DatabaseName, workflow.Name)
-}
-
-func (store *Store) FormScriptPath(form systemdb.FormDefinition) string {
-	return store.scriptPath(repository.FormDir, form.DatabaseName, form.Name)
 }
 
 func (store *Store) writeScript(ctx context.Context, kind, databaseName string, name, script string) error {

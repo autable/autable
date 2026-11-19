@@ -6,7 +6,6 @@ const (
 	MetadataDir      = "metadata"
 	MetadataFileName = "main.yml"
 	WorkflowDir      = "workflow"
-	FormDir          = "form"
 )
 
 type Layout struct {
@@ -23,8 +22,4 @@ func (layout Layout) MetadataPath() string {
 
 func (layout Layout) WorkflowDir() string {
 	return filepath.Join(layout.root, WorkflowDir)
-}
-
-func (layout Layout) FormDir() string {
-	return filepath.Join(layout.root, FormDir)
 }

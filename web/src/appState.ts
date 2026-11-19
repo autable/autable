@@ -1,6 +1,6 @@
 import type { RoleDefinition, RoleMember } from "./api";
 
-export type WorkspaceViewName = "table" | "workflow" | "form" | "permission";
+export type WorkspaceViewName = "table" | "workflow" | "app" | "permission";
 
 export type WorkspaceRoute = {
   databaseName: string;
@@ -10,7 +10,7 @@ export type WorkspaceRoute = {
   workflowID?: number;
   workflowTab?: "editor" | "history";
   workflowRunKey?: string;
-  formID?: number;
+  appName?: string;
   roleName?: string;
 };
 
@@ -77,12 +77,8 @@ export function parseWorkspaceRoute(pathname: string): WorkspaceRoute | null {
       workflowRunKey: segments[4] === "history" ? segments[5] : undefined
     };
   }
-  if (segments[2] === "forms") {
-    return {
-      databaseName,
-      view: "form",
-      formID: parsePositiveInteger(segments[3])
-    };
+  if (segments[2] === "apps") {
+    return { databaseName, view: "app", appName: segments[3] || undefined };
   }
   if (segments[2] === "permissions") {
     return {
@@ -111,8 +107,10 @@ export function buildWorkspacePath(route: WorkspaceRoute | null): string {
       ? `${workflowPath}/history/${encodePathSegment(route.workflowRunKey)}`
       : `${workflowPath}/history`;
   }
-  if (route.view === "form") {
-    return route.formID ? `/databases/${database}/forms/${route.formID}` : `/databases/${database}/forms`;
+  if (route.view === "app") {
+    return route.appName
+      ? `/databases/${database}/apps/${encodePathSegment(route.appName)}`
+      : `/databases/${database}/apps`;
   }
   if (route.view === "permission") {
     return route.roleName

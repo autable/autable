@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -38,6 +39,8 @@ type testEnv struct {
 	noEnv bool
 	// browser stands in for the user's browser during login.
 	browser func(string) error
+	// npm stands in for running npm.
+	npm func(dir string, env []string, out io.Writer, args ...string) error
 }
 
 func newTestEnv(t *testing.T) *testEnv {
@@ -119,6 +122,7 @@ func (env *testEnv) run(wantCode int, args ...string) string {
 		configPath: filepath.Join(env.dir, "config.json"),
 		httpClient: env.server.Client(),
 		openURL:    env.browser,
+		runNPM:     env.npm,
 	}
 	if code := a.run(args); code != wantCode {
 		env.t.Fatalf("autablectl %s: exit %d, want %d\nstdout: %s\nstderr: %s", strings.Join(args, " "), code, wantCode, stdout.String(), stderr.String())
@@ -347,8 +351,8 @@ func TestParseFlagsAcceptsInterspersedFlags(t *testing.T) {
 }
 
 func TestNewFileChangeResolvesDatabaseAndName(t *testing.T) {
-	got := newFileChange("form/名称-db/订单.js", kindForm, "", []string{"other", "名称 db"})
-	if got.Status != "new" || got.Database != "名称 db" || got.Name != "订单" {
+	got := newFileChange("workflow/名称-db/备注.js", kindWorkflow, "", []string{"other", "名称 db"})
+	if got.Status != "new" || got.Database != "名称 db" || got.Name != "备注" {
 		t.Fatalf("unexpected change %#v", got)
 	}
 	if got := newFileChange("workflow/missing/a.js", kindWorkflow, "", []string{"db"}); got.Status != "invalid" {

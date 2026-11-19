@@ -26,6 +26,8 @@ type app struct {
 	configPath string
 	httpClient *http.Client
 	openURL    func(string) error
+	// runNPM replaces running npm, for tests; nil runs the real npm.
+	runNPM func(dir string, env []string, out io.Writer, args ...string) error
 }
 
 type command struct {

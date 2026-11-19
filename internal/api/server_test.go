@@ -26,6 +26,7 @@ import (
 	"testing"
 	"time"
 
+	"autable/internal/appsdk"
 	"autable/internal/auth"
 	"autable/internal/codefiles"
 	"autable/internal/config"
@@ -1894,7 +1895,7 @@ func TestDatabaseOwnerCanManageRoles(t *testing.T) {
 		"grants":[
 			{"scope":"field_set","resource":"workspace.contacts","level":7},
 			{"scope":"workflow_set","resource":"workspace","level":1},
-			{"scope":"form","resource":"3","level":0}
+			{"scope":"app","resource":"3","level":0}
 		]
 	}`))
 	updateGrants.AddCookie(testSessionCookie(t, system, "owner"))
@@ -1988,19 +1989,11 @@ func TestRoleGrantValidationKeepsResourcesInsideDatabase(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	workspaceForm, err := system.SaveForm(ctx, systemdb.FormDefinition{
-		DatabaseName: "workspace",
-		Name:         "workspace-form",
-		Script:       "function render(api, root) { root.append(api.input({ field: 'name' }), api.submit('Save')); return { table: 'contacts' }; }",
-	})
+	workspaceApp, err := system.CreateApp(ctx, systemdb.AppDefinition{DatabaseName: "workspace", Name: "workspace-app"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	otherForm, err := system.SaveForm(ctx, systemdb.FormDefinition{
-		DatabaseName: "other",
-		Name:         "other-form",
-		Script:       "function render(api, root) { root.append(api.input({ field: 'name' }), api.submit('Save')); return { table: 'contacts' }; }",
-	})
+	otherApp, err := system.CreateApp(ctx, systemdb.AppDefinition{DatabaseName: "other", Name: "other-app"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2009,7 +2002,7 @@ func TestRoleGrantValidationKeepsResourcesInsideDatabase(t *testing.T) {
 		{Scope: permission.ScopeFieldSet, Resource: "workspace.contacts", Level: permission.Read},
 		{Scope: permission.ScopeRecord, Resource: "workspace.contacts", Field: "create", Level: permission.Write},
 		{Scope: permission.ScopeWorkflow, Resource: resourceID(workspaceWorkflow.ID), Level: permission.Read},
-		{Scope: permission.ScopeForm, Resource: resourceID(workspaceForm.ID), Level: permission.Read},
+		{Scope: permission.ScopeApp, Resource: resourceID(workspaceApp.ID), Level: permission.Read},
 		{Scope: permission.ScopeFieldSet, Resource: "other.contacts", Level: permission.None},
 	}
 	if err := server.validateRoleGrants(ctx, "workspace", valid); err != nil {
@@ -2028,7 +2021,9 @@ func TestRoleGrantValidationKeepsResourcesInsideDatabase(t *testing.T) {
 		{name: "deleted field", grant: permission.Grant{Scope: permission.ScopeField, Resource: "workspace.contacts", Field: "legacy", Level: permission.Read}},
 		{name: "record id field", grant: permission.Grant{Scope: permission.ScopeField, Resource: "workspace.contacts", Field: "ct_record_id", Level: permission.Read}},
 		{name: "other workflow", grant: permission.Grant{Scope: permission.ScopeWorkflow, Resource: resourceID(otherWorkflow.ID), Level: permission.Read}},
-		{name: "other form", grant: permission.Grant{Scope: permission.ScopeForm, Resource: resourceID(otherForm.ID), Level: permission.Read}},
+		{name: "other app", grant: permission.Grant{Scope: permission.ScopeApp, Resource: resourceID(otherApp.ID), Level: permission.Read}},
+		{name: "other app set", grant: permission.Grant{Scope: permission.ScopeAppSet, Resource: "other", Level: permission.Read}},
+		{name: "missing app", grant: permission.Grant{Scope: permission.ScopeApp, Resource: "999", Level: permission.Read}},
 	}
 	for _, tc := range invalidCases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -2052,6 +2047,14 @@ func TestRoleGrantValidationKeepsResourcesInsideDatabase(t *testing.T) {
 	}
 	if err := server.validateRoleGrants(ctx, "workspace", mixedWorkflowGrants); err == nil {
 		t.Fatal("expected workflow set and workflow grants to be mutually exclusive")
+	}
+
+	mixedAppGrants := []permission.Grant{
+		{Scope: permission.ScopeAppSet, Resource: "workspace", Level: permission.Read},
+		{Scope: permission.ScopeApp, Resource: resourceID(workspaceApp.ID), Level: permission.Read},
+	}
+	if err := server.validateRoleGrants(ctx, "workspace", mixedAppGrants); err == nil {
+		t.Fatal("expected app set and app grants to be mutually exclusive")
 	}
 }
 
@@ -2388,7 +2391,7 @@ func TestCreateRowAPICanUsePersistentRepository(t *testing.T) {
 	}
 }
 
-func TestWorkflowAndFormAPI(t *testing.T) {
+func TestWorkflowAPI(t *testing.T) {
 	server, system := newTestServer(t)
 	codeRoot := t.TempDir()
 	server.SetCodeFileStore(codefiles.NewStore(codeRoot))
@@ -2402,7 +2405,6 @@ func TestWorkflowAndFormAPI(t *testing.T) {
 	}
 	saveTestGrants(t, system,
 		permission.Grant{SubjectID: "u1", Scope: permission.ScopeWorkflowSet, Resource: "db", Level: permission.Write},
-		permission.Grant{SubjectID: "u1", Scope: permission.ScopeFormSet, Resource: "db", Level: permission.Write},
 	)
 
 	workflowRequest := httptest.NewRequest(http.MethodPost, "/api/databases/db/workflows", bytes.NewBufferString(`{
@@ -2458,40 +2460,8 @@ func TestWorkflowAndFormAPI(t *testing.T) {
 		t.Fatalf("workflow list leaked secret value: %s", listWorkflowsResponseBody)
 	}
 
-	formRequest := httptest.NewRequest(http.MethodPost, "/api/databases/db/forms", bytes.NewBufferString(`{
-		"name":"contact-intake",
-		"script":"function render(api, root) { root.append(api.input({ field: 'email' }), api.submit('Save')); return { table: 'contacts' }; }"
-	}`))
-	formRequest.AddCookie(testSessionCookie(t, system, "u1"))
-	formRecorder := httptest.NewRecorder()
-	server.ServeHTTP(formRecorder, formRequest)
-	if formRecorder.Code != http.StatusCreated {
-		t.Fatalf("expected form 201, got %d: %s", formRecorder.Code, formRecorder.Body.String())
-	}
-
-	var form systemdb.FormDefinition
-	if err := json.NewDecoder(formRecorder.Body).Decode(&form); err != nil {
-		t.Fatal(err)
-	}
-	if form.DatabaseName != "db" {
-		t.Fatalf("expected db-level form, got %#v", form)
-	}
-	listForms := httptest.NewRequest(http.MethodGet, "/api/databases/db/forms", nil)
-	listForms.AddCookie(testSessionCookie(t, system, "u1"))
-	listFormsRecorder := httptest.NewRecorder()
-	server.ServeHTTP(listFormsRecorder, listForms)
-	if listFormsRecorder.Code != http.StatusOK {
-		t.Fatalf("expected form list 200, got %d: %s", listFormsRecorder.Code, listFormsRecorder.Body.String())
-	}
-	var forms []systemdb.FormDefinition
-	if err := json.NewDecoder(listFormsRecorder.Body).Decode(&forms); err != nil {
-		t.Fatal(err)
-	}
-	if len(forms) != 1 || forms[0].ID != form.ID {
-		t.Fatalf("unexpected form list: %#v", forms)
-	}
-	if workflow.ID != 1 || form.ID != 1 {
-		t.Fatalf("expected autoincrement ids, got workflow=%d form=%d", workflow.ID, form.ID)
+	if workflow.ID != 1 {
+		t.Fatalf("expected autoincrement workflow id, got %d", workflow.ID)
 	}
 	workflowPath := filepath.Join(codeRoot, "workflow", "db", "notify.js")
 	workflowScript, err := os.ReadFile(workflowPath)
@@ -2500,14 +2470,6 @@ func TestWorkflowAndFormAPI(t *testing.T) {
 	}
 	if string(workflowScript) != workflow.Script {
 		t.Fatalf("unexpected workflow code file: %s", workflowScript)
-	}
-	formPath := filepath.Join(codeRoot, "form", "db", "contact-intake.js")
-	formScript, err := os.ReadFile(formPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(formScript) != form.Script {
-		t.Fatalf("unexpected form code file: %s", formScript)
 	}
 	fileWorkflowScript := "function instances(info) { return { noop: \"echo\" }; } function run(info) { return { message: info.inputs.name + '-from-file' }; }"
 	if err := os.WriteFile(workflowPath, []byte(fileWorkflowScript), 0o644); err != nil {
@@ -2542,25 +2504,6 @@ func TestWorkflowAndFormAPI(t *testing.T) {
 		t.Fatalf("expected workflow run to use repository script, got %#v", run.Run.Outputs)
 	}
 
-	fileFormScript := "function render(api, root) { root.append(api.input({ field: 'name', label: 'From file' }), api.submit('Save')); return { table: 'contacts' }; }"
-	if err := os.WriteFile(formPath, []byte(fileFormScript), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	getForm := httptest.NewRequest(http.MethodGet, "/api/forms/1", nil)
-	getForm.AddCookie(testSessionCookie(t, system, "u1"))
-	getFormRecorder := httptest.NewRecorder()
-	server.ServeHTTP(getFormRecorder, getForm)
-	if getFormRecorder.Code != http.StatusOK {
-		t.Fatalf("expected form reload 200, got %d: %s", getFormRecorder.Code, getFormRecorder.Body.String())
-	}
-	var reloadedForm systemdb.FormDefinition
-	if err := json.NewDecoder(getFormRecorder.Body).Decode(&reloadedForm); err != nil {
-		t.Fatal(err)
-	}
-	if reloadedForm.Script != fileFormScript {
-		t.Fatalf("expected form script from repository file, got %q", reloadedForm.Script)
-	}
-
 	renameWorkflow := httptest.NewRequest(http.MethodPost, "/api/databases/db/workflows", bytes.NewBufferString(`{
 		"id":1,
 		"name":"renamed-notify",
@@ -2582,7 +2525,7 @@ func TestWorkflowAndFormAPI(t *testing.T) {
 	}
 }
 
-func TestWorkflowAndFormCreationRequiresSetOrDatabaseWrite(t *testing.T) {
+func TestWorkflowAndAppCreationRequiresSetOrDatabaseWrite(t *testing.T) {
 	ctx := context.Background()
 	server, system := newTestServer(t)
 
@@ -2618,7 +2561,7 @@ func TestWorkflowAndFormCreationRequiresSetOrDatabaseWrite(t *testing.T) {
 
 	saveTestGrants(t, system,
 		permission.Grant{SubjectID: "workflow-owner", Scope: permission.ScopeWorkflowSet, Resource: "db", Level: permission.Write},
-		permission.Grant{SubjectID: "form-owner", Scope: permission.ScopeFormSet, Resource: "db", Level: permission.Write},
+		permission.Grant{SubjectID: "app-owner", Scope: permission.ScopeAppSet, Resource: "db", Level: permission.Write},
 	)
 	saveTestDatabaseOwners(t, system, "db", "db-owner")
 	workflowOwnerWorkflow := httptest.NewRequest(http.MethodPost, "/api/databases/db/workflows", bytes.NewBufferString(`{
@@ -2631,33 +2574,21 @@ func TestWorkflowAndFormCreationRequiresSetOrDatabaseWrite(t *testing.T) {
 	if workflowOwnerWorkflowRecorder.Code != http.StatusCreated {
 		t.Fatalf("expected workflow set writer workflow create 201, got %d: %s", workflowOwnerWorkflowRecorder.Code, workflowOwnerWorkflowRecorder.Body.String())
 	}
-	formOwnerForm := httptest.NewRequest(http.MethodPost, "/api/databases/db/forms", bytes.NewBufferString(`{
-		"name":"allowed-by-form-set",
-		"script":"function render(api, root) { root.append(api.input({ field: 'email' }), api.submit('Save')); return { table: 'contacts' }; }"
-	}`))
-	formOwnerForm.AddCookie(testSessionCookie(t, system, "form-owner"))
-	formOwnerFormRecorder := httptest.NewRecorder()
-	server.ServeHTTP(formOwnerFormRecorder, formOwnerForm)
-	if formOwnerFormRecorder.Code != http.StatusCreated {
-		t.Fatalf("expected form set writer form create 201, got %d: %s", formOwnerFormRecorder.Code, formOwnerFormRecorder.Body.String())
+	for _, userID := range []string{"viewer", "table-owner", "workflow-owner"} {
+		denied := uploadTestApp(t, server, system, userID, "db", "denied", testAppBundle(t, "db", "denied", appsdk.Version(), "x"), "")
+		if denied.Code != http.StatusForbidden {
+			t.Fatalf("expected %s app create 403, got %d: %s", userID, denied.Code, denied.Body.String())
+		}
 	}
-	dbOwnerForm := httptest.NewRequest(http.MethodPost, "/api/databases/db/forms", bytes.NewBufferString(`{
-		"name":"allowed-by-db",
-		"script":"function render(api, root) { root.append(api.input({ field: 'email' }), api.submit('Save')); return { table: 'contacts' }; }"
-	}`))
-	dbOwnerForm.AddCookie(testSessionCookie(t, system, "db-owner"))
-	dbOwnerFormRecorder := httptest.NewRecorder()
-	server.ServeHTTP(dbOwnerFormRecorder, dbOwnerForm)
-	if dbOwnerFormRecorder.Code != http.StatusCreated {
-		t.Fatalf("expected db owner form create 201, got %d: %s", dbOwnerFormRecorder.Code, dbOwnerFormRecorder.Body.String())
-	}
+	createTestApp(t, server, system, "app-owner", "db", "allowed-by-app-set")
+	createTestApp(t, server, system, "db-owner", "db", "allowed-by-db")
 }
 
-func TestDatabaseOwnerCanManageDatabaseWorkflowsAndForms(t *testing.T) {
+func TestDatabaseOwnerCanManageDatabaseWorkflowsAndApps(t *testing.T) {
 	server, system := newTestServer(t)
 	saveTestGrants(t, system,
 		permission.Grant{SubjectID: "set-owner", Scope: permission.ScopeWorkflowSet, Resource: "db", Level: permission.Write},
-		permission.Grant{SubjectID: "set-owner", Scope: permission.ScopeFormSet, Resource: "db", Level: permission.Write},
+		permission.Grant{SubjectID: "set-owner", Scope: permission.ScopeAppSet, Resource: "db", Level: permission.Write},
 	)
 	saveTestDatabaseOwners(t, system, "db", "db-owner")
 
@@ -2676,20 +2607,7 @@ func TestDatabaseOwnerCanManageDatabaseWorkflowsAndForms(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	formRequest := httptest.NewRequest(http.MethodPost, "/api/databases/db/forms", bytes.NewBufferString(`{
-		"name":"owned-by-set",
-		"script":"function render(api, root) { root.append(api.input({ field: 'name' }), api.submit('Save')); return { table: 'contacts' }; }"
-	}`))
-	formRequest.AddCookie(testSessionCookie(t, system, "set-owner"))
-	formRecorder := httptest.NewRecorder()
-	server.ServeHTTP(formRecorder, formRequest)
-	if formRecorder.Code != http.StatusCreated {
-		t.Fatalf("expected form set owner form create 201, got %d: %s", formRecorder.Code, formRecorder.Body.String())
-	}
-	var form systemdb.FormDefinition
-	if err := json.NewDecoder(formRecorder.Body).Decode(&form); err != nil {
-		t.Fatal(err)
-	}
+	app := createTestApp(t, server, system, "set-owner", "db", "owned-by-set")
 
 	listWorkflows := httptest.NewRequest(http.MethodGet, "/api/databases/db/workflows", nil)
 	listWorkflows.AddCookie(testSessionCookie(t, system, "db-owner"))
@@ -2726,43 +2644,26 @@ func TestDatabaseOwnerCanManageDatabaseWorkflowsAndForms(t *testing.T) {
 		t.Fatalf("expected db owner workflow update 201, got %d: %s", updateWorkflowRecorder.Code, updateWorkflowRecorder.Body.String())
 	}
 
-	listForms := httptest.NewRequest(http.MethodGet, "/api/databases/db/forms", nil)
-	listForms.AddCookie(testSessionCookie(t, system, "db-owner"))
-	listFormsRecorder := httptest.NewRecorder()
-	server.ServeHTTP(listFormsRecorder, listForms)
-	if listFormsRecorder.Code != http.StatusOK {
-		t.Fatalf("expected db owner form list 200, got %d: %s", listFormsRecorder.Code, listFormsRecorder.Body.String())
+	listApps := appTestRequest(t, server, system, "db-owner", http.MethodGet, "/api/databases/db/apps", nil)
+	if listApps.Code != http.StatusOK {
+		t.Fatalf("expected db owner app list 200, got %d: %s", listApps.Code, listApps.Body.String())
 	}
-	var forms []systemdb.FormDefinition
-	if err := json.NewDecoder(listFormsRecorder.Body).Decode(&forms); err != nil {
-		t.Fatal(err)
-	}
-	if len(forms) != 1 || forms[0].ID != form.ID {
-		t.Fatalf("expected db owner to see form, got %#v", forms)
+	if apps := decodeTestJSON[[]appResponse](t, listApps); len(apps) != 1 || apps[0].ID != app.App.ID || apps[0].PermissionLevel != permission.Write {
+		t.Fatalf("expected db owner to see app with write, got %#v", apps)
 	}
 
-	getForm := httptest.NewRequest(http.MethodGet, "/api/forms/1", nil)
-	getForm.AddCookie(testSessionCookie(t, system, "db-owner"))
-	getFormRecorder := httptest.NewRecorder()
-	server.ServeHTTP(getFormRecorder, getForm)
-	if getFormRecorder.Code != http.StatusOK {
-		t.Fatalf("expected db owner form get 200, got %d: %s", getFormRecorder.Code, getFormRecorder.Body.String())
+	getApp := appTestRequest(t, server, system, "db-owner", http.MethodGet, "/api/databases/db/apps/owned-by-set", nil)
+	if getApp.Code != http.StatusOK {
+		t.Fatalf("expected db owner app get 200, got %d: %s", getApp.Code, getApp.Body.String())
 	}
 
-	updateForm := httptest.NewRequest(http.MethodPost, "/api/databases/db/forms", bytes.NewBufferString(`{
-		"id":1,
-		"name":"owned-by-set",
-		"script":"function render(api, root) { root.append(api.input({ field: 'name' }), api.submit('Save')); return { table: 'contacts' }; }"
-	}`))
-	updateForm.AddCookie(testSessionCookie(t, system, "db-owner"))
-	updateFormRecorder := httptest.NewRecorder()
-	server.ServeHTTP(updateFormRecorder, updateForm)
-	if updateFormRecorder.Code != http.StatusCreated {
-		t.Fatalf("expected db owner form update 201, got %d: %s", updateFormRecorder.Code, updateFormRecorder.Body.String())
+	updateApp := uploadTestApp(t, server, system, "db-owner", "db", "owned-by-set", testAppBundle(t, "db", "owned-by-set", appsdk.Version(), "version-2"), "publish=1")
+	if updateApp.Code != http.StatusOK {
+		t.Fatalf("expected db owner app upload 200, got %d: %s", updateApp.Code, updateApp.Body.String())
 	}
 }
 
-func TestWorkflowAndFormUpdatesCannotMoveAcrossDatabases(t *testing.T) {
+func TestWorkflowUpdatesCannotMoveAcrossDatabases(t *testing.T) {
 	ctx := context.Background()
 	catalog := metadata.Catalog{Databases: []metadata.Database{
 		{Name: "db", Tables: []metadata.Table{{Name: "contacts", Fields: []metadata.Field{{Name: "name", Type: "string"}}}}},
@@ -2779,7 +2680,6 @@ func TestWorkflowAndFormUpdatesCannotMoveAcrossDatabases(t *testing.T) {
 	}
 	saveTestGrants(t, system,
 		permission.Grant{SubjectID: "u1", Scope: permission.ScopeWorkflowSet, Resource: "db", Level: permission.Write},
-		permission.Grant{SubjectID: "u1", Scope: permission.ScopeFormSet, Resource: "db", Level: permission.Write},
 	)
 
 	workflowRequest := httptest.NewRequest(http.MethodPost, "/api/databases/db/workflows", bytes.NewBufferString(`{
@@ -2794,21 +2694,6 @@ func TestWorkflowAndFormUpdatesCannotMoveAcrossDatabases(t *testing.T) {
 	}
 	var savedWorkflow workflowDefinitionResponse
 	if err := json.NewDecoder(workflowRecorder.Body).Decode(&savedWorkflow); err != nil {
-		t.Fatal(err)
-	}
-
-	formRequest := httptest.NewRequest(http.MethodPost, "/api/databases/db/forms", bytes.NewBufferString(`{
-		"name":"intake",
-		"script":"function render(api, root) { root.append(api.input({ field: 'email' }), api.submit('Save')); return { table: 'contacts' }; }"
-	}`))
-	formRequest.AddCookie(testSessionCookie(t, system, "u1"))
-	formRecorder := httptest.NewRecorder()
-	server.ServeHTTP(formRecorder, formRequest)
-	if formRecorder.Code != http.StatusCreated {
-		t.Fatalf("expected form create 201, got %d: %s", formRecorder.Code, formRecorder.Body.String())
-	}
-	var savedForm systemdb.FormDefinition
-	if err := json.NewDecoder(formRecorder.Body).Decode(&savedForm); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2837,44 +2722,12 @@ func TestWorkflowAndFormUpdatesCannotMoveAcrossDatabases(t *testing.T) {
 		t.Fatalf("expected cross-db workflow body update 400, got %d: %s", moveWorkflowByBodyRecorder.Code, moveWorkflowByBodyRecorder.Body.String())
 	}
 
-	moveFormByPath := httptest.NewRequest(http.MethodPost, "/api/databases/other/forms", bytes.NewBufferString(`{
-		"id":1,
-		"name":"intake",
-		"script":"function render(api, root) { root.append(api.input({ field: 'name' }), api.submit('Save')); return { table: 'contacts' }; }"
-	}`))
-	moveFormByPath.AddCookie(testSessionCookie(t, system, "u1"))
-	moveFormByPathRecorder := httptest.NewRecorder()
-	server.ServeHTTP(moveFormByPathRecorder, moveFormByPath)
-	if moveFormByPathRecorder.Code != http.StatusBadRequest {
-		t.Fatalf("expected cross-db form path update 400, got %d: %s", moveFormByPathRecorder.Code, moveFormByPathRecorder.Body.String())
-	}
-
-	moveFormByBody := httptest.NewRequest(http.MethodPost, "/api/forms", bytes.NewBufferString(`{
-		"id":1,
-		"database_name":"other",
-		"name":"intake",
-		"script":"function render(api, root) { root.append(api.input({ field: 'name' }), api.submit('Save')); return { table: 'contacts' }; }"
-	}`))
-	moveFormByBody.AddCookie(testSessionCookie(t, system, "u1"))
-	moveFormByBodyRecorder := httptest.NewRecorder()
-	server.ServeHTTP(moveFormByBodyRecorder, moveFormByBody)
-	if moveFormByBodyRecorder.Code != http.StatusBadRequest {
-		t.Fatalf("expected cross-db form body update 400, got %d: %s", moveFormByBodyRecorder.Code, moveFormByBodyRecorder.Body.String())
-	}
-
 	workflowAfter, err := system.Workflow(ctx, savedWorkflow.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if workflowAfter.DatabaseName != "db" || workflowAfter.Script != savedWorkflow.Script {
 		t.Fatalf("expected workflow to remain in db unchanged, got %#v", workflowAfter)
-	}
-	formAfter, err := system.Form(ctx, savedForm.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if formAfter.DatabaseName != "db" || formAfter.Script != savedForm.Script {
-		t.Fatalf("expected form to remain in db unchanged, got %#v", formAfter)
 	}
 }
 
@@ -3513,7 +3366,7 @@ func TestWorkflowRunsListDefaultsToLatestRuns(t *testing.T) {
 	}
 }
 
-func TestWorkflowAndFormPermissions(t *testing.T) {
+func TestWorkflowAndAppPermissions(t *testing.T) {
 	server, system := newTestServer(t)
 	saveTestDatabaseOwners(t, system, "db", "owner")
 
@@ -3535,22 +3388,9 @@ func TestWorkflowAndFormPermissions(t *testing.T) {
 		t.Fatalf("expected created workflow write permission, got %d", createdWorkflow.PermissionLevel)
 	}
 
-	formRequest := httptest.NewRequest(http.MethodPost, "/api/databases/db/forms", bytes.NewBufferString(`{
-		"name":"restricted-form",
-		"script":"function render(api, root) { root.append(api.input({ field: 'email' }), api.submit('Save')); return { table: 'contacts' }; }"
-	}`))
-	formRequest.AddCookie(testSessionCookie(t, system, "owner"))
-	formRecorder := httptest.NewRecorder()
-	server.ServeHTTP(formRecorder, formRequest)
-	if formRecorder.Code != http.StatusCreated {
-		t.Fatalf("expected form 201, got %d: %s", formRecorder.Code, formRecorder.Body.String())
-	}
-	var createdForm systemdb.FormDefinition
-	if err := json.NewDecoder(formRecorder.Body).Decode(&createdForm); err != nil {
-		t.Fatal(err)
-	}
-	if createdForm.PermissionLevel != permission.Write {
-		t.Fatalf("expected created form write permission, got %d", createdForm.PermissionLevel)
+	createdApp := createTestApp(t, server, system, "owner", "db", "restricted")
+	if createdApp.App.PermissionLevel != permission.Write {
+		t.Fatalf("expected created app write permission, got %d", createdApp.App.PermissionLevel)
 	}
 
 	otherWorkflow := httptest.NewRequest(http.MethodGet, "/api/workflows/1", nil)
@@ -3561,19 +3401,12 @@ func TestWorkflowAndFormPermissions(t *testing.T) {
 		t.Fatalf("expected workflow 403, got %d: %s", otherWorkflowRecorder.Code, otherWorkflowRecorder.Body.String())
 	}
 
-	otherForms := httptest.NewRequest(http.MethodGet, "/api/databases/db/forms", nil)
-	otherForms.AddCookie(testSessionCookie(t, system, "other"))
-	otherFormsRecorder := httptest.NewRecorder()
-	server.ServeHTTP(otherFormsRecorder, otherForms)
-	if otherFormsRecorder.Code != http.StatusOK {
-		t.Fatalf("expected form list 200, got %d: %s", otherFormsRecorder.Code, otherFormsRecorder.Body.String())
+	otherApps := appTestRequest(t, server, system, "other", http.MethodGet, "/api/databases/db/apps", nil)
+	if otherApps.Code != http.StatusOK {
+		t.Fatalf("expected app list 200, got %d: %s", otherApps.Code, otherApps.Body.String())
 	}
-	var forms []systemdb.FormDefinition
-	if err := json.NewDecoder(otherFormsRecorder.Body).Decode(&forms); err != nil {
-		t.Fatal(err)
-	}
-	if len(forms) != 0 {
-		t.Fatalf("expected unreadable forms to be filtered, got %#v", forms)
+	if apps := decodeTestJSON[[]appResponse](t, otherApps); len(apps) != 0 {
+		t.Fatalf("expected unreadable apps to be filtered, got %#v", apps)
 	}
 
 	if err := system.SaveGrant(context.Background(), permission.Grant{
@@ -3607,151 +3440,35 @@ func TestWorkflowAndFormPermissions(t *testing.T) {
 		t.Fatalf("expected read-only workflow run 403, got %d: %s", runWorkflowRecorder.Code, runWorkflowRecorder.Body.String())
 	}
 
-	if err := system.SaveGrant(context.Background(), permission.Grant{
+	saveTestGrants(t, system, permission.Grant{
 		SubjectID: "other",
-		Scope:     permission.ScopeForm,
-		Resource:  "1",
+		Scope:     permission.ScopeApp,
+		Resource:  resourceID(createdApp.App.ID),
 		Level:     permission.Read,
-	}); err != nil {
-		t.Fatal(err)
+	})
+	readApps := appTestRequest(t, server, system, "other", http.MethodGet, "/api/databases/db/apps", nil)
+	if readApps.Code != http.StatusOK {
+		t.Fatalf("expected app list 200, got %d: %s", readApps.Code, readApps.Body.String())
 	}
-	readForms := httptest.NewRequest(http.MethodGet, "/api/databases/db/forms", nil)
-	readForms.AddCookie(testSessionCookie(t, system, "other"))
-	readFormsRecorder := httptest.NewRecorder()
-	server.ServeHTTP(readFormsRecorder, readForms)
-	if readFormsRecorder.Code != http.StatusOK {
-		t.Fatalf("expected form list 200, got %d: %s", readFormsRecorder.Code, readFormsRecorder.Body.String())
-	}
-	if err := json.NewDecoder(readFormsRecorder.Body).Decode(&forms); err != nil {
-		t.Fatal(err)
-	}
-	if len(forms) != 1 || forms[0].PermissionLevel != permission.Read {
-		t.Fatalf("expected read-only form permission in list, got %#v", forms)
+	if apps := decodeTestJSON[[]appResponse](t, readApps); len(apps) != 1 || apps[0].PermissionLevel != permission.Read {
+		t.Fatalf("expected read-only app permission in list, got %#v", apps)
 	}
 
-	readForm := httptest.NewRequest(http.MethodGet, "/api/forms/1", nil)
-	readForm.AddCookie(testSessionCookie(t, system, "other"))
-	readFormRecorder := httptest.NewRecorder()
-	server.ServeHTTP(readFormRecorder, readForm)
-	if readFormRecorder.Code != http.StatusOK {
-		t.Fatalf("expected form 200, got %d: %s", readFormRecorder.Code, readFormRecorder.Body.String())
+	readApp := appTestRequest(t, server, system, "other", http.MethodGet, "/api/databases/db/apps/restricted", nil)
+	if readApp.Code != http.StatusOK {
+		t.Fatalf("expected app 200, got %d: %s", readApp.Code, readApp.Body.String())
 	}
-	var readableForm systemdb.FormDefinition
-	if err := json.NewDecoder(readFormRecorder.Body).Decode(&readableForm); err != nil {
-		t.Fatal(err)
-	}
-	if readableForm.PermissionLevel != permission.Read {
-		t.Fatalf("expected read-only form permission, got %d", readableForm.PermissionLevel)
+	if detail := decodeTestJSON[appDetailResponse](t, readApp); detail.App.PermissionLevel != permission.Read {
+		t.Fatalf("expected read-only app permission, got %d", detail.App.PermissionLevel)
 	}
 
-	updateForm := httptest.NewRequest(http.MethodPost, "/api/databases/db/forms", bytes.NewBufferString(`{
-		"id":1,
-		"name":"restricted-form",
-		"script":"function render(api, root) { root.append(api.input({ field: 'name' }), api.submit('Save')); return { table: 'contacts' }; }"
-	}`))
-	updateForm.AddCookie(testSessionCookie(t, system, "other"))
-	updateFormRecorder := httptest.NewRecorder()
-	server.ServeHTTP(updateFormRecorder, updateForm)
-	if updateFormRecorder.Code != http.StatusForbidden {
-		t.Fatalf("expected read-only form update 403, got %d: %s", updateFormRecorder.Code, updateFormRecorder.Body.String())
+	updateApp := uploadTestApp(t, server, system, "other", "db", "restricted", testAppBundle(t, "db", "restricted", appsdk.Version(), "update"), "")
+	if updateApp.Code != http.StatusForbidden {
+		t.Fatalf("expected read-only app upload 403, got %d: %s", updateApp.Code, updateApp.Body.String())
 	}
-}
-
-func TestPublishedFormRequiresExplicitFormPermission(t *testing.T) {
-	ctx := context.Background()
-	server, system := newTestServer(t)
-	if err := system.SaveGrant(ctx, permission.Grant{
-		SubjectID: "owner",
-		Scope:     permission.ScopeFieldSet,
-		Resource:  "db.contacts",
-		Level:     permission.FieldAll,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	saveTestGrants(t, system, permission.Grant{SubjectID: "owner", Scope: permission.ScopeFormSet, Resource: "db", Level: permission.Write})
-
-	formRequest := httptest.NewRequest(http.MethodPost, "/api/databases/db/forms", bytes.NewBufferString(`{
-		"name":"published-intake",
-		"script":"function render(api, root) { root.append(api.input({ field: 'name' }), api.input({ field: 'email' }), api.submit('Submit')); return { table: 'contacts' }; }"
-	}`))
-	formRequest.AddCookie(testSessionCookie(t, system, "owner"))
-	formRecorder := httptest.NewRecorder()
-	server.ServeHTTP(formRecorder, formRequest)
-	if formRecorder.Code != http.StatusCreated {
-		t.Fatalf("expected form 201, got %d: %s", formRecorder.Code, formRecorder.Body.String())
-	}
-
-	publishRequest := httptest.NewRequest(http.MethodPost, "/api/forms/1/publish", nil)
-	publishRequest.AddCookie(testSessionCookie(t, system, "owner"))
-	publishRecorder := httptest.NewRecorder()
-	server.ServeHTTP(publishRecorder, publishRequest)
-	if publishRecorder.Code != http.StatusOK {
-		t.Fatalf("expected publish 200, got %d: %s", publishRecorder.Code, publishRecorder.Body.String())
-	}
-	var published systemdb.FormDefinition
-	if err := json.NewDecoder(publishRecorder.Body).Decode(&published); err != nil {
-		t.Fatal(err)
-	}
-	if published.PublishedToken == "" {
-		t.Fatalf("expected published token, got %#v", published)
-	}
-
-	anonymousRead := httptest.NewRequest(http.MethodGet, "/api/published/forms/"+published.PublishedToken, nil)
-	anonymousRecorder := httptest.NewRecorder()
-	server.ServeHTTP(anonymousRecorder, anonymousRead)
-	if anonymousRecorder.Code != http.StatusUnauthorized {
-		t.Fatalf("expected anonymous published form 401, got %d: %s", anonymousRecorder.Code, anonymousRecorder.Body.String())
-	}
-
-	saveTestDatabaseOwners(t, system, "db", "db-owner")
-	dbOwnerRead := httptest.NewRequest(http.MethodGet, "/api/published/forms/"+published.PublishedToken, nil)
-	dbOwnerRead.AddCookie(testSessionCookie(t, system, "db-owner"))
-	dbOwnerRecorder := httptest.NewRecorder()
-	server.ServeHTTP(dbOwnerRecorder, dbOwnerRead)
-	if dbOwnerRecorder.Code != http.StatusForbidden {
-		t.Fatalf("expected db owner without form grant 403, got %d: %s", dbOwnerRecorder.Code, dbOwnerRecorder.Body.String())
-	}
-
-	if err := system.SaveGrant(ctx, permission.Grant{
-		SubjectID: "reader",
-		Scope:     permission.ScopeForm,
-		Resource:  "1",
-		Level:     permission.Read,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	saveTestGrants(t, system, permission.Grant{SubjectID: "reader", Scope: permission.ScopeFieldSet, Resource: "db.contacts", Level: permission.FieldAll})
-	saveTestRecordCreateGrant(t, system, "reader", "db.contacts")
-	readerRead := httptest.NewRequest(http.MethodGet, "/api/published/forms/"+published.PublishedToken, nil)
-	readerRead.AddCookie(testSessionCookie(t, system, "reader"))
-	readerRecorder := httptest.NewRecorder()
-	server.ServeHTTP(readerRecorder, readerRead)
-	if readerRecorder.Code != http.StatusOK {
-		t.Fatalf("expected reader published form 200, got %d: %s", readerRecorder.Code, readerRecorder.Body.String())
-	}
-	var readableForm systemdb.FormDefinition
-	if err := json.NewDecoder(readerRecorder.Body).Decode(&readableForm); err != nil {
-		t.Fatal(err)
-	}
-	if readableForm.PermissionLevel != permission.Read {
-		t.Fatalf("expected read permission on published form, got %#v", readableForm)
-	}
-
-	submitRequest := httptest.NewRequest(http.MethodPost, "/api/tables/db/contacts/rows", bytes.NewBufferString(`{
-		"values":{"name":"Published Reader","email":"reader@example.com"}
-	}`))
-	submitRequest.AddCookie(testSessionCookie(t, system, "reader"))
-	submitRecorder := httptest.NewRecorder()
-	server.ServeHTTP(submitRecorder, submitRequest)
-	if submitRecorder.Code != http.StatusCreated {
-		t.Fatalf("expected reader published form submit 201, got %d: %s", submitRecorder.Code, submitRecorder.Body.String())
-	}
-	var row rowResponse
-	if err := json.NewDecoder(submitRecorder.Body).Decode(&row); err != nil {
-		t.Fatal(err)
-	}
-	if row.RecordID == 0 || row.Values["name"] != "Published Reader" {
-		t.Fatalf("unexpected published submit row: %#v", row)
+	publishApp := publishTestApp(t, server, system, "other", "db", "restricted", 1)
+	if publishApp.Code != http.StatusForbidden {
+		t.Fatalf("expected read-only app publish 403, got %d: %s", publishApp.Code, publishApp.Body.String())
 	}
 }
 

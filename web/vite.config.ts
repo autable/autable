@@ -11,7 +11,9 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      "/api": apiProxyTarget
+      "/api": apiProxyTarget,
+      // Hosted apps are served by the backend under /apps/{database}/{name}/.
+      "^/apps/": apiProxyTarget
     }
   },
   test: {

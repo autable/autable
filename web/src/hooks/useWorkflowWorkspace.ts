@@ -3,25 +3,17 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { replaceResource } from "../appState";
 import {
-  deleteForm,
   deleteWorkflow,
-  listForms,
   loadWorkflowRun,
   listWorkflowRuns,
   listWorkflows,
   loadWorkflowNodes,
-  publishForm,
   runWorkflow,
-  saveForm,
   saveWorkflow,
-  unpublishForm,
-  type FormDefinition,
   type WorkflowDefinition,
   type WorkflowNodeInfo,
   type WorkflowRunResponse
 } from "../api";
-import { rowRecordToValues } from "../tableGrid";
-import { useFormRunner } from "./useFormRunner";
 import {
   evaluateWorkflowInstances,
   evaluateWorkflowTrigger,
@@ -29,51 +21,36 @@ import {
   type WorkflowTriggerDeclaration
 } from "../workflowInstances";
 
-type UseWorkflowFormWorkspaceOptions = {
+type UseWorkflowWorkspaceOptions = {
   currentUserID?: string;
   databaseName: string;
   tableName: string;
   onStatus: Notify;
-  onSubmittedRow: (targetTableName: string, row: ReturnType<typeof rowRecordToValues>) => void;
 };
 
 const workflowEvaluationDelayMs = 5000;
 
-export function useWorkflowFormWorkspace({
+export function useWorkflowWorkspace({
   currentUserID,
   databaseName,
   tableName,
-  onStatus,
-  onSubmittedRow
-}: UseWorkflowFormWorkspaceOptions) {
+  onStatus
+}: UseWorkflowWorkspaceOptions) {
   const { t } = useTranslation();
   const emptyWorkflowInstances: WorkflowInstanceResult = { ok: false, error: t("workflow.noWorkflowSelected") };
   const [workflows, setWorkflows] = useState<WorkflowDefinition[]>([]);
   const [workflowNodes, setWorkflowNodes] = useState<WorkflowNodeInfo[]>([]);
-  const [forms, setForms] = useState<FormDefinition[]>([]);
   const [selectedWorkflowID, setSelectedWorkflowID] = useState(0);
-  const [selectedFormID, setSelectedFormID] = useState(0);
   const [workflowRuns, setWorkflowRuns] = useState<WorkflowRunResponse[]>([]);
   const [selectedWorkflowRunKey, setSelectedWorkflowRunKey] = useState("");
   const [newWorkflowName, setNewWorkflowName] = useState("");
-  const [newFormName, setNewFormName] = useState("");
   const [workflowInstances, setWorkflowInstances] = useState<WorkflowInstanceResult>(emptyWorkflowInstances);
   const [workflowTrigger, setWorkflowTrigger] = useState<WorkflowTriggerDeclaration | undefined>(undefined);
   const [resourcesReady, setResourcesReady] = useState(false);
 
   const selectedWorkflow = workflows.find((item) => item.id === selectedWorkflowID) ?? workflows[0];
-  const selectedForm = forms.find((item) => item.id === selectedFormID) ?? forms[0];
   const selectedWorkflowRun =
     workflowRuns.find((run) => run.history_key === selectedWorkflowRunKey) ?? workflowRuns[0] ?? null;
-  const formRunner = useFormRunner({
-    databaseName,
-    script: selectedForm?.script ?? "",
-    onStatus,
-    onRowCreated: (targetTableName, row) => {
-      onSubmittedRow(targetTableName, rowRecordToValues(row));
-      onStatus(t("status.formCreatedRecord", { table: targetTableName, id: row.record_id }));
-    }
-  });
 
   useEffect(() => {
     evaluateSelectedWorkflowScript();
@@ -122,15 +99,11 @@ export function useWorkflowFormWorkspace({
 
     async function loadResources(dbName: string) {
       setResourcesReady(false);
-      const [nextWorkflows, nextForms, nextWorkflowNodes] = await Promise.all([
-        listWorkflows(dbName),
-        listForms(dbName),
-        loadWorkflowNodes()
-      ]);
+      const [nextWorkflows, nextWorkflowNodes] = await Promise.all([listWorkflows(dbName), loadWorkflowNodes()]);
       if (cancelled) {
         return;
       }
-      applyResources(nextWorkflows, nextForms, nextWorkflowNodes);
+      applyResources(nextWorkflows, nextWorkflowNodes);
       setResourcesReady(true);
     }
   }, [currentUserID, databaseName]);
@@ -212,22 +185,16 @@ export function useWorkflowFormWorkspace({
     return loadWorkflowRuns(workflowID, preferredRunKey);
   }
 
-  function applyResources(
-    nextWorkflows: WorkflowDefinition[],
-    nextForms: FormDefinition[],
-    nextWorkflowNodes: WorkflowNodeInfo[]
-  ) {
+  function applyResources(nextWorkflows: WorkflowDefinition[], nextWorkflowNodes: WorkflowNodeInfo[]) {
     setWorkflows(nextWorkflows);
-    setForms(nextForms);
     setWorkflowNodes(nextWorkflowNodes);
     setSelectedWorkflowID((current) =>
       nextWorkflows.some((item) => item.id === current) ? current : nextWorkflows[0]?.id ?? 0
     );
-    setSelectedFormID((current) => (nextForms.some((item) => item.id === current) ? current : nextForms[0]?.id ?? 0));
   }
 
   function clearResources() {
-    applyResources([], [], []);
+    applyResources([], []);
     setResourcesReady(false);
     setWorkflowRuns([]);
     setSelectedWorkflowRunKey("");
@@ -238,12 +205,11 @@ export function useWorkflowFormWorkspace({
       clearResources();
       return;
     }
-    const [nextWorkflows, nextForms, nextWorkflowNodes] = await Promise.all([
+    const [nextWorkflows, nextWorkflowNodes] = await Promise.all([
       listWorkflows(nextDatabaseName),
-      listForms(nextDatabaseName),
       loadWorkflowNodes()
     ]);
-    applyResources(nextWorkflows, nextForms, nextWorkflowNodes);
+    applyResources(nextWorkflows, nextWorkflowNodes);
     setResourcesReady(true);
   }
 
@@ -395,110 +361,6 @@ export function useWorkflowFormWorkspace({
     }
   }
 
-  async function persistForm() {
-    if (!selectedForm) {
-      return;
-    }
-    try {
-      const saved = await saveForm(databaseName, selectedForm);
-      setForms((current) => replaceResource(current, saved));
-      setSelectedFormID(saved.id ?? 0);
-      onStatus(t("status.savedForm", { id: saved.id }));
-    } catch (error) {
-      onStatus(error instanceof Error ? error.message : t("status.formSaveFailed"), "error");
-    }
-  }
-
-  async function publishSelectedForm() {
-    if (!selectedForm?.id) {
-      onStatus(t("status.saveFormBeforePublishing"));
-      return;
-    }
-    try {
-      const saved = await publishForm(selectedForm.id);
-      setForms((current) => replaceResource(current, saved));
-      setSelectedFormID(saved.id ?? 0);
-      onStatus(t("status.publishedForm", { name: saved.name }));
-    } catch (error) {
-      onStatus(error instanceof Error ? error.message : t("status.formPublishFailed"), "error");
-    }
-  }
-
-  async function unpublishSelectedForm() {
-    if (!selectedForm?.id) {
-      onStatus(t("status.saveFormBeforeUnpublishing"));
-      return;
-    }
-    try {
-      const saved = await unpublishForm(selectedForm.id);
-      setForms((current) => replaceResource(current, saved));
-      setSelectedFormID(saved.id ?? 0);
-      onStatus(t("status.unpublishedForm", { name: saved.name }));
-    } catch (error) {
-      onStatus(error instanceof Error ? error.message : t("status.formUnpublishFailed"), "error");
-    }
-  }
-
-  async function renameSelectedForm(name: string, formID = selectedForm?.id ?? 0) {
-    const trimmed = name.trim();
-    const form = forms.find((item) => item.id === formID) ?? selectedForm;
-    if (!form || !trimmed) {
-      onStatus(t("status.formNameRequired"));
-      return;
-    }
-    try {
-      const saved = await saveForm(databaseName, { ...form, name: trimmed });
-      setForms((current) => replaceResource(current, saved));
-      setSelectedFormID(saved.id ?? 0);
-      onStatus(t("status.renamedForm", { name: saved.name }));
-    } catch (error) {
-      onStatus(error instanceof Error ? error.message : t("status.formRenameFailed"), "error");
-    }
-  }
-
-  async function deleteSelectedForm(formID = selectedForm?.id ?? 0) {
-    const form = forms.find((item) => item.id === formID) ?? selectedForm;
-    if (!form?.id) {
-      return;
-    }
-    try {
-      await deleteForm(form.id);
-      setForms((current) => current.filter((item) => item.id !== form.id));
-      setSelectedFormID(forms.find((item) => item.id !== form.id)?.id ?? 0);
-      onStatus(t("status.deletedForm", { name: form.name }));
-    } catch (error) {
-      onStatus(error instanceof Error ? error.message : t("status.formDeleteFailed"), "error");
-    }
-  }
-
-  async function createForm() {
-    const name = newFormName.trim();
-    if (!databaseName) {
-      onStatus(t("status.selectDatabaseBeforeForm"));
-      return;
-    }
-    if (!name) {
-      onStatus(t("status.formNameRequired"));
-      return;
-    }
-    try {
-      const targetTable = tableName ? JSON.stringify(tableName) : '""';
-      const saved = await saveForm(databaseName, {
-        database_name: databaseName,
-        name,
-        script: defaultFormScript(targetTable)
-      });
-      setForms((current) => replaceResource(current, saved));
-      setSelectedFormID(saved.id ?? 0);
-      setNewFormName("");
-      onStatus(t("status.createdForm", { name: saved.name }));
-      return saved;
-    } catch (error) {
-      onStatus(error instanceof Error ? error.message : t("status.formCreationFailed"), "error");
-      return undefined;
-    }
-  }
-
   function updateSelectedWorkflowScript(script: string) {
     setWorkflows((current) =>
       current.map((item) => (item.id === selectedWorkflow?.id ? { ...item, script } : item))
@@ -546,18 +408,8 @@ export function useWorkflowFormWorkspace({
     }
   }
 
-  function updateSelectedFormScript(script: string) {
-    setForms((current) => current.map((item) => (item.id === selectedForm?.id ? { ...item, script } : item)));
-  }
-
   return {
-    forms,
-    formResult: formRunner.result,
-    formValues: formRunner.values,
-    newFormName,
     newWorkflowName,
-    renderedForm: formRunner.rendered,
-    selectedForm,
     selectedWorkflow,
     selectedWorkflowRun,
     resourcesReady,
@@ -567,31 +419,19 @@ export function useWorkflowFormWorkspace({
     workflowRuns,
     workflows,
     clearResources,
-    createForm,
     createWorkflow,
-    deleteSelectedForm,
     deleteSelectedWorkflow,
     executeWorkflow,
-    persistForm,
-    publishSelectedForm,
     persistWorkflow,
-    renameSelectedForm,
     renameSelectedWorkflow,
     refreshResources,
     refreshWorkflowRuns,
-    setNewFormName,
     setNewWorkflowName,
     setSelectedWorkflowHistoryRetention,
     setSelectedWorkflowTimeoutSeconds,
-    setSelectedFormID,
     setSelectedWorkflowID,
     setSelectedWorkflowRunKey,
-    executeFormAction: formRunner.execute,
-    submitRenderedForm: formRunner.submit,
     toggleSelectedWorkflowEnabled,
-    unpublishSelectedForm,
-    updateFormValue: formRunner.updateValue,
-    updateSelectedFormScript,
     saveSelectedWorkflowInstanceConfig,
     updateSelectedWorkflowScript
   };
@@ -645,22 +485,4 @@ export function mergeWorkflowRuns(
 ): WorkflowRunResponse[] {
   const loadedRuns = new Map(current.filter((run) => !run.summary).map((run) => [run.history_key, run]));
   return incoming.map((run) => (run.summary ? loadedRuns.get(run.history_key) ?? run : run));
-}
-
-function defaultFormScript(targetTable: string) {
-  return `/**
- * @param {AutableFormAPI} api
- * @param {AutableFormRoot} root
- * @returns {AutableFormDefinition}
- */
-function render(api, root) {
-  root.append(
-    api.input({ field: 'name', label: 'Name' }),
-    api.button('Submit', async (api) => {
-      const row = await api.rows.create(${targetTable}, api.values());
-      api.show(row);
-    })
-  );
-  return { table: ${targetTable} };
-}`;
 }
