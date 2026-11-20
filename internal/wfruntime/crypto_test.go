@@ -12,7 +12,12 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
+	"maps"
+	"regexp"
+	"slices"
 	"testing"
+
+	"autable/internal/wfsdk"
 )
 
 func pemOf(t *testing.T, kind string, der []byte) string {
@@ -205,4 +210,20 @@ func TestAESVectors(t *testing.T) {
 		"aadOpen":   "hello",
 		"aadError":  "aes-gcm: message authentication failed",
 	})
+}
+
+// Every host function the vendored SDK calls must exist on the host object.
+func TestSDKCallsOnlyExistingHostFunctions(t *testing.T) {
+	called := map[string]bool{}
+	for _, body := range wfsdk.Files() {
+		for _, match := range regexp.MustCompile(`host\(\)\.(\w+)\(`).FindAllStringSubmatch(body, -1) {
+			called[match[1]] = true
+		}
+	}
+	if !called["publicKey"] || !called["encode"] {
+		t.Fatalf("expected the SDK to call publicKey and encode, got %v", called)
+	}
+	names, _ := json.Marshal(slices.Sorted(maps.Keys(called)))
+	output := cryptoRun(t, `return { missing: `+string(names)+`.filter((name) => typeof h[name] !== "function").join(",") };`, nil)
+	expectValues(t, output, map[string]any{"missing": ""})
 }

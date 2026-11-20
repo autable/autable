@@ -44,3 +44,29 @@ func TestFilesEmbedTheSDK(t *testing.T) {
 		}
 	}
 }
+
+func TestSDKDeclaresCryptoAndEncodings(t *testing.T) {
+	files := Files()
+	for name, wants := range map[string][]string{
+		"host.ts": {
+			`export type Encoding = "base64" | "base64url" | "hex" | "base58" | "utf8";`,
+			`publicKey(privateKeyPem: string): string;`,
+		},
+		"crypto.ts": {
+			`export type SignatureAlgorithm = "ed25519" | "ecdsa-p256-sha256" | "ecdsa-sha256-p1363" | "rsa-pkcs1-sha256";`,
+			`publicKey(privateKeyPem: string): string {`,
+			`export const base58: BinaryEncoding = {`,
+			`host().encode("base58", toBytes(data))`,
+			`host().decode("base58", text)`,
+		},
+		"index.ts": {
+			`export { crypto, base64, base64url, hex, base58, utf8 } from "./crypto.js";`,
+		},
+	} {
+		for _, want := range wants {
+			if !strings.Contains(files[name], want) {
+				t.Errorf("%s lacks %q", name, want)
+			}
+		}
+	}
+}

@@ -120,17 +120,33 @@ Algorithm names are lower-case strings.
 | `randomBytes(n)` — `0 ≤ n ≤ 65536` | `ArrayBuffer` from the OS CSPRNG |
 | `sign(alg, privateKeyPem, data)` | `ArrayBuffer` signature |
 | `verify(alg, publicKeyPem, data, signature)` | `boolean` (`false` for a wrong signature; throws for a malformed key) |
+| `publicKey(privateKeyPem)` | `string`: the matching public key as base64 SPKI DER, byte for byte what OpenSSL writes |
 | `encrypt(alg, key, iv, data, aad?)` | `ArrayBuffer` |
 | `decrypt(alg, key, iv, data, aad?)` | `ArrayBuffer` (throws on authentication failure / bad padding) |
 | `timingSafeEqual(a, b)` | `boolean`, constant time for equal lengths |
 
-- `sign`/`verify` algorithms: `"ed25519"`, `"ecdsa-p256-sha256"` and
-  `"rsa-pkcs1-sha256"`. ECDSA signatures are produced in ASN.1 DER form
-  (as OpenSSL does); `verify` accepts DER or the 64-byte raw `r‖s` form
-  WebCrypto uses. Private keys are PEM `PRIVATE KEY` (PKCS #8), or
-  `EC PRIVATE KEY` / `RSA PRIVATE KEY`; public keys are PEM `PUBLIC KEY`
-  (PKIX) or `RSA PUBLIC KEY`; a PEM `CERTIFICATE` is also accepted for
-  `verify`.
+- `sign`/`verify` algorithms: `"ed25519"`, `"ecdsa-p256-sha256"`,
+  `"ecdsa-sha256-p1363"` and `"rsa-pkcs1-sha256"`.
+  - `"ecdsa-p256-sha256"` signatures are produced in ASN.1 DER form (as
+    OpenSSL does); `verify` accepts DER or the 64-byte raw `r‖s` form
+    WebCrypto uses.
+  - `"ecdsa-sha256-p1363"` is ECDSA over the SHA-256 digest on the curve
+    the key names: P-256, P-384, P-521 or secp160r1 (any curve Go's x509
+    parses also works). Signatures are IEEE P1363 raw `r‖s`, each half
+    zero-padded to the byte length of the group order: 64, 96, 132 or 42
+    bytes (secp160r1's order is 161 bits, so 21 bytes per half). This is
+    the layout .NET's `ECDsa.SignData`/`VerifyData` and Windows CNG use by
+    default; `verify` accepts only that layout and returns `false` for any
+    other length. `sign` verifies the signature against the key's own
+    public key before returning it. secp160r1 runs on Go's generic,
+    non-constant-time ECDSA arithmetic: fine for a server issuing short
+    codes (e.g. licence codes typed by hand), not for keys an attacker can
+    time.
+- Private keys are PEM `PRIVATE KEY` (PKCS #8), or `EC PRIVATE KEY` /
+  `RSA PRIVATE KEY`; public keys are PEM `PUBLIC KEY` (SPKI) or
+  `RSA PUBLIC KEY`; a PEM `CERTIFICATE` is also accepted for `verify`.
+  Text that is not PEM is read as single-line base64 DER: PKCS #8 for
+  private keys, SPKI for public keys (whitespace is ignored).
 - `encrypt`/`decrypt` algorithms: `"aes-gcm"` (12-byte IV recommended;
   output is ciphertext followed by the 16-byte tag; `aad` optional) and
   `"aes-cbc"` (16-byte IV, PKCS #7 padding; `aad` not allowed). Key
@@ -140,8 +156,21 @@ Algorithm names are lower-case strings.
 
 | Function | Returns |
 |---|---|
-| `encode(encoding, bytes)` — `encoding`: `"base64" \| "base64url" \| "hex" \| "utf8"` | `string` (`base64url` without padding) |
+| `encode(encoding, bytes)` — `encoding`: `"base64" \| "base64url" \| "hex" \| "base58" \| "utf8"` | `string` (`base64url` without padding) |
 | `decode(encoding, text)` | `ArrayBuffer` (`base64`/`base64url` accept padded and unpadded input; throws on invalid input) |
+
+`base58` uses the Bitcoin alphabet
+(`123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz`, no `0`,
+`O`, `I`, `l`) and is **fixed-width**: the bytes are one big-endian integer
+written in exactly `ceil(8n / log2 58)` digits for `n` bytes, left-padded
+with `1` (the digit zero). The same number of bytes always gives the same
+number of characters (20 → 28, 32 → 44, 42 → 58, 64 → 88), so a verifier
+can check a code's length outright. `decode` maps each such width back to
+its byte length and throws on any other length, on a character outside the
+alphabet, and on a value too large for the width. Leading zero bytes are
+not encoded as one `1` each as in Bitcoin's base58, so codes are not
+interchangeable with other base58 implementations. Input is limited to
+1024 bytes.
 
 ### Secrets and vars (sync)
 

@@ -12,11 +12,20 @@ export type HashAlgorithm = "sha1" | "sha256" | "sha512" | "md5";
 /**
  * Signature algorithms. Keys are PEM text: private keys as PKCS #8
  * "PRIVATE KEY", "EC PRIVATE KEY" or "RSA PRIVATE KEY"; public keys as
- * "PUBLIC KEY" (PKIX), "RSA PUBLIC KEY", or a "CERTIFICATE" (verify only).
- * ECDSA signatures are produced as ASN.1 DER; verify also accepts the
- * 64-byte raw r‖s form WebCrypto uses.
+ * "PUBLIC KEY" (SPKI), "RSA PUBLIC KEY", or a "CERTIFICATE" (verify only).
+ * Single-line base64 DER is accepted too, as PKCS #8 or SPKI.
+ *
+ * "ecdsa-p256-sha256": produces ASN.1 DER; verify also accepts the 64-byte
+ * raw r‖s form WebCrypto uses.
+ * "ecdsa-sha256-p1363": ECDSA on the curve the key names (P-256, P-384,
+ * P-521 or secp160r1) over the SHA-256 digest, as IEEE P1363 raw r‖s with
+ * each half zero-padded to the byte length of the group order: 64, 96, 132
+ * or 42 bytes. This is the layout .NET's ECDsa.SignData/VerifyData and
+ * Windows CNG use by default; secp160r1 gives signatures short enough to
+ * type by hand (58 characters with `base58`). sign checks the signature
+ * against the key's own public key before returning it.
  */
-export type SignatureAlgorithm = "ed25519" | "ecdsa-p256-sha256" | "rsa-pkcs1-sha256";
+export type SignatureAlgorithm = "ed25519" | "ecdsa-p256-sha256" | "ecdsa-sha256-p1363" | "rsa-pkcs1-sha256";
 
 /**
  * "aes-gcm": 12-byte IV recommended; the ciphertext is followed by the
@@ -41,13 +50,21 @@ export const crypto = {
   randomBytes(n: number): Uint8Array {
     return bytes(host().randomBytes(n));
   },
-  /** Signs data with a PEM private key. */
+  /** Signs data with a private key (PEM or base64 PKCS #8 DER). */
   sign(algorithm: SignatureAlgorithm, privateKeyPem: string, data: BytesOrString): Uint8Array {
     return bytes(host().sign(algorithm, privateKeyPem, data));
   },
   /** False for a wrong signature; throws for a malformed key. */
   verify(algorithm: SignatureAlgorithm, publicKeyPem: string, data: BytesOrString, signature: Bytes): boolean {
     return host().verify(algorithm, publicKeyPem, data, signature);
+  },
+  /**
+   * The public key of a private key, as base64 SPKI DER encoded exactly as
+   * OpenSSL does: compare it with a key embedded in a client to confirm the
+   * right key is configured, or pass it to verify.
+   */
+  publicKey(privateKeyPem: string): string {
+    return host().publicKey(privateKeyPem);
   },
   encrypt(algorithm: CipherAlgorithm, key: Bytes, iv: Bytes, plaintext: BytesOrString, aad?: BytesOrString): Uint8Array {
     return bytes(aad === undefined ? host().encrypt(algorithm, key, iv, plaintext) : host().encrypt(algorithm, key, iv, plaintext, aad));
@@ -89,6 +106,19 @@ export const base64url: BinaryEncoding = {
 export const hex: BinaryEncoding = {
   encode: (data) => host().encode("hex", toBytes(data)),
   decode: (text) => bytes(host().decode("hex", text)),
+};
+
+/**
+ * Base58 with the Bitcoin alphabet (no 0, O, I or l), fixed-width: n bytes
+ * always encode to ceil(8n / log2 58) characters, left-padded with "1"
+ * (42 bytes give 58), so a code's length can be checked outright. decode
+ * maps each such width back to its byte length and throws on any other
+ * length. Leading zero bytes are not Bitcoin's one "1" each, so codes are
+ * not interchangeable with other base58 implementations. At most 1024 bytes.
+ */
+export const base58: BinaryEncoding = {
+  encode: (data) => host().encode("base58", toBytes(data)),
+  decode: (text) => bytes(host().decode("base58", text)),
 };
 
 /** UTF-8 text and its bytes. Invalid sequences decode to U+FFFD. */

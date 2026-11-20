@@ -36,7 +36,7 @@ export interface HostFetchResponse {
   body: ArrayBuffer;
 }
 
-export type Encoding = "base64" | "base64url" | "hex" | "utf8";
+export type Encoding = "base64" | "base64url" | "hex" | "base58" | "utf8";
 
 export interface Host {
   readonly version: string;
@@ -47,6 +47,7 @@ export interface Host {
   randomBytes(n: number): ArrayBuffer;
   sign(alg: string, privateKeyPem: string, data: BytesOrString): ArrayBuffer;
   verify(alg: string, publicKeyPem: string, data: BytesOrString, signature: Bytes): boolean;
+  publicKey(privateKeyPem: string): string;
   encrypt(alg: string, key: Bytes, iv: Bytes, data: BytesOrString, aad?: BytesOrString): ArrayBuffer;
   decrypt(alg: string, key: Bytes, iv: Bytes, data: Bytes, aad?: BytesOrString): ArrayBuffer;
   timingSafeEqual(a: BytesOrString, b: BytesOrString): boolean;

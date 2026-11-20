@@ -51,7 +51,7 @@ export type {
 export { fetch, FetchResponse, FetchHeaders } from "./fetch.js";
 export type { FetchInit } from "./fetch.js";
 
-export { crypto, base64, base64url, hex, utf8 } from "./crypto.js";
+export { crypto, base64, base64url, hex, base58, utf8 } from "./crypto.js";
 export type { HashAlgorithm, SignatureAlgorithm, CipherAlgorithm, BinaryEncoding } from "./crypto.js";
 
 export { secrets, vars, log, runInfo, isPermissionError, isNotFoundError } from "./runtime.js";

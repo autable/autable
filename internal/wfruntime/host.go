@@ -217,6 +217,7 @@ func (machine *vm) hostObject() *goja.Object {
 	sync("randomBytes", machine.hostRandomBytes)
 	sync("sign", machine.hostSign)
 	sync("verify", machine.hostVerify)
+	sync("publicKey", machine.hostPublicKey)
 	sync("encrypt", machine.hostEncrypt)
 	sync("decrypt", machine.hostDecrypt)
 	sync("timingSafeEqual", machine.hostTimingSafeEqual)

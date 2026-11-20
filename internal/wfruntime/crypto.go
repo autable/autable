@@ -100,6 +100,14 @@ func (machine *vm) hostVerify(call goja.FunctionCall) goja.Value {
 	return machine.rt.ToValue(ok)
 }
 
+func (machine *vm) hostPublicKey(call goja.FunctionCall) goja.Value {
+	public, err := PublicKey(call.Argument(0).String())
+	if err != nil {
+		machine.throw(err)
+	}
+	return machine.rt.ToValue(public)
+}
+
 func (machine *vm) optionalBytes(value goja.Value, name string) []byte {
 	if value == nil || goja.IsUndefined(value) || goja.IsNull(value) {
 		return nil
@@ -139,7 +147,8 @@ func (machine *vm) hostDecode(call goja.FunctionCall) goja.Value {
 	return machine.buffer(data)
 }
 
-// Encode renders bytes as base64, base64url (unpadded), hex or utf8.
+// Encode renders bytes as base64, base64url (unpadded), hex, fixed-width
+// base58 or utf8.
 func Encode(encoding string, data []byte) (string, error) {
 	switch encoding {
 	case "base64":
@@ -148,15 +157,17 @@ func Encode(encoding string, data []byte) (string, error) {
 		return base64.RawURLEncoding.EncodeToString(data), nil
 	case "hex":
 		return hex.EncodeToString(data), nil
+	case "base58":
+		return encodeBase58(data)
 	case "utf8":
 		return strings.ToValidUTF8(string(data), "�"), nil
 	default:
-		return "", fmt.Errorf("unsupported encoding %q (use base64, base64url, hex or utf8)", encoding)
+		return "", fmt.Errorf("unsupported encoding %q (use base64, base64url, hex, base58 or utf8)", encoding)
 	}
 }
 
 // Decode parses text in the encoding; base64 variants accept padded and
-// unpadded input.
+// unpadded input, base58 only its fixed widths.
 func Decode(encoding, text string) ([]byte, error) {
 	var data []byte
 	var err error
@@ -167,10 +178,12 @@ func Decode(encoding, text string) ([]byte, error) {
 		data, err = base64.RawURLEncoding.DecodeString(strings.TrimRight(text, "="))
 	case "hex":
 		data, err = hex.DecodeString(text)
+	case "base58":
+		data, err = decodeBase58(text)
 	case "utf8":
 		data = []byte(text)
 	default:
-		return nil, fmt.Errorf("unsupported encoding %q (use base64, base64url, hex or utf8)", encoding)
+		return nil, fmt.Errorf("unsupported encoding %q (use base64, base64url, hex, base58 or utf8)", encoding)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("invalid %s input: %w", encoding, err)
@@ -178,24 +191,31 @@ func Decode(encoding, text string) ([]byte, error) {
 	return data, nil
 }
 
-func pemBlock(text string) (*pem.Block, error) {
-	block, _ := pem.Decode([]byte(strings.TrimSpace(text)))
-	if block == nil {
-		return nil, errors.New("key is not PEM encoded")
+// keyBlock reads a PEM block, or else single-line base64 DER, which is
+// taken as the PEM type bareType (PKCS #8 for private keys, SPKI for
+// public keys).
+func keyBlock(text, bareType string) (*pem.Block, error) {
+	text = strings.TrimSpace(text)
+	if block, _ := pem.Decode([]byte(text)); block != nil {
+		return block, nil
 	}
-	return block, nil
+	der, err := base64.StdEncoding.DecodeString(strings.Join(strings.Fields(text), ""))
+	if err != nil || len(der) == 0 {
+		return nil, errors.New("key is neither PEM nor base64 DER")
+	}
+	return &pem.Block{Type: bareType, Bytes: der}, nil
 }
 
 func parsePrivateKey(text string) (crypto.PrivateKey, error) {
-	block, err := pemBlock(text)
+	block, err := keyBlock(text, "PRIVATE KEY")
 	if err != nil {
 		return nil, err
 	}
 	switch block.Type {
 	case "PRIVATE KEY":
-		return x509.ParsePKCS8PrivateKey(block.Bytes)
+		return parsePKCS8(block.Bytes)
 	case "EC PRIVATE KEY":
-		return x509.ParseECPrivateKey(block.Bytes)
+		return parseSEC1(block.Bytes)
 	case "RSA PRIVATE KEY":
 		return x509.ParsePKCS1PrivateKey(block.Bytes)
 	default:
@@ -204,13 +224,13 @@ func parsePrivateKey(text string) (crypto.PrivateKey, error) {
 }
 
 func parsePublicKey(text string) (crypto.PublicKey, error) {
-	block, err := pemBlock(text)
+	block, err := keyBlock(text, "PUBLIC KEY")
 	if err != nil {
 		return nil, err
 	}
 	switch block.Type {
 	case "PUBLIC KEY":
-		return x509.ParsePKIXPublicKey(block.Bytes)
+		return parseSPKI(block.Bytes)
 	case "RSA PUBLIC KEY":
 		return x509.ParsePKCS1PublicKey(block.Bytes)
 	case "CERTIFICATE":
@@ -224,7 +244,47 @@ func parsePublicKey(text string) (crypto.PublicKey, error) {
 	}
 }
 
-// Sign signs data with a PEM private key.
+// PublicKey returns the public key of a private key (PEM or base64 PKCS #8
+// DER) as base64 SPKI DER, encoded as OpenSSL does.
+func PublicKey(privateKey string) (string, error) {
+	key, err := parsePrivateKey(privateKey)
+	if err != nil {
+		return "", err
+	}
+	signer, ok := key.(crypto.Signer)
+	if !ok {
+		return "", fmt.Errorf("unsupported private key type %T", key)
+	}
+	der, err := marshalSPKI(signer.Public())
+	if err != nil {
+		return "", err
+	}
+	return base64.StdEncoding.EncodeToString(der), nil
+}
+
+const signatureAlgorithms = "ed25519, ecdsa-p256-sha256, ecdsa-sha256-p1363 or rsa-pkcs1-sha256"
+
+// signP1363 signs the SHA-256 digest of data and returns the IEEE P1363
+// layout r||s, each half zero-padded to the byte length of the group order.
+// The signature is checked against the key's own public key first, so a
+// mismatched key or curve fails here rather than at the verifier.
+func signP1363(key *ecdsa.PrivateKey, data []byte) ([]byte, error) {
+	digest := sha256.Sum256(data)
+	r, s, err := ecdsa.Sign(rand.Reader, key, digest[:])
+	if err != nil {
+		return nil, fmt.Errorf("ecdsa-sha256-p1363: %w", err)
+	}
+	if !ecdsa.Verify(&key.PublicKey, digest[:], r, s) {
+		return nil, errors.New("ecdsa-sha256-p1363: the signature does not verify against the key's own public key")
+	}
+	size := orderBytes(key.Curve)
+	signature := make([]byte, 2*size)
+	r.FillBytes(signature[:size])
+	s.FillBytes(signature[size:])
+	return signature, nil
+}
+
+// Sign signs data with a private key: PEM, or base64 PKCS #8 DER.
 func Sign(alg, privateKeyPEM string, data []byte) ([]byte, error) {
 	key, err := parsePrivateKey(privateKeyPEM)
 	if err != nil {
@@ -244,6 +304,12 @@ func Sign(alg, privateKeyPEM string, data []byte) ([]byte, error) {
 		}
 		digest := sha256.Sum256(data)
 		return ecdsa.SignASN1(rand.Reader, private, digest[:])
+	case "ecdsa-sha256-p1363":
+		private, ok := key.(*ecdsa.PrivateKey)
+		if !ok {
+			return nil, errors.New("ecdsa-sha256-p1363 needs an ECDSA private key")
+		}
+		return signP1363(private, data)
 	case "rsa-pkcs1-sha256":
 		private, ok := key.(*rsa.PrivateKey)
 		if !ok {
@@ -252,12 +318,13 @@ func Sign(alg, privateKeyPEM string, data []byte) ([]byte, error) {
 		digest := sha256.Sum256(data)
 		return rsa.SignPKCS1v15(nil, private, crypto.SHA256, digest[:])
 	default:
-		return nil, fmt.Errorf("unsupported signature algorithm %q (use ed25519, ecdsa-p256-sha256 or rsa-pkcs1-sha256)", alg)
+		return nil, fmt.Errorf("unsupported signature algorithm %q (use %s)", alg, signatureAlgorithms)
 	}
 }
 
-// Verify checks a signature with a PEM public key or certificate. A wrong
-// signature is (false, nil); a bad key or algorithm is an error.
+// Verify checks a signature with a public key (PEM, or base64 SPKI DER) or
+// a PEM certificate. A wrong signature is (false, nil); a bad key or
+// algorithm is an error.
 func Verify(alg, publicKeyPEM string, data, signature []byte) (bool, error) {
 	key, err := parsePublicKey(publicKeyPEM)
 	if err != nil {
@@ -284,6 +351,19 @@ func Verify(alg, publicKeyPEM string, data, signature []byte) (bool, error) {
 			}
 		}
 		return ecdsa.VerifyASN1(public, digest[:], signature), nil
+	case "ecdsa-sha256-p1363":
+		public, ok := key.(*ecdsa.PublicKey)
+		if !ok {
+			return false, errors.New("ecdsa-sha256-p1363 needs an ECDSA public key")
+		}
+		size := orderBytes(public.Curve)
+		if len(signature) != 2*size {
+			return false, nil
+		}
+		digest := sha256.Sum256(data)
+		r := new(big.Int).SetBytes(signature[:size])
+		s := new(big.Int).SetBytes(signature[size:])
+		return ecdsa.Verify(public, digest[:], r, s), nil
 	case "rsa-pkcs1-sha256":
 		public, ok := key.(*rsa.PublicKey)
 		if !ok {
@@ -292,7 +372,7 @@ func Verify(alg, publicKeyPEM string, data, signature []byte) (bool, error) {
 		digest := sha256.Sum256(data)
 		return rsa.VerifyPKCS1v15(public, crypto.SHA256, digest[:], signature) == nil, nil
 	default:
-		return false, fmt.Errorf("unsupported signature algorithm %q (use ed25519, ecdsa-p256-sha256 or rsa-pkcs1-sha256)", alg)
+		return false, fmt.Errorf("unsupported signature algorithm %q (use %s)", alg, signatureAlgorithms)
 	}
 }
 

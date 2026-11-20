@@ -113,7 +113,7 @@ SDK is built on are specified in
 | Primitive | Behaviour |
 |---|---|
 | `fetch(url, init?)` | `method`, `headers`, `body` (string, bytes or a JSON-able value with `json:`), `timeoutMs` (default 30 s), `via` (runner name). Returns `{ status, headers, text(), json(), bytes() }`. Responses are capped at 20 MiB. With `via`, the request is performed by that runner. |
-| `crypto` | `hash(alg, data)` for sha1, sha256, sha512 and md5; `hmac(alg, key, data)`; `randomBytes(n)`; `sign` and `verify` for ed25519, ecdsa-p256-sha256 and rsa-pkcs1-sha256 (PEM keys); AES-GCM and AES-CBC `encrypt`/`decrypt`. Encoding helpers: `base64`, `base64url`, `hex`, `utf8`. |
+| `crypto` | `hash(alg, data)` for sha1, sha256, sha512 and md5; `hmac(alg, key, data)`; `randomBytes(n)`; `sign` and `verify` for ed25519, ecdsa-p256-sha256, ecdsa-sha256-p1363 (IEEE P1363 `r‖s` on the key's curve: P-256, P-384, P-521 or secp160r1) and rsa-pkcs1-sha256 (PEM or base64 DER keys); `publicKey(privateKey)` (base64 SPKI); AES-GCM and AES-CBC `encrypt`/`decrypt`. Encoding helpers: `base64`, `base64url`, `hex`, fixed-width `base58` (Bitcoin alphabet), `utf8`. |
 | `secrets.get(name)`, `vars.get(name)` | Per-workflow, set by admins in the UI or with `autablectl workflow secret set`. Secret values are never returned by the API. |
 | `tables(name)`, `users`, `files` | The same typed API as the app SDK, executed server-side as the `workflow:<id>` subject and limited by that subject's grants. |
 | `log.info/warn/error(message, data?)` | Stored with the run. |
