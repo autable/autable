@@ -15,7 +15,14 @@ you are talking to:
 ## Rules
 
 - Change the live server only through `autablectl`. The git repository autable
-  pushes metadata to is a one-way backup; editing it changes nothing.
+  pushes to (metadata, plus the source of every pushed app, workflow and
+  library version under `app/`, `workflow/`, `lib/`) is a one-way backup:
+  read it for history, but editing it changes nothing. Develop in your own
+  repository instead.
+- If you are not an admin, prepare the change (code in the development
+  repository, a description of schema or permission changes) and hand it to
+  an admin to deploy; admins are the deployment gate, and review happens
+  outside autable.
 - autable is admin-gated. Only admins (emails listed under `auth.admins` in
   the server config) change code or structure: databases, tables, fields,
   views, permissions, workflows, and apps. Everyone else reads and writes data
@@ -25,6 +32,10 @@ you are talking to:
 - Discover before you write: `autablectl meta [DB [TABLE]]` for tables, fields
   (types, enum `options`, `deleted`), and views; `autablectl help` and
   `autablectl <command> -h` for the CLI.
+- For one-off data work use `autablectl rows list|get|create|update|upsert|
+  delete|history` (and `autablectl api` for any other endpoint); every call
+  is checked against your own grants. Anything that has to happen again
+  belongs in a workflow, not in a script you run by hand.
 - Build automation as workflows: TypeScript projects bundled into one script
   and versioned like apps. `autablectl workflow init DIR --database DB --name
   NAME` scaffolds one with the SDK in `src/autable/`; read the project's
@@ -67,7 +78,8 @@ you are talking to:
 - Workflows run as their own subject, `workflow:<id>`, with the grants an
   admin gave it; apps run in the viewer's browser with the viewer's
   permissions. Hiding a column in an app does not protect it; field
-  permissions do.
+  permissions do. An app's `runWorkflow` starts a workflow's `manual`
+  trigger, which needs the viewer to hold a run grant on that workflow.
 - Secrets are never readable through the API. Ask a human for the value, or
   pipe it in: `autablectl workflow secret set DB NAME KEY` reads stdin; never
   put a secret on a command line, in source, or in a log.
