@@ -12,7 +12,7 @@ Every command prints JSON on stdout and diagnostics on stderr. Exit codes:
 `0` success, `1` the request failed, `2` the command line was invalid.
 
 Release archives named `autable-<version>-cli-<os>-<arch>` contain the binary
-for Linux (amd64, arm64) and Windows (amd64). To build it
+for Linux (amd64) and Windows (amd64). To build it
 yourself: `CGO_ENABLED=0 go build ./cmd/autablectl`.
 
 ## Signing in
