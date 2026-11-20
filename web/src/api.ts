@@ -48,18 +48,13 @@ export type TableMetadata = {
   display_name: string;
   fields: Field[];
   views: TableView[];
+  // 2 for admins, 1 for a table a non-admin can see.
   permission_level?: 0 | 1 | 2;
-  database_permission_level?: 0 | 1 | 2;
-  field_permission_level?: 0 | 1 | 2;
-  view_permission_level?: 0 | 1 | 2;
 };
 
 export type DatabaseMetadata = {
   name: string;
   tables: TableMetadata[];
-  permission_level?: 0 | 1 | 2;
-  workflow_permission_level?: 0 | 1 | 2;
-  form_permission_level?: 0 | 1 | 2;
 };
 
 export type Catalog = {
@@ -78,97 +73,212 @@ export type RowChange = {
   actor_id?: string;
 };
 
-export type WorkflowDefinition = {
-  id?: number;
+// Workflows (docs/design/workflows-v2.md): versioned code bundles pushed
+// with `autablectl workflow push`. Triggers come from the published version.
+export type WorkflowManualField = {
+  name: string;
+  label?: string;
+  type: "string" | "number" | "boolean";
+};
+
+export type WorkflowRecordOperation = "create" | "update" | "delete";
+
+export type WorkflowTrigger =
+  | { name: string; kind: "schedule"; cron: string; timezone?: string }
+  | {
+      name: string;
+      kind: "recordChanged";
+      table: string;
+      operations?: WorkflowRecordOperation[];
+      fields?: string[];
+      includeOwnWrites?: boolean;
+    }
+  | { name: string; kind: "webhook"; path: string; url?: string }
+  | { name: string; kind: "manual"; fields?: WorkflowManualField[] };
+
+export type WorkflowTriggerKind = WorkflowTrigger["kind"];
+
+export type WorkflowManualTrigger = Extract<WorkflowTrigger, { kind: "manual" }>;
+
+export type WorkflowRunStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled";
+
+export type WorkflowLogEntry = {
+  time: number;
+  level: "info" | "warn" | "error";
+  message: string;
+  data?: unknown;
+};
+
+// A run as admins see it; lists omit event and logs, and users who started
+// a run only get status, output and error.
+export type WorkflowRun = {
+  id: number;
+  workflow_id: number;
+  version?: number;
+  trigger: string;
+  status: WorkflowRunStatus;
+  event?: unknown;
+  output?: unknown;
+  error?: string;
+  started_by?: string;
+  created_at: number;
+  started_at?: number;
+  finished_at?: number;
+  logs?: WorkflowLogEntry[];
+  // The libraries the run loaded (@lib/<name>) with the versions it used.
+  libraries?: LibraryUse[];
+};
+
+export type LibraryUse = { name: string; version: number };
+
+// WorkflowSummary names a workflow, e.g. as a role member.
+export type WorkflowSummary = {
+  id: number;
   database_name: string;
   name: string;
-  script: string;
-  enabled?: boolean;
+  title: string;
+};
+
+// WorkflowDefinition is a list entry. Admins get every field; users with a
+// run grant get the runnable workflows with their manual triggers only.
+export type WorkflowDefinition = WorkflowSummary & {
+  enabled: boolean;
+  published_version: number;
+  latest_version?: number;
+  timeout_seconds?: number;
+  history_retention_days?: number;
   creator_id?: string;
-  secrets: Record<string, number>;
-  secret_values?: Record<string, string>;
-  variables: Record<string, string>;
-  runners?: Record<string, string>;
-  history_retention_days?: number | null;
-  timeout_seconds?: number | null;
   permission_level?: 0 | 1 | 2;
   created_at?: number;
   updated_at?: number;
+  triggers: WorkflowTrigger[];
+  last_run?: WorkflowRun;
 };
 
-export type WorkflowPort = {
-  name: string;
-  type: string;
-  description?: string;
+export type WorkflowVersion = {
+  workflow_id: number;
+  version: number;
+  sdk: string;
+  message: string;
+  size: number;
+  // Libraries the version imports, recorded when it is published.
+  libraries?: string[];
+  created_by: string;
+  created_at: number;
+  published: boolean;
+  supported: boolean;
+  sdk_error?: string;
 };
 
-export type WorkflowNodeInfo = {
-  type: string;
-  display_name: string;
-  description?: string;
-  documentation?: Record<string, string>;
-  inputs: WorkflowPort[];
-  outputs: WorkflowPort[];
-  variables?: WorkflowPort[];
-  secrets?: WorkflowPort[];
-  stateless: boolean;
-  trigger: boolean;
+export type WorkflowDetail = {
+  workflow: WorkflowDefinition;
+  versions: WorkflowVersion[];
+  secrets: string[];
+  vars: Record<string, string>;
+  sdk: { version: string; min_major: number };
 };
 
-export type WorkflowInstanceDeclaration = {
-  node: string;
-  variables?: WorkflowPort[];
-  secrets?: WorkflowPort[];
-  params?: Record<string, unknown>;
+export type WorkflowSettings = {
+  enabled?: boolean;
+  timeout_seconds?: number;
+  history_retention_days?: number;
 };
 
-export type WorkflowStepRecord = {
-  node_id: string;
-  node_type?: string;
-  runner?: string;
-  input?: Record<string, unknown>;
-  output?: Record<string, unknown>;
-  error?: string;
+export type WorkflowRunFilter = {
+  status?: WorkflowRunStatus | "";
+  limit?: number;
+  before?: number;
 };
 
+// RunnerStatus is a connected runner: an egress proxy for workflow fetch
+// calls made with `via`.
 export type RunnerStatus = {
   name: string;
   version: string;
-  node_types: string[];
   connected_at: number;
 };
 
 export type RunnersResponse = {
-  token?: { exists: boolean; created_at?: number } | null;
-  can_manage: boolean;
+  token: { exists: boolean; created_at?: number };
   runners: RunnerStatus[];
-  remote_node_types: string[];
 };
 
-export type WorkflowRun = {
-  workflow_id: number;
-  timestamp: number;
-  inputs?: Record<string, unknown>;
-  outputs?: Record<string, unknown>;
-  steps: WorkflowStepRecord[];
-  error?: string;
-};
-
-export type WorkflowRunResponse = {
-  history_key: string;
-  run: WorkflowRun;
-  summary?: boolean;
-};
-
-export type FormDefinition = {
-  id?: number;
+// AppDefinition is a hosted web app: a versioned static bundle uploaded with
+// `autablectl app push` and served at `url`. published_version is 0 while
+// no version is published.
+export type AppDefinition = {
+  id: number;
   database_name: string;
   name: string;
-  script: string;
-  published_token?: string;
+  title: string;
+  published_version: number;
+  latest_version: number;
+  creator_id?: string;
   permission_level?: 0 | 1 | 2;
-  created_at?: number;
-  updated_at?: number;
+  created_at: number;
+  updated_at: number;
+  url: string;
+};
+
+export type AppVersion = {
+  app_id: number;
+  version: number;
+  sdk: string;
+  message: string;
+  size: number;
+  created_by: string;
+  created_at: number;
+  supported: boolean;
+  sdk_error?: string;
+  preview_url: string;
+};
+
+export type AppDetail = {
+  app: AppDefinition;
+  versions: AppVersion[];
+  sdk: { version: string; min_major: number };
+};
+
+// A library is instance-wide shared code that workflows import as
+// "@lib/<name>"; every run loads its published version. Admins only.
+export type LibraryImporter = {
+  kind: "workflow" | "library";
+  database_name?: string;
+  name: string;
+  title: string;
+  version: number;
+};
+
+export type LibraryDefinition = {
+  id: number;
+  name: string;
+  title: string;
+  published_version: number;
+  latest_version: number;
+  creator_id?: string;
+  created_at: number;
+  updated_at: number;
+  imported_by: LibraryImporter[];
+};
+
+export type LibraryVersion = {
+  library_id: number;
+  version: number;
+  sdk: string;
+  message: string;
+  size: number;
+  imports: string[];
+  created_by: string;
+  created_at: number;
+  published: boolean;
+  supported: boolean;
+  sdk_error?: string;
+};
+
+export type LibraryDetail = {
+  library: LibraryDefinition;
+  versions: LibraryVersion[];
+  sdk: { version: string; min_major: number };
 };
 
 export type PermissionGrant = {
@@ -176,20 +286,18 @@ export type PermissionGrant = {
   scope:
     | "field_set"
     | "field"
-    | "field_add"
-    | "field_modify"
     | "record"
     | "view_set"
     | "view"
-    | "workflow_set"
     | "workflow"
-    | "form_set"
-    | "form"
+    | "app_set"
+    | "app"
     | "file";
   resource: string;
   field: string;
-  // 0/1/2 for most scopes; field and field_set use the bitmask
-  // 1 = read, 2 = update, 4 = create.
+  // 0/1/2 for most data scopes; field and field_set use the bitmask
+  // 1 = read, 2 = update, 4 = create. workflow is 0 = none / 1 = run;
+  // app and app_set are 0 = none / 1 = open.
   level: number;
 };
 
@@ -201,7 +309,7 @@ export type RoleDefinition = {
   grants: PermissionGrant[];
   members: RoleMember[];
   member_users?: AuthUser[];
-  member_workflows?: WorkflowDefinition[];
+  member_workflows?: WorkflowSummary[];
   created_at?: number;
   updated_at?: number;
 };
@@ -216,6 +324,9 @@ export type AuthUser = {
   email: string;
   display_name: string;
   provider: string;
+  // Global admins write code and structure; everyone else only gets data
+  // access through grants.
+  is_admin?: boolean;
 };
 
 export type RowRecord = {
@@ -258,49 +369,6 @@ export type AuthConfig = {
   password_enabled: boolean;
   oidc_enabled: boolean;
   oidc_providers: OIDCProvider[];
-  ai_enabled?: boolean;
-};
-
-export type AIAuthStatus = {
-  authenticated: boolean;
-  account?: string;
-  message?: string;
-};
-
-export type AIAuthStart = {
-  type: string;
-  login_id?: string;
-  verification_url?: string;
-  user_code?: string;
-  auth_url?: string;
-  message?: string;
-};
-
-export type AIReasoningEffortOption = {
-  reasoning_effort: string;
-  description?: string;
-};
-
-export type AIModelOption = {
-  id: string;
-  model?: string;
-  display_name: string;
-  description?: string;
-  supported_reasoning_efforts?: AIReasoningEffortOption[];
-  default_reasoning_effort?: string;
-  is_default?: boolean;
-};
-
-export type AIOptions = {
-  models: AIModelOption[];
-};
-
-export type AIScriptKind = "workflow" | "form";
-
-export type AIScriptSuggestion = {
-  content: string;
-  summary?: string;
-  diagnostics?: string[];
 };
 
 export async function loadMetadata(): Promise<Catalog> {
@@ -602,54 +670,6 @@ export async function loadAuthConfig(): Promise<AuthConfig> {
   return response.json() as Promise<AuthConfig>;
 }
 
-export async function loadAIAuthStatus(): Promise<AIAuthStatus> {
-  const response = await fetch("/api/ai/auth/status");
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: response.statusText }));
-    throw new Error(error.error ?? `AI auth status failed: ${response.status}`);
-  }
-  return response.json() as Promise<AIAuthStatus>;
-}
-
-export async function startAIAuth(): Promise<AIAuthStart> {
-  const response = await fetch("/api/ai/auth/start", { method: "POST" });
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: response.statusText }));
-    throw new Error(error.error ?? `AI auth start failed: ${response.status}`);
-  }
-  return response.json() as Promise<AIAuthStart>;
-}
-
-export async function loadAIOptions(): Promise<AIOptions> {
-  const response = await fetch("/api/ai/options");
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: response.statusText }));
-    throw new Error(error.error ?? `AI options failed: ${response.status}`);
-  }
-  return response.json() as Promise<AIOptions>;
-}
-
-export async function suggestScriptWithAI(request: {
-  kind: AIScriptKind;
-  resource_id: number;
-  instruction: string;
-  script: string;
-  language?: string;
-  model?: string;
-  reasoning_effort?: string;
-}): Promise<AIScriptSuggestion> {
-  const response = await fetch("/api/ai/suggest-script", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(request)
-  });
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: response.statusText }));
-    throw new Error(error.error ?? `AI script suggestion failed: ${response.status}`);
-  }
-  return response.json() as Promise<AIScriptSuggestion>;
-}
-
 export function oidcStartURL(providerName: string, redirect?: string): string {
   const base = `/api/auth/oidc/${encodeURIComponent(providerName)}/start`;
   return redirect ? `${base}?redirect=${encodeURIComponent(redirect)}` : base;
@@ -720,148 +740,260 @@ export function fileDownloadURL(id: number): string {
   return `/api/files/${id}`;
 }
 
+async function errorMessage(response: Response, fallback: string): Promise<string> {
+  const body = (await response.json().catch(() => null)) as { error?: string } | null;
+  return body?.error ?? `${fallback}: ${response.status}`;
+}
+
+function workflowsPath(dbName: string): string {
+  return `/api/databases/${encodeURIComponent(dbName)}/workflows`;
+}
+
+function workflowPath(dbName: string, name: string): string {
+  return `${workflowsPath(dbName)}/${encodeURIComponent(name)}`;
+}
+
 export async function listWorkflows(dbName: string): Promise<WorkflowDefinition[]> {
-  const response = await fetch(`/api/databases/${dbName}/workflows`);
+  const response = await fetch(workflowsPath(dbName));
   if (!response.ok) {
-    throw new Error(`workflow list failed: ${response.status}`);
+    throw new Error(await errorMessage(response, "workflow list failed"));
   }
   return response.json() as Promise<WorkflowDefinition[]>;
 }
 
-export async function saveWorkflow(
-  dbName: string,
-  workflow: WorkflowDefinition
-): Promise<WorkflowDefinition> {
-  const payload = {
-    id: workflow.id,
-    database_name: workflow.database_name,
-    name: workflow.name,
-    script: workflow.script,
-    enabled: workflow.enabled ?? true,
-    creator_id: workflow.creator_id,
-    secrets: workflow.secret_values ?? {},
-    variables: workflow.variables,
-    runners: workflow.runners ?? {},
-    history_retention_days: workflow.history_retention_days ?? null,
-    timeout_seconds: workflow.timeout_seconds ?? null,
-    permission_level: workflow.permission_level,
-    created_at: workflow.created_at,
-    updated_at: workflow.updated_at
-  };
-  const response = await fetch(`/api/databases/${dbName}/workflows`, {
+export async function loadWorkflow(dbName: string, name: string): Promise<WorkflowDetail> {
+  const response = await fetch(workflowPath(dbName, name));
+  if (!response.ok) {
+    throw new Error(await errorMessage(response, "workflow load failed"));
+  }
+  return response.json() as Promise<WorkflowDetail>;
+}
+
+export async function publishWorkflowVersion(dbName: string, name: string, version: number): Promise<WorkflowDefinition> {
+  const response = await fetch(`${workflowPath(dbName, name)}/publish`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload)
+    body: JSON.stringify({ version })
   });
   if (!response.ok) {
-    throw new Error(`workflow save failed: ${response.status}`);
+    throw new Error(await errorMessage(response, "workflow publish failed"));
   }
   return response.json() as Promise<WorkflowDefinition>;
 }
 
-export async function deleteWorkflow(workflowID: number): Promise<void> {
-  const response = await fetch(`/api/workflows/${workflowID}`, { method: "DELETE" });
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: response.statusText }));
-    throw new Error(error.error ?? `workflow delete failed: ${response.status}`);
-  }
-}
-
-export async function loadWorkflowNodes(): Promise<WorkflowNodeInfo[]> {
-  const response = await fetch("/api/workflow/nodes");
-  if (!response.ok) {
-    throw new Error(`workflow nodes failed: ${response.status}`);
-  }
-  return response.json() as Promise<WorkflowNodeInfo[]>;
-}
-
-export async function runWorkflow(
-  workflowID: number,
-  inputs: Record<string, unknown>
-): Promise<WorkflowRunResponse> {
-  const response = await fetch(`/api/workflows/${workflowID}/runs`, {
-    method: "POST",
+export async function updateWorkflowSettings(dbName: string, name: string, settings: WorkflowSettings): Promise<WorkflowDefinition> {
+  const response = await fetch(workflowPath(dbName, name), {
+    method: "PATCH",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ inputs })
-  });
-  const body = await response.json().catch(() => undefined);
-  if (!response.ok && !body?.run) {
-    throw new Error(body?.error ?? `workflow run failed: ${response.status}`);
-  }
-  return body as WorkflowRunResponse;
-}
-
-export async function listWorkflowRuns(workflowID: number): Promise<WorkflowRunResponse[]> {
-  const response = await fetch(`/api/workflows/${workflowID}/runs`);
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: response.statusText }));
-    throw new Error(error.error ?? `workflow runs failed: ${response.status}`);
-  }
-  return response.json() as Promise<WorkflowRunResponse[]>;
-}
-
-export async function loadWorkflowRun(workflowID: number, historyKey: string): Promise<WorkflowRunResponse> {
-  const response = await fetch(`/api/workflows/${workflowID}/runs/${encodeURIComponent(historyKey)}`);
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: response.statusText }));
-    throw new Error(error.error ?? `workflow run failed: ${response.status}`);
-  }
-  return response.json() as Promise<WorkflowRunResponse>;
-}
-
-export async function listForms(dbName: string): Promise<FormDefinition[]> {
-  const response = await fetch(`/api/databases/${dbName}/forms`);
-  if (!response.ok) {
-    throw new Error(`form list failed: ${response.status}`);
-  }
-  return response.json() as Promise<FormDefinition[]>;
-}
-
-export async function saveForm(dbName: string, form: FormDefinition): Promise<FormDefinition> {
-  const response = await fetch(`/api/databases/${dbName}/forms`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(form)
+    body: JSON.stringify(settings)
   });
   if (!response.ok) {
-    throw new Error(`form save failed: ${response.status}`);
+    throw new Error(await errorMessage(response, "workflow update failed"));
   }
-  return response.json() as Promise<FormDefinition>;
+  return response.json() as Promise<WorkflowDefinition>;
 }
 
-export async function publishForm(formID: number): Promise<FormDefinition> {
-  const response = await fetch(`/api/forms/${formID}/publish`, { method: "POST" });
+export async function deleteWorkflow(dbName: string, name: string): Promise<void> {
+  const response = await fetch(workflowPath(dbName, name), { method: "DELETE" });
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: response.statusText }));
-    throw new Error(error.error ?? `form publish failed: ${response.status}`);
-  }
-  return response.json() as Promise<FormDefinition>;
-}
-
-export async function unpublishForm(formID: number): Promise<FormDefinition> {
-  const response = await fetch(`/api/forms/${formID}/unpublish`, { method: "POST" });
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: response.statusText }));
-    throw new Error(error.error ?? `form unpublish failed: ${response.status}`);
-  }
-  return response.json() as Promise<FormDefinition>;
-}
-
-export async function deleteForm(formID: number): Promise<void> {
-  const response = await fetch(`/api/forms/${formID}`, { method: "DELETE" });
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: response.statusText }));
-    throw new Error(error.error ?? `form delete failed: ${response.status}`);
+    throw new Error(await errorMessage(response, "workflow delete failed"));
   }
 }
 
-export async function loadPublishedForm(token: string): Promise<FormDefinition> {
-  const response = await fetch(`/api/published/forms/${encodeURIComponent(token)}`);
+export function workflowSourceURL(dbName: string, name: string, version: number): string {
+  return `${workflowPath(dbName, name)}/versions/${version}/source`;
+}
+
+async function putWorkflowValue(dbName: string, name: string, kind: "secrets" | "vars", key: string, value: string) {
+  const response = await fetch(`${workflowPath(dbName, name)}/${kind}/${encodeURIComponent(key)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ value })
+  });
+  if (!response.ok) {
+    throw new Error(await errorMessage(response, `workflow ${kind} update failed`));
+  }
+}
+
+async function deleteWorkflowValue(dbName: string, name: string, kind: "secrets" | "vars", key: string) {
+  const response = await fetch(`${workflowPath(dbName, name)}/${kind}/${encodeURIComponent(key)}`, { method: "DELETE" });
+  if (!response.ok) {
+    throw new Error(await errorMessage(response, `workflow ${kind} delete failed`));
+  }
+}
+
+export function setWorkflowSecret(dbName: string, name: string, key: string, value: string): Promise<void> {
+  return putWorkflowValue(dbName, name, "secrets", key, value);
+}
+
+export function deleteWorkflowSecret(dbName: string, name: string, key: string): Promise<void> {
+  return deleteWorkflowValue(dbName, name, "secrets", key);
+}
+
+export function setWorkflowVar(dbName: string, name: string, key: string, value: string): Promise<void> {
+  return putWorkflowValue(dbName, name, "vars", key, value);
+}
+
+export function deleteWorkflowVar(dbName: string, name: string, key: string): Promise<void> {
+  return deleteWorkflowValue(dbName, name, "vars", key);
+}
+
+export type StartWorkflowRunRequest = {
+  trigger?: string;
+  input?: Record<string, unknown>;
+  // Wait up to 60 s for the run to finish.
+  wait?: boolean;
+};
+
+// startWorkflowRun starts a manual trigger. finished is false when the run
+// was only queued, or (with wait) is still going after 60 s.
+export async function startWorkflowRun(
+  dbName: string,
+  name: string,
+  request: StartWorkflowRunRequest
+): Promise<{ run: WorkflowRun; finished: boolean }> {
+  const response = await fetch(`${workflowPath(dbName, name)}/runs`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request)
+  });
+  if (!response.ok) {
+    throw new Error(await errorMessage(response, "workflow run failed"));
+  }
+  const run = (await response.json()) as WorkflowRun;
+  return { run, finished: response.status === 200 };
+}
+
+export async function listWorkflowRuns(dbName: string, name: string, filter: WorkflowRunFilter = {}): Promise<WorkflowRun[]> {
+  const params = new URLSearchParams();
+  if (filter.status) {
+    params.set("status", filter.status);
+  }
+  if (filter.limit) {
+    params.set("limit", String(filter.limit));
+  }
+  if (filter.before) {
+    params.set("before", String(filter.before));
+  }
+  const query = params.toString();
+  const response = await fetch(`${workflowPath(dbName, name)}/runs${query ? `?${query}` : ""}`);
+  if (!response.ok) {
+    throw new Error(await errorMessage(response, "workflow runs failed"));
+  }
+  return response.json() as Promise<WorkflowRun[]>;
+}
+
+export async function loadWorkflowRun(dbName: string, name: string, runID: number): Promise<WorkflowRun> {
+  const response = await fetch(`${workflowPath(dbName, name)}/runs/${runID}`);
+  if (!response.ok) {
+    throw new Error(await errorMessage(response, "workflow run failed"));
+  }
+  return response.json() as Promise<WorkflowRun>;
+}
+
+export async function cancelWorkflowRun(dbName: string, name: string, runID: number): Promise<WorkflowRun> {
+  const response = await fetch(`${workflowPath(dbName, name)}/runs/${runID}/cancel`, { method: "POST" });
+  if (!response.ok) {
+    throw new Error(await errorMessage(response, "workflow run cancel failed"));
+  }
+  return response.json() as Promise<WorkflowRun>;
+}
+
+export async function listApps(dbName: string): Promise<AppDefinition[]> {
+  const response = await fetch(`/api/databases/${encodeURIComponent(dbName)}/apps`);
   if (!response.ok) {
     const error = await response.json().catch(() => ({ error: response.statusText }));
-    throw new Error(error.error ?? `published form load failed: ${response.status}`);
+    throw new Error(error.error ?? `app list failed: ${response.status}`);
   }
-  return response.json() as Promise<FormDefinition>;
+  return response.json() as Promise<AppDefinition[]>;
+}
+
+function appPath(dbName: string, appName: string): string {
+  return `/api/databases/${encodeURIComponent(dbName)}/apps/${encodeURIComponent(appName)}`;
+}
+
+export async function loadApp(dbName: string, appName: string): Promise<AppDetail> {
+  const response = await fetch(appPath(dbName, appName));
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: response.statusText }));
+    throw new Error(error.error ?? `app load failed: ${response.status}`);
+  }
+  return response.json() as Promise<AppDetail>;
+}
+
+export async function publishAppVersion(dbName: string, appName: string, version: number): Promise<AppDefinition> {
+  const response = await fetch(`${appPath(dbName, appName)}/publish`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ version })
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: response.statusText }));
+    throw new Error(error.error ?? `app publish failed: ${response.status}`);
+  }
+  return response.json() as Promise<AppDefinition>;
+}
+
+export async function deleteApp(dbName: string, appName: string): Promise<void> {
+  const response = await fetch(appPath(dbName, appName), { method: "DELETE" });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: response.statusText }));
+    throw new Error(error.error ?? `app delete failed: ${response.status}`);
+  }
+}
+
+export function appSourceURL(dbName: string, appName: string, version: number): string {
+  return `${appPath(dbName, appName)}/versions/${version}/source`;
+}
+
+function libraryPath(name: string): string {
+  return `/api/libs/${encodeURIComponent(name)}`;
+}
+
+async function failure(response: Response, fallback: string): Promise<Error> {
+  const error = await response.json().catch(() => ({ error: response.statusText }));
+  return new Error(error.error ?? `${fallback}: ${response.status}`);
+}
+
+export async function listLibraries(): Promise<LibraryDefinition[]> {
+  const response = await fetch("/api/libs");
+  if (!response.ok) {
+    throw await failure(response, "library list failed");
+  }
+  return response.json() as Promise<LibraryDefinition[]>;
+}
+
+export async function loadLibrary(name: string): Promise<LibraryDetail> {
+  const response = await fetch(libraryPath(name));
+  if (!response.ok) {
+    throw await failure(response, "library load failed");
+  }
+  return response.json() as Promise<LibraryDetail>;
+}
+
+// publishLibraryVersion publishes (or rolls back to) a version; every
+// importing workflow uses it from its next run.
+export async function publishLibraryVersion(name: string, version: number): Promise<LibraryDetail> {
+  const response = await fetch(`${libraryPath(name)}/publish`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ version })
+  });
+  if (!response.ok) {
+    throw await failure(response, "library publish failed");
+  }
+  return response.json() as Promise<LibraryDetail>;
+}
+
+export async function deleteLibrary(name: string): Promise<void> {
+  const response = await fetch(libraryPath(name), { method: "DELETE" });
+  if (!response.ok) {
+    throw await failure(response, "library delete failed");
+  }
+}
+
+export function librarySourceURL(name: string, version: number): string {
+  return `${libraryPath(name)}/versions/${version}/source`;
 }
 
 export async function listRoles(dbName: string): Promise<RoleDefinition[]> {

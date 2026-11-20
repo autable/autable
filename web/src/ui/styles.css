@@ -1,0 +1,259 @@
+/*
+ * Design tokens. Vendored from the Bindy design system (packages/ui/src/styles.css)
+ * so autable and Bindy share one visual language.
+ *
+ * - Grays carry the surfaces; color only expresses registered states
+ *   (success, running, warning, error, focus).
+ * - Depth comes from background steps and 1px borders. Elements on a page
+ *   have no shadow; only floating layers (menus, dialogs, tooltips) do.
+ * - Pages and components use these semantic tokens only, never ad-hoc
+ *   colors. Light and dark values live side by side; `.dark` switches.
+ */
+@import "tailwindcss";
+@import "@fontsource-variable/inter";
+/* Chinese text uses HarmonyOS Sans SC, bundled with the app instead of a CDN
+   and split by character range so a page downloads only the glyphs it shows.
+   Only the weights in use: regular 400, medium 500, semibold 600. The package
+   exports just index.css (every weight), so single weights are imported by path. */
+@import "../../node_modules/harmonyos-sans-sc-webfont-splitted/dist/Regular.css";
+@import "../../node_modules/harmonyos-sans-sc-webfont-splitted/dist/Medium.css";
+@import "../../node_modules/harmonyos-sans-sc-webfont-splitted/dist/Semibold.css";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  color-scheme: light;
+
+  /* Warm light gray. Three layers: page / raised cards, bubbles and floating layers / 1px dividers. */
+  --surface: #f2f2ed;
+  --surface-elevated: #fdfdf8;
+  --border: rgb(0 0 0 / 0.1);
+  --border-soft: rgb(0 0 0 / 0.06);
+
+  /* Sidebar: a little darker than the page; the selected item is a near-white block. */
+  --sidebar: #eeeee9;
+  --sidebar-active: #fcfcfd;
+
+  /* Gray fills: pill buttons, selected items, hover (translucent, so they also work on cards). */
+  --chip: rgb(0 0 0 / 0.05);
+  --hover: rgb(0 0 0 / 0.05);
+
+  /* Text ramp: primary > description > secondary > tertiary > placeholder. */
+  --text-primary: rgb(0 0 0 / 0.88);
+  --text-description: rgb(0 0 0 / 0.7);
+  --text-secondary: rgb(0 0 0 / 0.56);
+  --text-tertiary: rgb(0 0 0 / 0.44);
+  --text-placeholder: rgb(0 0 0 / 0.32);
+
+  /* The most emphasized action (at most one per screen). */
+  --cta: #3c3f43;
+  --cta-fg: #fcfcfc;
+  --cta-hover: #2e3237;
+
+  /* Registered semantic colors. */
+  --focus-ring: #417cdd;
+  --focus-ring-soft: rgb(65 124 221 / 0.5);
+  --running: #ea6b17;
+  --awaiting: #19d2c1;
+  --success: #177c3c;
+  --warning: #b86e00;
+  --warning-bg: #fbf1dc;
+  --error: #dc2626;
+  --error-bg: #fbeceb;
+  --error-border: rgb(220 38 38 / 0.4);
+  --destructive: #ef4444;
+  --destructive-hover: #dc2f2f;
+  --destructive-fg: #ffffff;
+  --info-bg: rgb(0 0 0 / 0.035);
+
+  --shadow-float: 0 4px 16px rgb(0 0 0 / 0.12);
+  --scrim: rgb(0 0 0 / 0.32);
+  --scrollbar: rgb(0 0 0 / 0.16);
+}
+
+.dark {
+  color-scheme: dark;
+
+  --surface: #181818;
+  --surface-elevated: #1f1f1f;
+  --border: rgb(255 255 255 / 0.1);
+  --border-soft: rgb(255 255 255 / 0.07);
+
+  --sidebar: #181818;
+  --sidebar-active: #2c2e31;
+
+  --chip: rgb(255 255 255 / 0.06);
+  --hover: rgb(255 255 255 / 0.06);
+
+  --text-primary: rgb(255 255 255 / 0.82);
+  --text-description: rgb(255 255 255 / 0.66);
+  --text-secondary: rgb(255 255 255 / 0.55);
+  --text-tertiary: rgb(255 255 255 / 0.4);
+  --text-placeholder: rgb(255 255 255 / 0.3);
+
+  --cta: #eeeeee;
+  --cta-fg: #151515;
+  --cta-hover: #e2e2e2;
+
+  --focus-ring: #417cdd;
+  --focus-ring-soft: rgb(65 124 221 / 0.5);
+  --running: #ea6b17;
+  --awaiting: #19d2c1;
+  --success: #2aae5b;
+  --warning: #f3a115;
+  --warning-bg: #2e2617;
+  --error: #f87171;
+  --error-bg: #351f1f;
+  --error-border: #7f1d1d;
+  --destructive: #e35d5d;
+  --destructive-hover: #ec7878;
+  --destructive-fg: #181818;
+  --info-bg: rgb(255 255 255 / 0.04);
+
+  --shadow-float: 0 4px 16px rgb(0 0 0 / 0.5);
+  --scrim: rgb(0 0 0 / 0.55);
+  --scrollbar: rgb(255 255 255 / 0.16);
+}
+
+@theme inline {
+  --color-surface: var(--surface);
+  --color-elevated: var(--surface-elevated);
+  --color-border: var(--border);
+  --color-border-soft: var(--border-soft);
+  --color-chip: var(--chip);
+  --color-hover: var(--hover);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-active: var(--sidebar-active);
+
+  --color-fg: var(--text-primary);
+  --color-description: var(--text-description);
+  --color-muted: var(--text-secondary);
+  --color-subtle: var(--text-tertiary);
+  --color-placeholder: var(--text-placeholder);
+
+  --color-cta: var(--cta);
+  --color-cta-fg: var(--cta-fg);
+  --color-cta-hover: var(--cta-hover);
+
+  --color-focus: var(--focus-ring);
+  --color-focus-soft: var(--focus-ring-soft);
+  --color-running: var(--running);
+  --color-awaiting: var(--awaiting);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-warning-bg: var(--warning-bg);
+  --color-error: var(--error);
+  --color-error-bg: var(--error-bg);
+  --color-error-border: var(--error-border);
+  --color-destructive: var(--destructive);
+  --color-destructive-hover: var(--destructive-hover);
+  --color-destructive-fg: var(--destructive-fg);
+  --color-info-bg: var(--info-bg);
+  --color-scrim: var(--scrim);
+
+  --shadow-float: var(--shadow-float);
+}
+
+@theme {
+  /* Latin text in Inter; Chinese in PingFang on Apple platforms and the bundled HarmonyOS Sans SC elsewhere. */
+  --font-sans: "Inter Variable", "Inter", -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "HarmonyOS Sans SC",
+    "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans CJK SC", "Source Han Sans SC", "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, "SFMono-Regular", "Cascadia Code", Menlo, Consolas, "PingFang SC", "HarmonyOS Sans SC", "Noto Sans Mono CJK SC", monospace;
+
+  /* Font sizes allowed: UI 11/12/13/14/15, headings and content 18/20/24. Keep src/ui/cn.ts in sync. */
+  --text-11: 0.6875rem;
+  --text-11--line-height: 1rem;
+  --text-12: 0.75rem;
+  --text-12--line-height: 1.125rem;
+  --text-13: 0.8125rem;
+  --text-13--line-height: 1.25rem;
+  --text-14: 0.875rem;
+  --text-14--line-height: 1.375rem;
+  --text-15: 0.9375rem;
+  --text-15--line-height: 1.5rem;
+  --text-18: 1.125rem;
+  --text-18--line-height: 1.625rem;
+  --text-20: 1.25rem;
+  --text-20--line-height: 1.75rem;
+  --text-24: 1.5rem;
+  --text-24--line-height: 2rem;
+
+  /* Radii: controls are pills (9999px), inner controls 8px, content containers 12px. Keep src/ui/cn.ts in sync. */
+  --radius-inner: 0.5rem;
+  --radius-container: 0.75rem;
+
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --animate-fade-in: fade-in 150ms var(--ease-out);
+  --animate-pop-in: pop-in 150ms var(--ease-out);
+  --animate-rise-in: rise-in 200ms var(--ease-out);
+  --animate-slide-in-left: slide-in-left 200ms var(--ease-out);
+  --animate-breathe: breathe 1.8s ease-in-out infinite;
+
+  @keyframes fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  @keyframes pop-in {
+    from { opacity: 0; transform: scale(0.98); }
+    to { opacity: 1; transform: scale(1); }
+  }
+  @keyframes rise-in {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes slide-in-left {
+    from { transform: translateX(-100%); }
+    to { transform: translateX(0); }
+  }
+  @keyframes breathe {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.35; }
+  }
+}
+
+/* Persistent lists like the sidebar: no scrollbar until hovered or focused. */
+@utility scroll-quiet {
+  scrollbar-color: transparent transparent;
+  &:hover,
+  &:focus-within {
+    scrollbar-color: var(--scrollbar) transparent;
+  }
+}
+
+@layer base {
+  html {
+    font-family: var(--font-sans);
+    font-feature-settings: "cv11", "ss01";
+    background: var(--surface);
+    color: var(--text-primary);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  body {
+    font-size: var(--text-14);
+    line-height: var(--text-14--line-height);
+  }
+  *, ::before, ::after {
+    border-color: var(--border);
+  }
+  /* The focus ring is for keyboard use only (:focus-visible); mouse clicks never show it. */
+  :focus-visible {
+    outline: 2px solid var(--focus-ring-soft);
+    outline-offset: 2px;
+  }
+  /* Thin, faint scrollbars instead of the thick system default. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--scrollbar) transparent;
+  }
+  ::selection {
+    background: rgb(65 124 221 / 0.22);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, ::before, ::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}

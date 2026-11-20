@@ -1,74 +1,55 @@
-import {
-  Button,
-  Combobox,
-  CounterBadge,
-  Dropdown,
-  List,
-  ListItem,
-  Option,
-  Popover,
-  PopoverSurface,
-  PopoverTrigger,
-  Select,
-  Tab,
-  TabList,
-  Text,
-  ToggleButton
-} from "@fluentui/react-components";
-import {
-  DismissRegular,
-  DocumentFlowchartRegular,
-  PeopleRegular,
-  SaveRegular
-} from "@fluentui/react-icons";
-import { useState, type ReactElement, type ReactNode } from "react";
+import { Info, Table2, Users, Workflow, X } from "lucide-react";
+import { useId, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import {
+  type AppDefinition,
+  type AuthUser,
   type DatabaseMetadata,
-  type FormDefinition,
   type PermissionGrant,
   type RoleDefinition,
   type RoleMember,
-  type AuthUser,
-  type WorkflowDefinition
+  type WorkflowSummary
 } from "../api";
 import { compactRoleGrants } from "../permissionState";
-import { WorkspaceEmptyState } from "./WorkspaceEmptyState";
+import { Page, SectionHeading } from "../shell/Page";
+import { Button, Callout, Card, cn, EmptyState, Input, NativeSelect, Tabs, TabsList, TabsTrigger } from "../ui";
 
 export { compactRoleGrants };
 
-const permissionLevels = [0, 1, 2] as const;
+// Workflow and app grants are on/off: 0 = none, 1 = run (workflows) or
+// open (apps). Building and managing them is admin-only.
+const accessLevels = [0, 1] as const;
 
 // Field value grants are bitmasks: read=1, update=2, create=4.
 const fieldBits = [1, 2, 4] as const;
 
 type PermissionPanelProps = {
+  apps: AppDefinition[];
   database: DatabaseMetadata;
-  forms: FormDefinition[];
   grants: PermissionGrant[];
   members: RoleMember[];
   memberOptions: AuthUser[];
   memberUsers: AuthUser[];
-  memberWorkflows: WorkflowDefinition[];
+  memberWorkflows: WorkflowSummary[];
   newMemberQuery: string;
   onAddMember: (user: AuthUser) => void;
-  onAddWorkflowMember: (workflow: WorkflowDefinition) => void;
-  onGrantChange: (
-    scope: PermissionGrant["scope"],
-    resource: string,
-    field: string,
-    level: PermissionGrant["level"]
-  ) => void;
+  onAddWorkflowMember: (workflow: WorkflowSummary) => void;
+  onGrantChange: (scope: PermissionGrant["scope"], resource: string, field: string, level: PermissionGrant["level"]) => void;
   onMemberRemove: (member: RoleMember) => void;
   onNewMemberQueryChange: (value: string) => void;
   onSave: () => void;
   role?: RoleDefinition;
-  workflows: WorkflowDefinition[];
+  workflows: WorkflowSummary[];
 };
 
+/**
+ * One role of a database: what it grants (tables, workflows, apps) on the
+ * left, who and which workflows are in it on the right. Changes are drafts
+ * until Save.
+ */
 export function PermissionPanel({
+  apps,
   database,
-  forms,
   grants,
   members,
   memberOptions,
@@ -87,310 +68,404 @@ export function PermissionPanel({
   const { t } = useTranslation();
   if (!role) {
     return (
-      <WorkspaceEmptyState
-        icon={<PeopleRegular />}
-        title={t("empty.noRoleTitle")}
-        description={t("empty.noRoleDescription")}
-      />
+      <Page title={t("nav.permissions")} description={t("permission.pageDescription", { database: database.name })}>
+        <Card>
+          <EmptyState icon={Users} title={t("empty.noRoleTitle")} description={t("empty.noRoleDescription")} />
+        </Card>
+      </Page>
     );
   }
   const dirty =
-    normalizeGrants(grants) !== normalizeGrants(role.grants ?? []) ||
-    normalizeMembers(members) !== normalizeMembers(role.members ?? []);
+    normalizeGrants(grants) !== normalizeGrants(role.grants ?? []) || normalizeMembers(members) !== normalizeMembers(role.members ?? []);
   return (
-    <div className="permission-view">
-      <div className="section-header">
-        <div>
-          <Text weight="semibold">{role.name}</Text>
-          <Text size={200}>{t("permission.roleAccessMatrix", { database: database.name })}</Text>
-        </div>
-        <div className="permission-actions">
-          <MembersControl
+    <Page
+      width="wide"
+      title={role.name}
+      description={t("permission.roleAccessMatrix", { database: database.name })}
+      icon={<Users />}
+      actions={
+        <>
+          {dirty && <span className="text-12 text-warning">{t("permission.unsaved")}</span>}
+          <Button variant="cta" onClick={onSave} disabled={!dirty}>
+            {t("common.save")}
+          </Button>
+        </>
+      }
+    >
+      <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_20rem]">
+        <section aria-labelledby="role-access" className="min-w-0">
+          <SectionHeading id="role-access" title={t("permission.access")} />
+          <PermissionMatrix key={role.name} apps={apps} database={database} grants={grants} onGrantChange={onGrantChange} workflows={workflows} />
+        </section>
+        <div className="flex min-w-0 flex-col gap-6 xl:sticky xl:top-6">
+          <UserMembers
             members={members}
             memberOptions={memberOptions}
             memberUsers={memberUsers}
-            memberWorkflows={memberWorkflows}
             newMemberQuery={newMemberQuery}
             onAddMember={onAddMember}
-            onAddWorkflowMember={onAddWorkflowMember}
             onMemberRemove={onMemberRemove}
             onNewMemberQueryChange={onNewMemberQueryChange}
+          />
+          <WorkflowMembers
+            members={members}
+            memberWorkflows={memberWorkflows}
+            onAddWorkflowMember={onAddWorkflowMember}
+            onMemberRemove={onMemberRemove}
             workflows={workflows}
           />
-          <Button icon={<SaveRegular />} appearance="primary" onClick={onSave} disabled={!dirty}>
-            {t("common.save")}
-          </Button>
         </div>
       </div>
-      <PermissionMatrix
-        key={role.name}
-        database={database}
-        forms={forms}
-        grants={grants}
-        onGrantChange={onGrantChange}
-        workflows={workflows}
+    </Page>
+  );
+}
+
+function MemberSection({ id, title, count, children }: { id: string; title: string; count: number; children: ReactNode }) {
+  return (
+    <section aria-labelledby={id}>
+      <SectionHeading
+        id={id}
+        title={
+          <span className="flex items-center gap-2">
+            {title}
+            <span className="rounded-full bg-chip px-1.5 text-11 font-medium tabular-nums text-fg">{count}</span>
+          </span>
+        }
       />
+      <Card>{children}</Card>
+    </section>
+  );
+}
+
+function MemberRow({ label, detail, icon, onRemove }: { label: string; detail?: string; icon: ReactNode; onRemove: () => void }) {
+  const { t } = useTranslation();
+  return (
+    <li className="group flex items-center gap-2.5 px-4 py-2">
+      <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-chip text-12 font-medium text-description" aria-hidden>
+        {icon}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-13 text-fg">{label}</span>
+        {detail && <span className="block truncate text-12 text-muted">{detail}</span>}
+      </span>
+      <Button variant="quiet" size="icon-sm" aria-label={t("permission.removeMember", { name: label })} onClick={onRemove}>
+        <X />
+      </Button>
+    </li>
+  );
+}
+
+function UserMembers({
+  members,
+  memberOptions,
+  memberUsers,
+  newMemberQuery,
+  onAddMember,
+  onMemberRemove,
+  onNewMemberQueryChange
+}: Pick<
+  PermissionPanelProps,
+  "members" | "memberOptions" | "memberUsers" | "newMemberQuery" | "onAddMember" | "onMemberRemove" | "onNewMemberQueryChange"
+>) {
+  const { t } = useTranslation();
+  const memberByID = new Map(memberUsers.map((member) => [member.id, member]));
+  const users = members.filter((member) => member.type === "user");
+  return (
+    <MemberSection id="role-members" title={t("permission.members")} count={users.length}>
+      <div className="p-3">
+        <MemberSearch
+          // People already in the role are not offered again.
+          options={memberOptions.filter((option) => !users.some((member) => member.id === option.id))}
+          query={newMemberQuery}
+          onQueryChange={onNewMemberQueryChange}
+          onSelect={onAddMember}
+        />
+      </div>
+      {users.length === 0 ? (
+        <p className="border-t border-border-soft px-4 py-3 text-13 text-muted">{t("permission.noMembers")}</p>
+      ) : (
+        <ul aria-label={t("permission.members")} className="divide-y divide-border-soft border-t border-border-soft">
+          {users.map((member) => {
+            const user = memberByID.get(member.id);
+            const label = user?.display_name ?? member.id;
+            return (
+              <MemberRow
+                key={member.id}
+                label={label}
+                detail={user?.email && user.email !== label ? user.email : undefined}
+                icon={Array.from(label.trim())[0]?.toUpperCase() ?? "?"}
+                onRemove={() => onMemberRemove(member)}
+              />
+            );
+          })}
+        </ul>
+      )}
+    </MemberSection>
+  );
+}
+
+/** Search people by name or email; matches appear below once two characters are typed. */
+function MemberSearch({
+  options,
+  query,
+  onQueryChange,
+  onSelect
+}: {
+  options: AuthUser[];
+  query: string;
+  onQueryChange: (value: string) => void;
+  onSelect: (user: AuthUser) => void;
+}) {
+  const { t } = useTranslation();
+  const listID = useId();
+  const [active, setActive] = useState(0);
+  const [dismissed, setDismissed] = useState(false);
+  const open = !dismissed && query.trim().length >= 2 && options.length > 0;
+  function choose(user: AuthUser) {
+    onSelect(user);
+    setDismissed(true);
+  }
+  return (
+    <div className="relative">
+      <Input
+        inputSize="sm"
+        role="combobox"
+        aria-label={t("permission.roleMemberDisplayName")}
+        aria-expanded={open}
+        aria-controls={listID}
+        aria-autocomplete="list"
+        aria-activedescendant={open ? `${listID}-${active}` : undefined}
+        placeholder={t("permission.searchMember")}
+        value={query}
+        onChange={(event) => {
+          setDismissed(false);
+          setActive(0);
+          onQueryChange(event.target.value);
+        }}
+        onKeyDown={(event) => {
+          if (!open) {
+            return;
+          }
+          if (event.key === "ArrowDown") {
+            event.preventDefault();
+            setActive((current) => (current + 1) % options.length);
+          } else if (event.key === "ArrowUp") {
+            event.preventDefault();
+            setActive((current) => (current - 1 + options.length) % options.length);
+          } else if (event.key === "Enter") {
+            event.preventDefault();
+            choose(options[Math.min(active, options.length - 1)]);
+          } else if (event.key === "Escape") {
+            setDismissed(true);
+          }
+        }}
+      />
+      {open && (
+        <ul
+          id={listID}
+          role="listbox"
+          aria-label={t("permission.addRoleMember")}
+          className="absolute inset-x-0 top-full z-20 mt-1 max-h-60 overflow-y-auto rounded-container border border-border bg-elevated p-1 shadow-float animate-pop-in"
+        >
+          {options.map((user, index) => (
+            <li
+              key={user.id}
+              id={`${listID}-${index}`}
+              role="option"
+              aria-selected={index === active}
+              onMouseDown={(event) => event.preventDefault()}
+              onMouseEnter={() => setActive(index)}
+              onClick={() => choose(user)}
+              className={cn("flex cursor-default flex-col rounded-inner px-2.5 py-1.5", index === active && "bg-hover")}
+            >
+              <span className="truncate text-13 text-fg">{user.display_name}</span>
+              {user.email !== user.display_name && <span className="truncate text-12 text-muted">{user.email}</span>}
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
 
-function MembersControl({
+function WorkflowMembers({
   members,
-  memberOptions,
-  memberUsers,
   memberWorkflows,
-  newMemberQuery,
-  onAddMember,
   onAddWorkflowMember,
   onMemberRemove,
-  onNewMemberQueryChange,
   workflows
-}: Pick<
-  PermissionPanelProps,
-  | "members"
-  | "memberOptions"
-  | "memberUsers"
-  | "memberWorkflows"
-  | "newMemberQuery"
-  | "onAddMember"
-  | "onAddWorkflowMember"
-  | "onMemberRemove"
-  | "onNewMemberQueryChange"
-  | "workflows"
->) {
+}: Pick<PermissionPanelProps, "members" | "memberWorkflows" | "onAddWorkflowMember" | "onMemberRemove" | "workflows">) {
   const { t } = useTranslation();
-  const memberByID = new Map(memberUsers.map((member) => [member.id, member]));
   const workflowByID = new Map(memberWorkflows.map((workflow) => [String(workflow.id), workflow]));
-  const userItems = members
-    .filter((member) => member.type === "user")
-    .map((member) => ({
-      member,
-      key: `user:${member.id}`,
-      label: memberByID.get(member.id)?.display_name ?? member.id
-    }));
-  const workflowItems = members
-    .filter((member) => member.type === "workflow")
-    .map((member) => ({
-      member,
-      key: `workflow:${member.id}`,
-      label: workflowByID.get(member.id)?.name ?? `#${member.id}`
-    }));
-  const selectableWorkflows = workflows.filter(
+  const workflowMembers = members.filter((member) => member.type === "workflow");
+  const selectable = workflows.filter(
     (workflow) => workflow.id && !members.some((member) => member.type === "workflow" && member.id === String(workflow.id))
   );
-
   return (
-    <>
-      <MemberPopover
-        icon={<PeopleRegular />}
-        label={t("permission.members")}
-        ariaLabel={t("permission.members")}
-        count={userItems.length}
-        items={userItems}
-        emptyText={t("permission.noMembers")}
-        onRemove={onMemberRemove}
-      >
-        <Combobox
-          className="member-add-control"
-          aria-label={t("permission.roleMemberDisplayName")}
-          placeholder={t("permission.searchMember")}
-          open={newMemberQuery.trim().length >= 2 && memberOptions.length > 0}
-          value={newMemberQuery}
-          onChange={(event) => onNewMemberQueryChange(event.currentTarget.value)}
-          onOptionSelect={(_, data) => {
-            const selected = memberOptions.find((member) => member.id === data.optionValue);
-            if (selected) {
-              onAddMember(selected);
-            }
-          }}
-        >
-          {memberOptions.map((member) => (
-            <Option key={member.id} value={member.id} text={member.display_name}>
-              {member.display_name}
-            </Option>
-          ))}
-        </Combobox>
-      </MemberPopover>
-      <MemberPopover
-        icon={<DocumentFlowchartRegular />}
-        label={t("permission.workflows")}
-        ariaLabel={t("permission.workflows")}
-        count={workflowItems.length}
-        items={workflowItems}
-        emptyText={t("permission.noWorkflowMembers")}
-        onRemove={onMemberRemove}
-      >
-        <Dropdown
-          className="member-add-control"
+    <MemberSection id="role-workflow-members" title={t("permission.workflowMembers")} count={workflowMembers.length}>
+      <p className="px-4 pt-3 text-12 text-muted">{t("permission.workflowMembersHint")}</p>
+      <div className="p-3">
+        <NativeSelect
+          selectSize="sm"
           aria-label={t("permission.addWorkflowMember")}
-          placeholder={t("permission.addWorkflowMember")}
-          selectedOptions={[]}
           value=""
-          disabled={selectableWorkflows.length === 0}
-          onOptionSelect={(_, data) => {
-            const selected = selectableWorkflows.find((workflow) => String(workflow.id) === data.optionValue);
+          disabled={selectable.length === 0}
+          onChange={(event) => {
+            const selected = selectable.find((workflow) => String(workflow.id) === event.target.value);
             if (selected) {
               onAddWorkflowMember(selected);
             }
           }}
         >
-          {selectableWorkflows.map((workflow) => (
-            <Option key={workflow.id} value={String(workflow.id)}>
-              {workflow.name}
-            </Option>
+          <option value="">{t("permission.addWorkflowMember")}</option>
+          {selectable.map((workflow) => (
+            <option key={workflow.id} value={String(workflow.id)}>
+              {workflowLabel(workflow)}
+            </option>
           ))}
-        </Dropdown>
-      </MemberPopover>
-    </>
+        </NativeSelect>
+      </div>
+      {workflowMembers.length === 0 ? (
+        <p className="border-t border-border-soft px-4 py-3 text-13 text-muted">{t("permission.noWorkflowMembers")}</p>
+      ) : (
+        <ul aria-label={t("permission.workflowMembers")} className="divide-y divide-border-soft border-t border-border-soft">
+          {workflowMembers.map((member) => (
+            <MemberRow
+              key={member.id}
+              label={workflowLabel(workflowByID.get(member.id)) ?? `#${member.id}`}
+              icon={<Workflow className="size-3.5" />}
+              onRemove={() => onMemberRemove(member)}
+            />
+          ))}
+        </ul>
+      )}
+    </MemberSection>
   );
 }
 
-function MemberPopover({
-  icon,
-  label,
-  ariaLabel,
-  count,
-  items,
-  emptyText,
-  onRemove,
-  children
-}: {
-  icon: ReactElement;
-  label: string;
-  ariaLabel: string;
-  count: number;
-  items: Array<{ key: string; label: string; member: RoleMember }>;
-  emptyText: string;
-  onRemove: (member: RoleMember) => void;
-  children: ReactNode;
-}) {
-  const { t } = useTranslation();
-  return (
-    <Popover positioning="below-end" trapFocus>
-      <PopoverTrigger disableButtonEnhancement>
-        <Button icon={icon}>
-          {label}
-          <CounterBadge className="members-count" appearance="filled" color="brand" count={count} showZero />
-        </Button>
-      </PopoverTrigger>
-      <PopoverSurface className="members-popover" aria-label={ariaLabel}>
-        {children}
-        {items.length === 0 ? (
-          <Text size={200}>{emptyText}</Text>
-        ) : (
-          <List navigationMode="items" aria-label={ariaLabel}>
-            {items.map((item) => (
-              <ListItem key={item.key}>
-                <div className="member-list-item">
-                  <Text truncate>{item.label}</Text>
-                  <Button
-                    appearance="subtle"
-                    icon={<DismissRegular />}
-                    aria-label={t("permission.removeMember", { name: item.label })}
-                    onClick={() => onRemove(item.member)}
-                  />
-                </div>
-              </ListItem>
-            ))}
-          </List>
-        )}
-      </PopoverSurface>
-    </Popover>
-  );
+function workflowLabel(workflow: WorkflowSummary | undefined): string | undefined {
+  return workflow ? workflow.title || workflow.name : undefined;
 }
+
+type MatrixTab = "tables" | "workflows" | "apps";
 
 function PermissionMatrix({
+  apps,
   database,
-  forms,
   grants,
   onGrantChange,
   workflows
-}: Pick<PermissionPanelProps, "database" | "forms" | "grants" | "onGrantChange" | "workflows">) {
+}: Pick<PermissionPanelProps, "apps" | "database" | "grants" | "onGrantChange" | "workflows">) {
   const { t } = useTranslation();
-  const [tab, setTab] = useState<"tables" | "workflows" | "forms">("tables");
+  const [tab, setTab] = useState<MatrixTab>("tables");
   const [selectedTableName, setSelectedTableName] = useState("");
   const selectedTable = database.tables.find((table) => table.name === selectedTableName) ?? database.tables[0];
 
   return (
-    <div className="permission-card permission-matrix">
-      <TabList selectedValue={tab} onTabSelect={(_, data) => setTab(data.value as "tables" | "workflows" | "forms")}>
-        <Tab value="tables">{t("permission.tables")}</Tab>
-        <Tab value="workflows">{t("permission.workflows")}</Tab>
-        <Tab value="forms">{t("permission.forms")}</Tab>
-      </TabList>
+    <>
+      <Tabs value={tab} onValueChange={(value) => setTab(value as MatrixTab)} className="mb-3">
+        <TabsList>
+          <TabsTrigger value="tables">{t("permission.tables")}</TabsTrigger>
+          <TabsTrigger value="workflows">{t("permission.workflows")}</TabsTrigger>
+          <TabsTrigger value="apps">{t("permission.apps")}</TabsTrigger>
+        </TabsList>
+      </Tabs>
       {tab === "tables" &&
         (selectedTable ? (
-          <div className="permission-tables-layout">
-            <div className="permission-table-list" aria-label={t("permission.tables")}>
-              {database.tables.map((table) => (
-                <Button
-                  key={table.name}
-                  appearance={table.name === selectedTable.name ? "secondary" : "subtle"}
-                  onClick={() => setSelectedTableName(table.name)}
-                >
-                  {table.display_name || table.name}
-                </Button>
-              ))}
-            </div>
-            <TablePermissionEditor
-              key={selectedTable.name}
-              database={database}
-              table={selectedTable}
-              grants={grants}
-              onGrantChange={onGrantChange}
-            />
-          </div>
+          <Card className="overflow-hidden md:grid md:grid-cols-[13rem_minmax(0,1fr)]">
+            <nav aria-label={t("permission.tables")} className="flex gap-1 overflow-x-auto border-b border-border-soft p-2 md:flex-col md:border-b-0 md:border-r">
+              {database.tables.map((table) => {
+                const active = table.name === selectedTable.name;
+                return (
+                  <button
+                    key={table.name}
+                    type="button"
+                    aria-current={active ? "true" : undefined}
+                    onClick={() => setSelectedTableName(table.name)}
+                    className={cn(
+                      "flex h-8 shrink-0 items-center gap-2 rounded-inner px-2.5 text-left text-13 transition-colors duration-150",
+                      active ? "bg-chip font-medium text-fg" : "text-description hover:bg-hover hover:text-fg"
+                    )}
+                  >
+                    <Table2 className="size-4 shrink-0" strokeWidth={1.75} aria-hidden />
+                    <span className="truncate">{table.display_name || table.name}</span>
+                  </button>
+                );
+              })}
+            </nav>
+            <TablePermissionEditor key={selectedTable.name} database={database} table={selectedTable} grants={grants} onGrantChange={onGrantChange} />
+          </Card>
         ) : (
-          <Text size={200}>{t("permission.noPartialItems")}</Text>
+          <Card className="px-5 py-6 text-center text-13 text-muted">{t("permission.noPartialItems")}</Card>
         ))}
       {tab === "workflows" && (
         <ResourceLevelSection
-          allLabel={t("permission.workflowSet")}
-          setScope="workflow_set"
-          setResource={database.name}
+          description={t("permission.workflowsHint")}
           itemScope="workflow"
           grants={grants}
           items={workflows.map((workflow) => ({
-            key: String(workflow.id ?? workflow.name),
-            label: workflow.name,
-            resource: String(workflow.id ?? 0),
+            key: String(workflow.id),
+            label: workflowLabel(workflow) ?? workflow.name,
+            resource: String(workflow.id),
             field: ""
           }))}
+          levelLabels={{ 0: t("permission.workflowLevels.none"), 1: t("permission.workflowLevels.run") }}
           onGrantChange={onGrantChange}
         />
       )}
-      {tab === "forms" && (
+      {tab === "apps" && (
         <ResourceLevelSection
-          allLabel={t("permission.formSet")}
-          setScope="form_set"
-          setResource={database.name}
-          itemScope="form"
+          description={t("permission.appsHint")}
+          all={{ label: t("permission.appSet"), scope: "app_set", resource: database.name }}
+          itemScope="app"
           grants={grants}
-          items={forms.map((form) => ({
-            key: String(form.id ?? form.name),
-            label: form.name,
-            resource: String(form.id ?? 0),
-            field: ""
-          }))}
+          items={apps.map((app) => ({ key: String(app.id), label: app.title || app.name, resource: String(app.id), field: "" }))}
+          levelLabels={{ 0: t("permission.appLevels.none"), 1: t("permission.appLevels.open") }}
           onGrantChange={onGrantChange}
         />
       )}
-    </div>
+    </>
   );
 }
 
 type ScopeItem = { key: string; label: string; resource: string; field: string };
 
-type GrantChangeFn = (
-  scope: PermissionGrant["scope"],
-  resource: string,
-  field: string,
-  level: PermissionGrant["level"]
-) => void;
+type GrantChangeFn = (scope: PermissionGrant["scope"], resource: string, field: string, level: PermissionGrant["level"]) => void;
 
-// TablePermissionEditor is the per-table permission sheet, split into the
-// two permission layers: data (records, field values, views, files) and
-// schema (adding fields, changing field definitions).
+function GroupTitle({ children }: { children: ReactNode }) {
+  return <h3 className="px-5 pb-1 pt-4 text-12 font-medium text-subtle">{children}</h3>;
+}
+
+function Row({ label, children, strong }: { label: string; children: ReactNode; strong?: boolean }) {
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-5 py-2">
+      <span className={cn("min-w-0 truncate text-13", strong ? "font-medium text-fg" : "text-description")}>{label}</span>
+      <div className="flex shrink-0 items-center gap-1">{children}</div>
+    </div>
+  );
+}
+
+/** A pill that is on or off; the pressed state is its value. */
+function BitToggle({ label, ariaLabel, pressed, onClick }: { label: string; ariaLabel: string; pressed: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      aria-pressed={pressed}
+      aria-label={ariaLabel}
+      onClick={onClick}
+      className={cn(
+        "inline-flex h-7 min-w-16 items-center justify-center rounded-full border px-3 text-12 font-medium transition-colors duration-150",
+        pressed ? "border-transparent bg-fg text-surface hover:bg-[color-mix(in_oklab,var(--text-primary),var(--surface)_12%)]" : "border-border text-muted hover:bg-hover hover:text-fg"
+      )}
+    >
+      {label}
+    </button>
+  );
+}
+
+// TablePermissionEditor is the per-table data permission sheet: records,
+// field values, views and files. Schema changes are admin-only and have no
+// grants.
 function TablePermissionEditor({
   database,
   table,
@@ -405,11 +480,9 @@ function TablePermissionEditor({
   const { t } = useTranslation();
   const resource = `${database.name}.${table.name}`;
   const activeFields = table.fields.filter((field) => !field.deleted);
-  const definableFields = activeFields.filter((field) => field.type !== "formula");
   const canCreate = grantLevel(grants, "record", resource, "create") >= 2;
   const canDelete = grantLevel(grants, "record", resource, "delete") >= 2;
   const canViewFiles = grantLevel(grants, "file", resource, "") >= 1;
-  const canAddFields = grantLevel(grants, "field_add", resource, "") >= 2;
   const fieldSetLevel = grantLevel(grants, "field_set", resource, "");
   const viewSetLevel = grantLevel(grants, "view_set", resource, "");
   // The catalog already carries the built-in "all" view as an ordinary
@@ -444,169 +517,71 @@ function TablePermissionEditor({
   }
 
   return (
-    <div className="permission-table-detail">
-      <div className="permission-block">
-        <Text weight="semibold">{t("permission.dataSection")}</Text>
-        <div className="permission-row">
-          <span>{t("permission.records")}</span>
-          <div className="field-bits" role="group" aria-label={t("permission.records")}>
-            <ToggleButton
-              size="small"
-              checked={canCreate}
-              appearance={canCreate ? "primary" : "secondary"}
-              aria-label={t("permission.recordCreate")}
-              onClick={() => onGrantChange("record", resource, "create", canCreate ? 0 : 2)}
-            >
-              {t("permission.recordCreate")}
-            </ToggleButton>
-            <ToggleButton
-              size="small"
-              checked={canDelete}
-              appearance={canDelete ? "primary" : "secondary"}
-              aria-label={t("permission.recordDelete")}
-              onClick={() => onGrantChange("record", resource, "delete", canDelete ? 0 : 2)}
-            >
-              {t("permission.recordDelete")}
-            </ToggleButton>
-          </div>
-        </div>
-        <ReadToggleRow
-          label={t("permission.files")}
-          checked={canViewFiles}
-          onChange={(next) => onGrantChange("file", resource, "", next ? 1 : 0)}
-        />
-        <div className="permission-subheader">{t("permission.fieldValues")}</div>
-        <FieldBitsSelect label={t("permission.allFields")} value={fieldSetLevel} onChange={changeFieldSet} />
-        {activeFields.map((field) => (
-          <FieldBitsSelect
-            key={field.name}
-            label={field.name}
-            value={grantLevel(grants, "field", resource, field.name)}
-            onChange={(level) => changeField(field.name, level)}
+    <div className="min-w-0 pb-3">
+      <GroupTitle>{t("permission.dataSection")}</GroupTitle>
+      <Row label={t("permission.records")}>
+        <div className="flex gap-1" role="group" aria-label={t("permission.records")}>
+          <BitToggle
+            label={t("permission.recordCreate")}
+            ariaLabel={t("permission.recordCreate")}
+            pressed={canCreate}
+            onClick={() => onGrantChange("record", resource, "create", canCreate ? 0 : 2)}
           />
-        ))}
-        <div className="permission-subheader">{t("permission.views")}</div>
-        <ReadToggleRow
-          label={t("permission.allViews")}
-          checked={viewSetLevel >= 1}
-          onChange={(next) => changeViewSet(next ? 1 : 0)}
-        />
-        {viewItems.map((view) => (
-          <ReadToggleRow
-            key={view.name}
-            label={view.label}
-            checked={grantLevel(grants, "view", resource, view.name) >= 1}
-            onChange={(next) => changeView(view.name, next ? 1 : 0)}
+          <BitToggle
+            label={t("permission.recordDelete")}
+            ariaLabel={t("permission.recordDelete")}
+            pressed={canDelete}
+            onClick={() => onGrantChange("record", resource, "delete", canDelete ? 0 : 2)}
           />
-        ))}
-      </div>
-      <div className="permission-block">
-        <Text weight="semibold">{t("permission.schemaSection")}</Text>
-        <div className="permission-row">
-          <span>{t("permission.fieldAdd")}</span>
-          <ToggleButton
-            size="small"
-            checked={canAddFields}
-            appearance={canAddFields ? "primary" : "secondary"}
-            aria-label={t("permission.fieldAdd")}
-            onClick={() => onGrantChange("field_add", resource, "", canAddFields ? 0 : 2)}
-          >
-            {t("permission.allowed")}
-          </ToggleButton>
         </div>
-        {definableFields.length > 0 && (
-          <>
-            <div className="permission-subheader">{t("permission.fieldDefine")}</div>
-            {definableFields.map((field) => {
-              const level = grantLevel(grants, "field_modify", resource, field.name);
-              return (
-                <div key={field.name} className="permission-row">
-                  <span>{field.name}</span>
-                  <ToggleButton
-                    size="small"
-                    checked={level >= 2}
-                    appearance={level >= 2 ? "primary" : "secondary"}
-                    aria-label={`${field.name} ${t("permission.fieldDefine")}`}
-                    onClick={() => onGrantChange("field_modify", resource, field.name, level >= 2 ? 0 : 2)}
-                  >
-                    {t("permission.allowed")}
-                  </ToggleButton>
-                </div>
-              );
-            })}
-          </>
-        )}
+      </Row>
+      <ReadToggleRow label={t("permission.files")} checked={canViewFiles} onChange={(next) => onGrantChange("file", resource, "", next ? 1 : 0)} />
+
+      <GroupTitle>{t("permission.fieldValues")}</GroupTitle>
+      <FieldBitsRow label={t("permission.allFields")} strong value={fieldSetLevel} onChange={changeFieldSet} />
+      {activeFields.map((field) => (
+        <FieldBitsRow
+          key={field.name}
+          label={field.name}
+          value={grantLevel(grants, "field", resource, field.name)}
+          onChange={(level) => changeField(field.name, level)}
+        />
+      ))}
+
+      <GroupTitle>{t("permission.views")}</GroupTitle>
+      <ReadToggleRow label={t("permission.allViews")} strong checked={viewSetLevel >= 1} onChange={(next) => changeViewSet(next ? 1 : 0)} />
+      {viewItems.map((view) => (
+        <ReadToggleRow
+          key={view.name}
+          label={view.label}
+          checked={grantLevel(grants, "view", resource, view.name) >= 1}
+          onChange={(next) => changeView(view.name, next ? 1 : 0)}
+        />
+      ))}
+
+      <GroupTitle>{t("permission.structureSection")}</GroupTitle>
+      <div className="px-5 pt-1">
+        <Callout icon={Info}>{t("permission.structureNote")}</Callout>
       </div>
     </div>
   );
 }
 
-function ReadToggleRow(props: { label: string; checked: boolean; onChange: (next: boolean) => void }) {
+function ReadToggleRow(props: { label: string; checked: boolean; strong?: boolean; onChange: (next: boolean) => void }) {
   const { t } = useTranslation();
   return (
-    <div className="permission-row">
-      <span>{props.label}</span>
-      <ToggleButton
-        size="small"
-        checked={props.checked}
-        appearance={props.checked ? "primary" : "secondary"}
-        aria-label={`${props.label} ${t("permission.bits.read")}`}
+    <Row label={props.label} strong={props.strong}>
+      <BitToggle
+        label={t("permission.bits.read")}
+        ariaLabel={`${props.label} ${t("permission.bits.read")}`}
+        pressed={props.checked}
         onClick={() => props.onChange(!props.checked)}
-      >
-        {t("permission.bits.read")}
-      </ToggleButton>
-    </div>
+      />
+    </Row>
   );
 }
 
-// ResourceLevelSection is the flat none/read/write editor for workflows and
-// forms: an "all" preset row plus one row per resource, mutually exclusive.
-function ResourceLevelSection(props: {
-  allLabel: string;
-  setScope: PermissionGrant["scope"];
-  setResource: string;
-  itemScope: PermissionGrant["scope"];
-  grants: PermissionGrant[];
-  items: ScopeItem[];
-  onGrantChange: GrantChangeFn;
-}) {
-  const { t } = useTranslation();
-  const setLevel = grantLevel(props.grants, props.setScope, props.setResource, "");
-
-  function chooseAll(level: number) {
-    props.items.forEach((item) => props.onGrantChange(props.itemScope, item.resource, item.field, 0));
-    props.onGrantChange(props.setScope, props.setResource, "", level);
-  }
-
-  function changeItem(item: ScopeItem, level: number) {
-    if (setLevel > 0) {
-      props.onGrantChange(props.setScope, props.setResource, "", 0);
-    }
-    props.onGrantChange(props.itemScope, item.resource, item.field, level);
-  }
-
-  return (
-    <div className="permission-table-detail">
-      <div className="permission-block">
-        <PermissionLevelSelect label={props.allLabel} value={setLevel} onChange={chooseAll} />
-        {props.items.length === 0 ? (
-          <Text size={200}>{t("permission.noPartialItems")}</Text>
-        ) : (
-          props.items.map((item) => (
-            <PermissionLevelSelect
-              key={item.key}
-              label={item.label}
-              value={grantLevel(props.grants, props.itemScope, item.resource, item.field)}
-              onChange={(level) => changeItem(item, level)}
-            />
-          ))
-        )}
-      </div>
-    </div>
-  );
-}
-
-function FieldBitsSelect(props: { label: string; value: number; onChange: (level: number) => void }) {
+function FieldBitsRow(props: { label: string; value: number; strong?: boolean; onChange: (level: number) => void }) {
   const { t } = useTranslation();
   const bitLabels: Record<number, string> = {
     1: t("permission.bits.read"),
@@ -614,32 +589,81 @@ function FieldBitsSelect(props: { label: string; value: number; onChange: (level
     4: t("permission.bits.create")
   };
   return (
-    <div className="permission-row">
-      <span>{props.label}</span>
-      <div className="field-bits" role="group" aria-label={`${props.label} permission`}>
+    <Row label={props.label} strong={props.strong}>
+      <div className="flex gap-1" role="group" aria-label={`${props.label} permission`}>
         {fieldBits.map((bit) => (
-          <ToggleButton
+          <BitToggle
             key={bit}
-            size="small"
-            checked={(props.value & bit) !== 0}
-            appearance={(props.value & bit) !== 0 ? "primary" : "secondary"}
-            aria-label={`${props.label} ${bitLabels[bit]}`}
+            label={bitLabels[bit]}
+            ariaLabel={`${props.label} ${bitLabels[bit]}`}
+            pressed={(props.value & bit) !== 0}
             onClick={() => props.onChange(props.value ^ bit)}
-          >
-            {bitLabels[bit]}
-          </ToggleButton>
+          />
         ))}
       </div>
-    </div>
+    </Row>
   );
 }
 
-function grantLevel(
-  grants: PermissionGrant[],
-  scope: PermissionGrant["scope"],
-  resource: string,
-  field: string
-): PermissionGrant["level"] {
+type LevelLabels = Record<(typeof accessLevels)[number], string>;
+
+// ResourceLevelSection is the flat none/run or none/open editor for
+// workflows and apps: one row per resource, plus an optional "all" preset
+// row that is mutually exclusive with the per-resource rows.
+function ResourceLevelSection(props: {
+  all?: { label: string; scope: PermissionGrant["scope"]; resource: string };
+  description: string;
+  levelLabels: LevelLabels;
+  itemScope: PermissionGrant["scope"];
+  grants: PermissionGrant[];
+  items: ScopeItem[];
+  onGrantChange: GrantChangeFn;
+}) {
+  const { t } = useTranslation();
+  const all = props.all;
+  const setLevel = all ? grantLevel(props.grants, all.scope, all.resource, "") : 0;
+
+  function chooseAll(level: number) {
+    if (!all) {
+      return;
+    }
+    props.items.forEach((item) => props.onGrantChange(props.itemScope, item.resource, item.field, 0));
+    props.onGrantChange(all.scope, all.resource, "", level);
+  }
+
+  function changeItem(item: ScopeItem, level: number) {
+    if (all && setLevel > 0) {
+      props.onGrantChange(all.scope, all.resource, "", 0);
+    }
+    props.onGrantChange(props.itemScope, item.resource, item.field, level);
+  }
+
+  return (
+    <Card className="pb-2">
+      <p className="px-5 pb-2 pt-4 text-12 text-muted">{props.description}</p>
+      {all && (
+        <div className="border-b border-border-soft pb-2">
+          <PermissionLevelRow label={all.label} strong levelLabels={props.levelLabels} value={setLevel} onChange={chooseAll} />
+        </div>
+      )}
+      {props.items.length === 0 ? (
+        <p className="px-5 py-3 text-13 text-muted">{t("permission.noPartialItems")}</p>
+      ) : (
+        props.items.map((item) => (
+          <PermissionLevelRow
+            key={item.key}
+            label={item.label}
+            levelLabels={props.levelLabels}
+            value={grantLevel(props.grants, props.itemScope, item.resource, item.field)}
+            onChange={(level) => changeItem(item, level)}
+          />
+        ))
+      )}
+    </Card>
+  );
+}
+
+function grantLevel(grants: PermissionGrant[], scope: PermissionGrant["scope"], resource: string, field: string): PermissionGrant["level"] {
   return grants.find((grant) => grant.scope === scope && grant.resource === resource && grant.field === field)?.level ?? 0;
 }
 
@@ -653,35 +677,34 @@ function normalizeGrants(grants: PermissionGrant[]): string {
 }
 
 function normalizeMembers(members: RoleMember[]): string {
-  return members.map((member) => `${member.type}:${member.id}`).sort().join(",");
+  return members
+    .map((member) => `${member.type}:${member.id}`)
+    .sort()
+    .join(",");
 }
 
-function PermissionLevelSelect(props: {
-  ariaLabel?: string;
+function PermissionLevelRow(props: {
   label: string;
+  strong?: boolean;
+  levelLabels: LevelLabels;
   value: PermissionGrant["level"];
   onChange: (level: PermissionGrant["level"]) => void;
 }) {
-  const { t } = useTranslation();
-  const permissionLevelLabels: Record<(typeof permissionLevels)[number], string> = {
-    0: t("permission.levels.none"),
-    1: t("permission.levels.read"),
-    2: t("permission.levels.write")
-  };
   return (
-    <div className="permission-row">
-      <span>{props.label}</span>
-      <Select
-        aria-label={props.ariaLabel ?? `${props.label} permission`}
-        value={String(props.value)}
-        onChange={(_, data) => props.onChange(Number(data.value) as PermissionGrant["level"])}
+    <Row label={props.label} strong={props.strong}>
+      <NativeSelect
+        selectSize="sm"
+        className="w-32"
+        aria-label={`${props.label} permission`}
+        value={String(Math.min(props.value, 1))}
+        onChange={(event) => props.onChange(Number(event.target.value) as PermissionGrant["level"])}
       >
-        {permissionLevels.map((level) => (
+        {accessLevels.map((level) => (
           <option key={level} value={level}>
-            {permissionLevelLabels[level]}
+            {props.levelLabels[level]}
           </option>
         ))}
-      </Select>
-    </div>
+      </NativeSelect>
+    </Row>
   );
 }

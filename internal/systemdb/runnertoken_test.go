@@ -66,37 +66,3 @@ func TestRunnerTokensAreDatabaseScoped(t *testing.T) {
 		t.Fatal("expected empty database name to be rejected")
 	}
 }
-
-func TestWorkflowRunnersRoundTrip(t *testing.T) {
-	ctx := context.Background()
-	db := openTestDB(t)
-
-	saved, err := db.SaveWorkflow(ctx, WorkflowDefinition{
-		DatabaseName: "db",
-		Name:         "sync",
-		Script:       "function instances() {}",
-		Runners:      map[string]string{"pull_orders": "intranet"},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	loaded, err := db.Workflow(ctx, saved.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if loaded.Runners["pull_orders"] != "intranet" {
-		t.Fatalf("unexpected runners: %#v", loaded.Runners)
-	}
-
-	saved.Runners = map[string]string{}
-	if _, err := db.SaveWorkflow(ctx, saved); err != nil {
-		t.Fatal(err)
-	}
-	loaded, err = db.Workflow(ctx, saved.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(loaded.Runners) != 0 {
-		t.Fatalf("expected runners to be replaced on save, got %#v", loaded.Runners)
-	}
-}

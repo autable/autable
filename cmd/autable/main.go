@@ -13,7 +13,6 @@ import (
 
 	"autable/internal/api"
 	"autable/internal/backup"
-	"autable/internal/codefiles"
 	"autable/internal/config"
 	"autable/internal/filestore"
 	"autable/internal/history"
@@ -73,6 +72,12 @@ func run(ctx context.Context, configPath string) error {
 		return err
 	}
 	defer historyStore.Close()
+	// Node-workflow run history went with workflows v1 (schema 7 → 8).
+	if deleted, err := history.DeleteLegacyWorkflowRuns(ctx, historyStore); err != nil {
+		return fmt.Errorf("delete legacy workflow run history: %w", err)
+	} else if deleted > 0 {
+		slog.Info("deleted legacy workflow run history", "entries", deleted)
+	}
 
 	rowRepository, err := recorddb.OpenCatalog(ctx, catalog, cfg.Data.Path)
 	if err != nil {
@@ -168,33 +173,24 @@ func run(ctx context.Context, configPath string) error {
 		cfg.Auth,
 	)
 	server.SetPublicURL(cfg.Server.PublicURL)
+	if len(cfg.Auth.Admins) == 0 {
+		slog.Warn("auth.admins is empty: nobody can create databases or change schema, views, permissions, workflows, or apps")
+	}
 	if fileStore != nil {
 		server.SetFileStore(fileStore)
 	}
 	server.SetFileUploadLimit(cfg.Files.MaxUploadSizeMB << 20)
 	server.EnableMetadataWrites(metadataPath)
-	server.SetRepositoryPath(cfg.Repository.Path)
 	server.SetDatabaseOpener(func(ctx context.Context, name string) error {
 		return rowRepository.OpenDatabase(ctx, name, cfg.DatabasePath(name))
 	})
-	server.SetCodeFileStore(codefiles.NewStore(cfg.Repository.Path))
 	if repoSync != nil {
 		server.SetRepositorySync(repoSync)
+		server.SetRepositoryRoot(cfg.Repository.Path)
 	}
-	if cfg.AI.Enabled {
-		aiWorkerURL := cfg.AI.WorkerURL
-		if aiWorkerURL == "" {
-			aiWorkerURL = os.Getenv("AUTABLE_AI_WORKER_URL")
-		}
-		if aiWorkerURL != "" {
-			server.SetAIClient(api.NewAIHTTPClient(aiWorkerURL))
-		} else {
-			slog.Warn("AI is enabled but no worker URL is configured")
-		}
+	if err := server.StartWorkflows(ctx); err != nil {
+		return err
 	}
-	server.StartWorkflowWorkers(ctx)
-	server.StartWorkflowScheduler(ctx, 15*time.Second)
-	server.StartHistoryCleanup(ctx, 24*time.Hour)
 	slog.Info("autable listening", "address", address)
 	return http.ListenAndServe(address, webui.Handler(server))
 }

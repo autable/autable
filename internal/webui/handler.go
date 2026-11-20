@@ -18,7 +18,7 @@ func Handler(api http.Handler) http.Handler {
 func HandlerWithFS(api http.Handler, frontend fs.FS) http.Handler {
 	files := http.FileServer(http.FS(frontend))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api" || strings.HasPrefix(r.URL.Path, "/api/") {
+		if r.URL.Path == "/api" || strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/apps/") {
 			api.ServeHTTP(w, r)
 			return
 		}

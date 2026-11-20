@@ -64,6 +64,29 @@ describe("parseWorkbook", () => {
     expect(sheets[0].rows).toEqual([{ 编号: "A01" }]);
   });
 
+  it("decodes UTF-8 CSV without a byte-order mark", async () => {
+    const csv = new TextEncoder().encode("名称,数量\n张伟,3\n");
+    const sheets = await parseWorkbook(csv);
+    expect(sheets[0].headers).toEqual(["名称", "数量"]);
+    expect(sheets[0].rows).toEqual([{ 名称: "张伟", 数量: 3 }]);
+  });
+
+  it("decodes UTF-8 CSV with a byte-order mark", async () => {
+    const body = new TextEncoder().encode("名称,备注\n李娜,ok\n");
+    const csv = new Uint8Array([0xef, 0xbb, 0xbf, ...body]);
+    const sheets = await parseWorkbook(csv);
+    expect(sheets[0].headers).toEqual(["名称", "备注"]);
+    expect(sheets[0].rows).toEqual([{ 名称: "李娜", 备注: "ok" }]);
+  });
+
+  it("decodes GB18030 CSV", async () => {
+    // "名称,数量\n张伟,3\n" in GB18030.
+    const csv = new Uint8Array([0xc3, 0xfb, 0xb3, 0xc6, 0x2c, 0xca, 0xfd, 0xc1, 0xbf, 0x0a, 0xd5, 0xc5, 0xce, 0xb0, 0x2c, 0x33, 0x0a]);
+    const sheets = await parseWorkbook(csv);
+    expect(sheets[0].headers).toEqual(["名称", "数量"]);
+    expect(sheets[0].rows).toEqual([{ 名称: "张伟", 数量: 3 }]);
+  });
+
   it("finds the header row below leading blank rows and drops empty sheets", async () => {
     const sheets = await parseWorkbook(
       workbookBuffer({

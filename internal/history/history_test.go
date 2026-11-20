@@ -76,52 +76,38 @@ func TestRowHistoryKeysSupportPrefixScan(t *testing.T) {
 	}
 }
 
-func TestWorkflowHistoryKey(t *testing.T) {
-	key := WorkflowKey(7, time.Unix(20, 0).UTC().UnixMilli())
-	if key != "whistory_00000000000000000007_00000000000000020000" {
-		t.Fatalf("unexpected key: %s", key)
-	}
-	workflowID, timestamp, err := ParseWorkflowKey(key)
+func TestDeleteLegacyWorkflowRuns(t *testing.T) {
+	ctx := context.Background()
+	store, err := OpenLevelDB(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if workflowID != 7 || timestamp != time.Unix(20, 0).UTC().UnixMilli() {
-		t.Fatalf("unexpected parsed key: workflow=%d timestamp=%d", workflowID, timestamp)
-	}
-	if _, _, err := ParseWorkflowKey("rhistory_db_contacts_00000000000000000001_00000000000000000002"); err == nil {
-		t.Fatal("expected non-workflow key parse error")
-	}
-}
-
-func TestMemoryStoreGetPrefixKeysLimit(t *testing.T) {
-	ctx := context.Background()
-	store := NewMemoryStore()
-	for index := 1; index <= 4; index++ {
-		if _, err := SaveWorkflowRun(ctx, store, WorkflowRun{
-			WorkflowID: 7,
-			Timestamp:  int64(index),
-			Outputs:    map[string]any{"index": index},
-			Steps:      []StepRecord{},
-		}); err != nil {
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Fatal(err)
+		}
+	})
+	for _, key := range []string{"whistory_00000000000000000007_00000000000000001000", "whistory_00000000000000000008_00000000000000002000"} {
+		if err := store.Put(ctx, key, []byte(`{"workflow_id":7,"steps":[]}`)); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if _, err := SaveWorkflowRun(ctx, store, WorkflowRun{
-		WorkflowID: 8,
-		Timestamp:  4,
-		Outputs:    map[string]any{"other": true},
-		Steps:      []StepRecord{},
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	keys, err := store.GetPrefixKeysLimit(ctx, WorkflowPrefix(7), 2)
+	rowKey, err := SaveRowChange(ctx, store, RowChange{Database: "db", Table: "contacts", RecordID: 1, Values: map[string]any{"name": "kept"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	expected := []string{WorkflowKey(7, 3), WorkflowKey(7, 4)}
-	if len(keys) != len(expected) || keys[0] != expected[0] || keys[1] != expected[1] {
-		t.Fatalf("unexpected keys: %#v", keys)
+	deleted, err := DeleteLegacyWorkflowRuns(ctx, store)
+	if err != nil || deleted != 2 {
+		t.Fatalf("expected both legacy runs deleted, got %d, %v", deleted, err)
+	}
+	if entries, _ := store.GetPrefix(ctx, "whistory_"); len(entries) != 0 {
+		t.Fatalf("expected no legacy runs left, got %#v", entries)
+	}
+	if _, err := store.Get(ctx, rowKey); err != nil {
+		t.Fatalf("expected row history to survive, got %v", err)
+	}
+	if deleted, err := DeleteLegacyWorkflowRuns(ctx, store); err != nil || deleted != 0 {
+		t.Fatalf("expected a second cleanup to do nothing, got %d, %v", deleted, err)
 	}
 }
 
@@ -156,34 +142,9 @@ func TestHistoryTimestampsStayMillisecondIntsWithoutOverwriting(t *testing.T) {
 		t.Fatalf("expected second row timestamp to increment by 1 ms, got %d", secondRow.Timestamp)
 	}
 
-	firstWorkflowKey, err := SaveWorkflowRun(ctx, store, WorkflowRun{WorkflowID: 7, Timestamp: ts, Steps: []StepRecord{}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	secondWorkflowKey, err := SaveWorkflowRun(ctx, store, WorkflowRun{WorkflowID: 7, Timestamp: ts, Steps: []StepRecord{}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if firstWorkflowKey == secondWorkflowKey {
-		t.Fatalf("expected unique millisecond workflow history keys, got %q", firstWorkflowKey)
-	}
-	workflowEntries, err := store.GetPrefix(ctx, WorkflowPrefix(7))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(workflowEntries) != 2 {
-		t.Fatalf("expected two workflow history entries, got %d", len(workflowEntries))
-	}
-	secondWorkflow, err := DecodeWorkflowRun(workflowEntries[1])
-	if err != nil {
-		t.Fatal(err)
-	}
-	if secondWorkflow.Timestamp != ts+1 {
-		t.Fatalf("expected second workflow timestamp to increment by 1 ms, got %d", secondWorkflow.Timestamp)
-	}
 }
 
-func TestDeletePrefixBeforeRemovesOldWorkflowRuns(t *testing.T) {
+func TestDeletePrefixBeforeRemovesOlderKeys(t *testing.T) {
 	ctx := context.Background()
 	stores := map[string]Store{
 		"memory": NewMemoryStore(),
@@ -201,30 +162,27 @@ func TestDeletePrefixBeforeRemovesOldWorkflowRuns(t *testing.T) {
 
 	for name, store := range stores {
 		t.Run(name, func(t *testing.T) {
-			for _, timestamp := range []int64{1000, 2000, 3000} {
-				if _, err := SaveWorkflowRun(ctx, store, WorkflowRun{WorkflowID: 7, Timestamp: timestamp}); err != nil {
+			for _, key := range []string{"a_7_1000", "a_7_2000", "a_7_3000", "a_8_1000"} {
+				if err := store.Put(ctx, key, []byte("{}")); err != nil {
 					t.Fatal(err)
 				}
 			}
-			if _, err := SaveWorkflowRun(ctx, store, WorkflowRun{WorkflowID: 8, Timestamp: 1000}); err != nil {
-				t.Fatal(err)
-			}
 
-			deleted, err := store.DeletePrefixBefore(ctx, WorkflowPrefix(7), WorkflowKey(7, 3000))
+			deleted, err := store.DeletePrefixBefore(ctx, "a_7_", "a_7_3000")
 			if err != nil {
 				t.Fatal(err)
 			}
 			if deleted != 2 {
 				t.Fatalf("expected 2 deleted runs, got %d", deleted)
 			}
-			remaining, err := store.GetPrefix(ctx, WorkflowPrefix(7))
+			remaining, err := store.GetPrefix(ctx, "a_7_")
 			if err != nil {
 				t.Fatal(err)
 			}
-			if len(remaining) != 1 || remaining[0].Key != WorkflowKey(7, 3000) {
+			if len(remaining) != 1 || remaining[0].Key != "a_7_3000" {
 				t.Fatalf("expected only the cutoff run to remain, got %#v", remaining)
 			}
-			other, err := store.GetPrefix(ctx, WorkflowPrefix(8))
+			other, err := store.GetPrefix(ctx, "a_8_")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -232,7 +190,7 @@ func TestDeletePrefixBeforeRemovesOldWorkflowRuns(t *testing.T) {
 				t.Fatalf("expected workflow 8 history untouched, got %#v", other)
 			}
 
-			deleted, err = store.DeletePrefixBefore(ctx, WorkflowPrefix(7), WorkflowKey(7, 3000))
+			deleted, err = store.DeletePrefixBefore(ctx, "a_7_", "a_7_3000")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -254,10 +212,10 @@ func TestLevelDBStoreCompactsAfterDeletion(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
-	if _, err := SaveWorkflowRun(ctx, store, WorkflowRun{WorkflowID: 1, Timestamp: 1000}); err != nil {
+	if err := store.Put(ctx, "a_1_1000", []byte("{}")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.DeletePrefixBefore(ctx, WorkflowPrefix(1), WorkflowKey(1, 2000)); err != nil {
+	if _, err := store.DeletePrefixBefore(ctx, "a_1_", "a_1_2000"); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.Compact(ctx); err != nil {

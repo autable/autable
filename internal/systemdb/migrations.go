@@ -62,6 +62,48 @@ var migrations = []func(orm *gorm.DB) error{
 	func(orm *gorm.DB) error {
 		return orm.Exec("UPDATE `permission_grant_models` SET `level` = 1 WHERE `scope` IN ('view', 'view_set') AND `level` > 1").Error
 	},
+	// 5 → 6: forms were replaced by hosted apps. Form grants would name
+	// ids of a table that no longer exists, so they go with it. Form
+	// scripts already written to the repository's form/ directory are left
+	// alone. IF EXISTS: a database upgraded straight from version 0 by an
+	// old-shape fixture may never have had the table.
+	func(orm *gorm.DB) error {
+		if err := orm.Exec("DELETE FROM `permission_grant_models` WHERE `scope` IN ('form', 'form_set')").Error; err != nil {
+			return err
+		}
+		return orm.Exec("DROP TABLE IF EXISTS `form_models`").Error
+	},
+	// 6 → 7: autable became admin-gated. Admins come from the config file,
+	// so database ownership is gone. Structure is admin-only, so the
+	// field_add / field_modify metadata grants and workflow_set grants go.
+	// Old workflow grants meant viewing or editing the workflow, not
+	// running it; they are deleted rather than reinterpreted, and admins
+	// grant run deliberately. App grants keep only their open level.
+	// Data-scope grants (including those of workflow subjects) are kept.
+	func(orm *gorm.DB) error {
+		if err := orm.Exec("DROP TABLE `database_owner_models`").Error; err != nil {
+			return err
+		}
+		if err := orm.Exec("DELETE FROM `permission_grant_models` WHERE `scope` IN ('field_add', 'field_modify', 'workflow_set', 'workflow')").Error; err != nil {
+			return err
+		}
+		return orm.Exec("UPDATE `permission_grant_models` SET `level` = 1 WHERE `scope` IN ('app', 'app_set') AND `level` > 1").Error
+	},
+	// 7 → 8: workflows became versioned code bundles (workflows v2) with no
+	// compatibility. The old workflow table is dropped; AutoMigrate creates
+	// the new one, whose ids restart, so every grant and role membership
+	// held by a workflow:<id> subject and every workflow (run) grant goes
+	// too — a new workflow must not inherit an old one's grants. The old
+	// LevelDB run history is deleted at startup (history.DeleteLegacyWorkflowRuns).
+	func(orm *gorm.DB) error {
+		if err := orm.Exec("DROP TABLE `workflow_models`").Error; err != nil {
+			return err
+		}
+		if err := orm.Exec("DELETE FROM `permission_grant_models` WHERE `subject_id` LIKE 'workflow:%' OR `scope` = 'workflow'").Error; err != nil {
+			return err
+		}
+		return orm.Exec("DELETE FROM `role_member_models` WHERE `subject_type` = 'workflow' OR `subject_id` LIKE 'workflow:%'").Error
+	},
 }
 
 func currentSchemaVersion() int64 {

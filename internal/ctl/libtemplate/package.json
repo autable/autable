@@ -1,0 +1,14 @@
+{
+  "name": "__LIB_NAME__",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsc --noEmit false --declaration --emitDeclarationOnly --rootDir src --outDir .autable/types && node build.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2",
+    "typescript": "^7.0.2"
+  }
+}

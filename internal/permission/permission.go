@@ -22,24 +22,29 @@ const (
 type Scope string
 
 const (
-	ScopeFieldSet    Scope = "field_set"
-	ScopeField       Scope = "field"
-	ScopeRecord      Scope = "record"
-	ScopeViewSet     Scope = "view_set"
-	ScopeView        Scope = "view"
-	ScopeWorkflowSet Scope = "workflow_set"
-	ScopeWorkflow    Scope = "workflow"
-	ScopeFormSet     Scope = "form_set"
-	ScopeForm        Scope = "form"
+	ScopeFieldSet Scope = "field_set"
+	ScopeField    Scope = "field"
+	ScopeRecord   Scope = "record"
+	ScopeViewSet  Scope = "view_set"
+	ScopeView     Scope = "view"
+	// ScopeWorkflow lets a user run one workflow (resource = workflow id).
+	// Level 1 (Run) is the only level; everything else about workflows is
+	// admin-only.
+	ScopeWorkflow Scope = "workflow"
+	// ScopeAppSet and ScopeApp let a user open the published apps of a
+	// database (resource = database name) or one app (resource = app id).
+	// Level 1 (Open) is the only level.
+	ScopeAppSet Scope = "app_set"
+	ScopeApp    Scope = "app"
 	// ScopeFile guards viewing and uploading files bound to a table; the
 	// resource is db.table.
 	ScopeFile Scope = "file"
-	// ScopeFieldAdd is a metadata permission: adding non-formula fields to
-	// the table (resource db.table). Independent from data-level field bits.
-	ScopeFieldAdd Scope = "field_add"
-	// ScopeFieldModify is a metadata permission: changing one field's
-	// non-formula definition (resource db.table, Field = field name).
-	ScopeFieldModify Scope = "field_modify"
+)
+
+// Run and Open are the only levels of workflow and app grants.
+const (
+	Run  Level = 1
+	Open Level = 1
 )
 
 type Grant struct {
@@ -146,25 +151,8 @@ func (set Set) CanCreateField(subjectID, resource, field string) bool {
 	return set.FieldLevel(subjectID, resource, field)&FieldCreate != 0
 }
 
-// CanAddFields is the metadata permission for adding non-formula fields.
-func (set Set) CanAddFields(subjectID, resource string) bool {
-	return set.ResourceLevel(subjectID, ScopeFieldAdd, resource) >= Write
-}
-
-// CanModifyField is the metadata permission for changing one field's
-// non-formula definition.
-func (set Set) CanModifyField(subjectID, resource, field string) bool {
-	for _, grant := range set.grants {
-		if grant.SubjectID == subjectID && grant.Scope == ScopeFieldModify && grant.Resource == resource && grant.Field == field && grant.Level >= Write {
-			return true
-		}
-	}
-	return false
-}
-
 // CanReadView is the only view capability: view definitions themselves are
-// managed exclusively by the database owner, so view grants carry no write
-// level.
+// managed exclusively by admins, so view grants carry no write level.
 func (set Set) CanReadView(subjectID, resource, view string) bool {
 	return set.ViewLevel(subjectID, resource, view) >= Read
 }
@@ -179,10 +167,6 @@ func (set Set) CanDeleteRecord(subjectID, resource string) bool {
 
 func (set Set) CanReadResource(subjectID string, scope Scope, resource string) bool {
 	return set.ResourceLevel(subjectID, scope, resource) >= Read
-}
-
-func (set Set) CanWriteResource(subjectID string, scope Scope, resource string) bool {
-	return set.ResourceLevel(subjectID, scope, resource) >= Write
 }
 
 func maxLevel(left, right Level) Level {

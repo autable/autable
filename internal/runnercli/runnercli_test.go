@@ -8,9 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"autable/internal/egress"
 	"autable/internal/runnerhub"
-	"autable/internal/workflow"
-	"autable/internal/workflow/nodes/echo"
 )
 
 func startHub(t *testing.T, hub *runnerhub.Hub) string {
@@ -20,16 +19,20 @@ func startHub(t *testing.T, hub *runnerhub.Hub) string {
 	return server.URL
 }
 
-func waitForRunner(t *testing.T, hub *runnerhub.Hub, name string) {
+func waitForRunner(t *testing.T, hub *runnerhub.Hub, name string, present bool) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		if _, ok := hub.NodeTypes("db", name); ok {
+		found := false
+		for _, runner := range hub.Runners("db") {
+			found = found || runner.Name == name
+		}
+		if found == present {
 			return
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	t.Fatalf("runner %q never registered", name)
+	t.Fatalf("runner %q presence never became %v", name, present)
 }
 
 func validator(valid string) runnerhub.TokenResolver {
@@ -41,94 +44,56 @@ func validator(valid string) runnerhub.TokenResolver {
 	}
 }
 
-func echoDispatch(hub *runnerhub.Hub, value string) (map[string]any, error) {
-	return hub.Dispatch(context.Background(), "intranet", workflow.RemoteJob{
-		Input: map[string]any{"value": value},
-		Runtime: workflow.RuntimeInfo{
-			WorkflowID:   7,
-			DatabaseName: "db",
-			RunID:        "run-1",
-			InstanceID:   "remote_echo",
-			NodeType:     "echo",
-		},
-	})
-}
-
-func TestRunnerExecutesDispatchedJobs(t *testing.T) {
-	hub := runnerhub.New(validator("good"), 0)
+func TestRunnerPerformsFetchJobs(t *testing.T) {
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Seen", r.Header.Get("X-Token"))
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte("hello " + r.Method))
+	}))
+	defer target.Close()
+	hub := runnerhub.New(validator("good"))
 	url := startHub(t, hub)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-
-	runDone := make(chan error, 1)
+	done := make(chan error, 1)
 	go func() {
-		runDone <- Run(ctx, Options{Endpoint: url, Token: "good", Name: "intranet"}, []workflow.Node{echo.Node{}})
+		done <- Run(ctx, Options{Endpoint: url, Token: "good", Name: "intranet", MaxJobs: 2})
 	}()
-	waitForRunner(t, hub, "intranet")
+	waitForRunner(t, hub, "intranet", true)
 
-	output, err := echoDispatch(hub, "Ada")
+	response, err := hub.Fetch(context.Background(), "db", "intranet", egress.Request{Method: "PUT", URL: target.URL + "/x", Headers: [][2]string{{"X-Token", "t"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if output["value"] != "Ada" {
-		t.Fatalf("unexpected output: %#v", output)
+	if response.Status != http.StatusCreated || string(response.Body) != "hello PUT" {
+		t.Fatalf("unexpected response %#v", response)
 	}
-
+	seen := false
+	for _, header := range response.Headers {
+		seen = seen || (header[0] == "x-seen" && header[1] == "t")
+	}
+	if !seen {
+		t.Fatalf("expected request headers to reach the target, got %#v", response.Headers)
+	}
+	if _, err := hub.Fetch(context.Background(), "db", "intranet", egress.Request{URL: "http://127.0.0.1:1/unreachable", TimeoutMs: 2000}); err == nil || !strings.Contains(err.Error(), `runner "intranet"`) {
+		t.Fatalf("expected the runner's transport error, got %v", err)
+	}
 	cancel()
-	select {
-	case err := <-runDone:
-		if err != nil {
-			t.Fatalf("expected clean shutdown, got %v", err)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("runner did not stop on context cancel")
+	if err := <-done; err != nil {
+		t.Fatalf("expected a clean shutdown, got %v", err)
 	}
 }
 
 func TestRunnerReconnectsAfterDisconnect(t *testing.T) {
-	hub := runnerhub.New(validator("good"), 0)
+	hub := runnerhub.New(validator("good"))
 	url := startHub(t, hub)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-
-	go Run(ctx, Options{Endpoint: url, Token: "good", Name: "intranet"}, []workflow.Node{echo.Node{}})
-	waitForRunner(t, hub, "intranet")
-
+	go func() { _ = Run(ctx, Options{Endpoint: url, Token: "good", Name: "intranet"}) }()
+	waitForRunner(t, hub, "intranet", true)
 	hub.DisconnectDatabase("db")
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
-		if _, ok := hub.NodeTypes("db", "intranet"); !ok {
-			break
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	waitForRunner(t, hub, "intranet")
-
-	output, err := echoDispatch(hub, "again")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if output["value"] != "again" {
-		t.Fatalf("unexpected output after reconnect: %#v", output)
-	}
-}
-
-func TestRunnerReportsUnknownNodes(t *testing.T) {
-	hub := runnerhub.New(validator("good"), 0)
-	url := startHub(t, hub)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	go Run(ctx, Options{Endpoint: url, Token: "good", Name: "intranet"}, []workflow.Node{echo.Node{}})
-	waitForRunner(t, hub, "intranet")
-
-	// The hub blocks unsupported node types before dispatching.
-	_, err := hub.Dispatch(context.Background(), "intranet", workflow.RemoteJob{
-		Runtime: workflow.RuntimeInfo{DatabaseName: "db", NodeType: "kingdee.bill.query"},
-	})
-	if err == nil || !strings.Contains(err.Error(), `does not support node`) {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	waitForRunner(t, hub, "intranet", false)
+	waitForRunner(t, hub, "intranet", true)
 }
 
 func TestRunnerRejectsInvalidOptions(t *testing.T) {
@@ -140,12 +105,9 @@ func TestRunnerRejectsInvalidOptions(t *testing.T) {
 		{Endpoint: "ftp://localhost", Token: "t", Name: "n"},
 	}
 	for _, options := range cases {
-		if err := Run(ctx, options, []workflow.Node{echo.Node{}}); err == nil {
+		if err := Run(ctx, options); err == nil {
 			t.Fatalf("expected options %#v to be rejected", options)
 		}
-	}
-	if err := Run(ctx, Options{Endpoint: "http://localhost", Token: "t", Name: "n"}, nil); err == nil {
-		t.Fatal("expected empty node registry to be rejected")
 	}
 }
 
@@ -165,5 +127,11 @@ func TestWebsocketEndpointNormalization(t *testing.T) {
 		if actual != expected {
 			t.Fatalf("websocketEndpoint(%q) = %q, expected %q", input, actual, expected)
 		}
+	}
+}
+
+func TestLogURLDropsCredentials(t *testing.T) {
+	if got := logURL("https://user:pw@example.com/a?token=s#f"); got != "https://example.com/a" {
+		t.Fatalf("unexpected log url %q", got)
 	}
 }

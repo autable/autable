@@ -13,17 +13,19 @@ import {
   type PermissionGrant,
   type RoleDefinition,
   type RoleMember,
-  type WorkflowDefinition
+  type WorkflowSummary
 } from "../api";
 import { compactRoleGrants } from "../permissionState";
 
 type UsePermissionWorkspaceOptions = {
   currentUserID?: string;
   database: DatabaseMetadata;
+  // Roles and grants are admin-only; non-admins never load them.
+  isAdmin: boolean;
   onStatus: Notify;
 };
 
-export function usePermissionWorkspace({ currentUserID, database, onStatus }: UsePermissionWorkspaceOptions) {
+export function usePermissionWorkspace({ currentUserID, database, isAdmin, onStatus }: UsePermissionWorkspaceOptions) {
   const { t } = useTranslation();
   const [roles, setRoles] = useState<RoleDefinition[]>([]);
   const [selectedRoleName, setSelectedRoleName] = useState("");
@@ -31,7 +33,7 @@ export function usePermissionWorkspace({ currentUserID, database, onStatus }: Us
   const [roleDraftGrants, setRoleDraftGrants] = useState<PermissionGrant[]>([]);
   const [roleDraftMembers, setRoleDraftMembers] = useState<RoleMember[]>([]);
   const [roleDraftMemberUsers, setRoleDraftMemberUsers] = useState<AuthUser[]>([]);
-  const [roleDraftMemberWorkflows, setRoleDraftMemberWorkflows] = useState<WorkflowDefinition[]>([]);
+  const [roleDraftMemberWorkflows, setRoleDraftMemberWorkflows] = useState<WorkflowSummary[]>([]);
   const [newRoleMemberQuery, setNewRoleMemberQuery] = useState("");
   const [memberSearchResults, setMemberSearchResults] = useState<AuthUser[]>([]);
   const [rolesReady, setRolesReady] = useState(false);
@@ -77,7 +79,7 @@ export function usePermissionWorkspace({ currentUserID, database, onStatus }: Us
 
   useEffect(() => {
     let cancelled = false;
-    if (!database.name || !currentUserID) {
+    if (!database.name || !currentUserID || !isAdmin) {
       clearRoles();
       return () => {
         cancelled = true;
@@ -101,7 +103,7 @@ export function usePermissionWorkspace({ currentUserID, database, onStatus }: Us
       applyRoles(nextRoles);
       setRolesReady(true);
     }
-  }, [currentUserID, database.name]);
+  }, [currentUserID, database.name, isAdmin]);
 
   function applyRoles(nextRoles: RoleDefinition[]) {
     setRoles(nextRoles);
@@ -114,7 +116,7 @@ export function usePermissionWorkspace({ currentUserID, database, onStatus }: Us
   }
 
   async function refreshRoles(dbName = database.name) {
-    if (!currentUserID || !dbName) {
+    if (!currentUserID || !isAdmin || !dbName) {
       clearRoles();
       return [];
     }
@@ -193,7 +195,7 @@ export function usePermissionWorkspace({ currentUserID, database, onStatus }: Us
     setMemberSearchResults([]);
   }
 
-  function addWorkflowMember(workflow: WorkflowDefinition) {
+  function addWorkflowMember(workflow: WorkflowSummary) {
     if (!workflow.id) {
       return;
     }
@@ -245,8 +247,8 @@ function compactMemberUsers(users: AuthUser[]): AuthUser[] {
   return [...byID.values()].sort((left, right) => left.email.localeCompare(right.email));
 }
 
-function compactMemberWorkflows(workflows: WorkflowDefinition[]): WorkflowDefinition[] {
-  const byID = new Map<number, WorkflowDefinition>();
+function compactMemberWorkflows(workflows: WorkflowSummary[]): WorkflowSummary[] {
+  const byID = new Map<number, WorkflowSummary>();
   for (const workflow of workflows) {
     if (workflow.id) {
       byID.set(workflow.id, workflow);

@@ -11,6 +11,14 @@ const repositoryPath = join(runtimeDir, "workspace");
 const metadataPath = join(repositoryPath, "metadata", "main.yml");
 const configPath = join(runtimeDir, "config.yml");
 
+// JSON strings are valid YAML double-quoted scalars, and escape the
+// backslashes of Windows paths.
+const yamlString = (value) => JSON.stringify(value);
+
+// The specs sign in as this admin (see adminEmail in the specs); everyone
+// else they register is an ordinary user.
+const adminEmail = "e2e-admin@example.com";
+
 rmSync(runtimeDir, { force: true, recursive: true });
 mkdirSync(join(runtimeDir, "data"), { recursive: true });
 mkdirSync(join(repositoryPath, "metadata"), { recursive: true });
@@ -21,11 +29,13 @@ writeFileSync(
     "server:",
     '  address: "127.0.0.1:18081"',
     "data:",
-    `  path: "${join(runtimeDir, "data")}"`,
+    `  path: ${yamlString(join(runtimeDir, "data"))}`,
     "repository:",
     "  enabled: false",
-    `  path: "${repositoryPath}"`,
+    `  path: ${yamlString(repositoryPath)}`,
     "auth:",
+    "  admins:",
+    `    - ${yamlString(adminEmail)}`,
     "  password:",
     "    enabled: true",
     "  oidc:",

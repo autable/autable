@@ -1,48 +1,50 @@
 # autable
 
-autable is a code-first alternative to multidimensional tables. The project is not a no-code or low-code builder: tables, forms, and workflows are stored as code-managed artifacts so AI-assisted development can work directly with the source of truth.
+autable is a code-first alternative to multidimensional tables. The project is not a no-code or low-code builder: tables are stored as code-managed metadata, and user interfaces and automations are hosted apps and workflows built as ordinary TypeScript projects, so AI-assisted development can work directly with the source of truth.
+
+autable is admin-gated. The global admins listed under `auth.admins` in the config file are the only people who write code or structure (databases, schema, formulas, views, permissions, workflows, apps); other developers write code elsewhere and deploy it with an admin account. Everyone else gets data access and can open the apps and run the workflows they are granted. See [docs/permissions.md](docs/permissions.md).
 
 ## Direction
 
 - Go backend with SQLite for system/application data.
 - LevelDB-compatible key/value storage for removable history/log data.
-- TypeScript React frontend for table, workflow, and form surfaces.
-- User-managed repository containing `config.yml`, table metadata, workflow JavaScript, and form JavaScript.
+- TypeScript React frontend for table, workflow, and app management surfaces.
+- Hosted apps: ordinary frontend projects that autable serves from the same origin as its API (see [docs/design/apps.md](docs/design/apps.md)).
+- Hosted workflows: TypeScript projects built on a small set of platform primitives (see [docs/design/workflows-v2.md](docs/design/workflows-v2.md)).
+- Git repository receiving table metadata as a backup.
 
 ## Current Slice
 
 This repository currently contains the backend core primitives:
 
-- `config.yml` loading and validation, including password and OIDC auth toggles under `auth`.
+- `config.yml` loading and validation, including password and OIDC auth toggles and the `auth.admins` list under `auth`.
 - YAML metadata for databases and tables, including soft-deleted fields.
-- Authenticated database/table creation that writes metadata YAML and grants database/table owner permissions.
+- Database and table creation, restricted to admins, that writes metadata YAML.
 - Hidden, auto-incrementing `ct_record_id` handling for user table storage.
 - Per-metadata-database SQLite row persistence through GORM.
 - Row create/update history written to LevelDB-compatible storage.
 - Table views with composable `base_view`, filters, and sorts.
-- Password registration/login with HttpOnly session cookies.
+- Password registration/login with HttpOnly session cookies (`__Host-autable_session` when `server.public_url` is https) and cross-site request checks on cookie-authenticated API writes.
 - OIDC provider listing plus authorization-code callback login with verified ID tokens and HttpOnly state/session cookies.
-- Field-level permissions: none, read, write.
-- Workflow and form resource permissions using their auto-incrementing IDs.
+- Default-deny data permissions: per-field read/update/create bits, record create/delete, row sets defined by readable views (including `$current_user` views), and row-scoped file access.
+- App open and workflow run permissions using their auto-incrementing IDs; everything else about apps and workflows is admin-only.
 - User identity model with email fallback for password and OIDC accounts.
-- History key generation and prefix scanning for row/workflow history.
-- Stateless workflow node interface definitions.
-- Workflow node metadata API and frontend node catalog for available stateless nodes and trigger nodes.
-- Synchronous JavaScript workflow runs through registered stateless nodes, with each run persisted as `whistory_id_timestamp`.
-- Remote runners: node instances can be bound (in the UI, beside instance variables/secrets) to a named `autable-runner` process that connects outbound over WebSocket and executes remote-capable nodes inside another network; a single resettable system token authorizes runners (see `docs/design/remote-runner.md`).
-- `autablectl`, a command-line client for scripts and coding agents: browser sign-in issues a bearer session token, and commands read and write tables, rows, workflows, and forms on the live server, including a pull/edit/push loop for scripts with conflict detection (see `docs/cli.md`).
-- A `kingdee.purchaseorder.list` node that pages purchase order lines out of Kingdee K3Cloud through a pure-Go WebAPI client (`internal/kingdee`) with request signing matching the official Python SDK.
-- A `table.record.changed` trigger node that accepts an `rhistory_db_table_record_id_timestamp` key and exposes the decoded row change.
-- Workflow JavaScript editing with JSON editors for GitHub Actions-style secrets and variables.
-- Git-managed artifacts live under `repository.path`: table metadata at `metadata/main.yml`, workflow JavaScript at `workflow/<database>/<workflow>.js`, and form JavaScript at `form/<database>/<form>.js`.
-- A form JavaScript runtime that requires `function render(api, root)` to render controls with `field` configs and return `{ table }`.
-- Form submissions send input JSON; the backend executes the form JavaScript to resolve the target table and field-bound controls before writing records.
+- History key generation and prefix scanning for row history.
+- Workflows: versioned TypeScript bundles stored in the system database like apps. Triggers are `schedule` (cron with a timezone), `recordChanged` (row changes, filtered by the workflow subject's grants), `webhook` (`/api/hooks/<database>/<name>/<path>`, answered by the code) and `manual`. Each run executes `run(event)` once in a goja runtime inside the server, with `fetch`, `crypto`, secrets and vars, and table, user and file access as the `workflow:<id>` subject; runs, their output and logs are recorded per workflow with a retention period (see `docs/design/workflows-v2.md` and `docs/design/workflows-host-api.md`).
+- Runners: `autable-runner` connects outbound over WebSocket with a per-database token and performs the HTTP requests a workflow sends with `fetch(url, { via: "<runner>" })`, so workflows reach systems inside other networks; runners execute no code (see `docs/design/remote-runner.md`).
+- `autablectl`, a command-line client for scripts and coding agents: browser sign-in issues a bearer session token, and commands read and write tables and rows, and, with an admin account, build, push, and publish hosted apps and workflows (see `docs/cli.md`). `autablectl skill export DIR` writes a self-contained agent skill package (`SKILL.md` plus reference docs and SDK sources from the same release) for skill-distribution systems; `skill install` puts it in `~/.claude/skills/autable`.
+- Reference docs: row queries and field values in `docs/query.md`, HTTP routes and authentication in `docs/http-api.md`.
+- Hosted apps: immutable app versions (built files plus project source) stored in the system database, published at `/apps/<database>/<name>/`, with a versioned TypeScript SDK served by the server (see `docs/design/apps.md`).
+- Git-managed artifacts live under `repository.path`: table metadata at `metadata/main.yml`. A `workflow/` directory left by releases before workflows v2 is no longer synced.
 - Runtime data is rooted at `data.path`: `system.sqlite`, `leveldb`, and per-database `<database>.sqlite` files are derived from that directory instead of being configured separately.
-- Excel import into tables, available from the table toolbar and from form scripts via `api.excelImport({ table, label, matchField, fields, duplicateStrategy })`: the file is parsed in the browser (SheetJS), users pick the worksheet and columns, missing `string`/`int`/`float` fields are auto-created through the field API, and rows are written serially through the existing create/upsert row APIs with per-row dedup on a match field (update or skip on duplicates).
-- Form scripts can print: `api.pdf({ html, name, orientation, marginMm, table, record_id })` inside an action typesets the html into an A4 PDF, uploads it as a `file`, and returns the stored file so the script can write its id into a `file` field. The text stays selectable and searchable, which needs real glyphs, so `web/public/pdf` ships Noto Sans SC and the HarfBuzz subsetter: the characters the document renders are collected automatically and the font is cut down to them, keeping a page of Chinese around 30 KB. pdfmake, html-to-pdfmake, the font, and the subsetter all load on first use.
-- Form controls support `api.relation({ onChange })` for filling other fields from a picked record, and `api.input({ disabled: true })` for values a script owns — rendered and submitted, but not typeable.
-- `api.input({ type: "date" })` renders the native date picker and submits the value as `YYYY-MM-DD`, alongside the `text`, `email`, `search`, `tel`, `url`, and `password` input types.
-- A string field with `options` is an enum; adding `multiple: true` lets it hold several of them at once, stored comma-separated (so an option may not contain a comma). Multi-valued cells are edited as checkboxes in the row panel and in forms, and are left out of grid editing because a cell cannot show a set of choices.
+- Excel import into tables from the table toolbar: the file is parsed in the browser (SheetJS), users pick the worksheet and columns, missing `string`/`int`/`float` fields are created through the field API (which requires an admin), and rows are written serially through the existing create/upsert row APIs with per-row dedup on a match field (update or skip on duplicates).
+- A string field with `options` is an enum; adding `multiple: true` lets it hold several of them at once, stored comma-separated (so an option may not contain a comma). Multi-valued cells are edited as checkboxes in the row panel, and are left out of grid editing because a cell cannot show a set of choices.
+
+## Workflows
+
+A workflow is a TypeScript project (`autablectl workflow init`) that exports `triggers` and `run`, uses the SDK the server ships (`fetch`, `crypto`, `secrets`, `vars`, `tables`, `users`, `files`, `log`), and is pushed and published by an admin like an app. Integrations with outside systems are ordinary code in the deployment's workflows, not part of autable. Runs are stateless; long processes keep their state in table rows and advance on `schedule` and `recordChanged` triggers. See [docs/design/workflows-v2.md](docs/design/workflows-v2.md).
+
+Upgrading from node-based workflows deletes them (schema migration 7 → 8), together with their run history and every grant and role membership of `workflow:<id>` subjects and every workflow run grant; rewrite them as projects, then grant again.
 
 ## Development Rules
 
@@ -61,13 +63,25 @@ This repository currently contains the backend core primitives:
 go test ./...
 ```
 
-Run the API server with git-managed config. On startup, Autable clones `repository.remote_url` at `repository.remote_branch` into `repository.path` when the path does not exist. After startup, local metadata, workflow, and form changes are committed and pushed to that remote branch; Autable does not pull or rebase remote changes automatically. The server loads metadata from `repository.path/metadata/main.yml` and stores runtime data under `data.path`:
+Run the API server with git-managed config. On startup, Autable clones `repository.remote_url` at `repository.remote_branch` into `repository.path` when the path does not exist. After startup, local metadata changes are committed and pushed to that remote branch; Autable does not pull or rebase remote changes automatically. The server loads metadata from `repository.path/metadata/main.yml` and stores runtime data under `data.path`:
 
 ```sh
 cp examples/config.example.yml examples/config.yml
 # Edit repository.remote_url and repository.remote_branch before starting.
 go run ./cmd/autable -config examples/config.yml
 ```
+
+List at least one admin email under `auth.admins` before starting; with an empty list the server starts but logs a warning, and nobody can create databases or change schema, permissions, workflows, or apps:
+
+```yaml
+auth:
+  admins:
+    - "admin@example.com"
+  password:
+    enabled: true
+```
+
+Admins are matched by email, and password registration is open whenever `auth.password.enabled` is true: whoever registers an admin email first becomes that admin. Register the admin accounts before or as the config is deployed, or disable password auth and sign in through OIDC, whose provider should verify email addresses.
 
 Build a single Go binary with the frontend embedded:
 
@@ -92,7 +106,7 @@ docker run --rm \
   ghcr.io/autable/autable:latest
 ```
 
-The container uses `/etc/autable/config.yml`, listens on `0.0.0.0:8080`, stores runtime data under `/data`, and stores user-authored metadata/workflows/forms under `/repository`. Mount a config file that sets `repository.remote_url` and `repository.remote_branch`; an empty `/repository` volume is initialized by cloning the remote, or by creating the local branch when the remote repository is empty.
+The container uses `/etc/autable/config.yml`, listens on `0.0.0.0:8080`, stores runtime data under `/data` (including the system database, which holds hosted app and workflow versions and workflow runs), and stores user-authored metadata under `/repository`. Mount a config file that sets `repository.remote_url` and `repository.remote_branch`; an empty `/repository` volume is initialized by cloning the remote, or by creating the local branch when the remote repository is empty.
 
 To debug memory or CPU in Docker, enable pprof in `config.yml`:
 
@@ -163,4 +177,4 @@ backup:
   tmp_dir: "/tmp/autable-backups"
 ```
 
-The project keeps generated runtime data out of git while keeping user-authored metadata, workflows, and forms in the configured repository remote.
+The project keeps generated runtime data out of git while keeping user-authored metadata in the configured repository remote. Hosted app and workflow versions, including their source, live in the system database and are covered by its backups.

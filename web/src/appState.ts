@@ -1,17 +1,27 @@
 import type { RoleDefinition, RoleMember } from "./api";
 
-export type WorkspaceViewName = "table" | "workflow" | "form" | "permission";
+// home: the database landing page (apps and tables); admin: the management
+// overview, admins only.
+// library: the instance-wide libraries, admins only; shown inside the
+// current database's workspace like the other management pages.
+export type WorkspaceViewName = "home" | "table" | "workflow" | "app" | "permission" | "admin" | "library";
+
+// The sections of a workflow's page; "config" holds its secrets and vars.
+export type WorkflowTab = "overview" | "runs" | "versions" | "config";
+
+const workflowTabs: WorkflowTab[] = ["overview", "runs", "versions", "config"];
 
 export type WorkspaceRoute = {
   databaseName: string;
   view: WorkspaceViewName;
   tableName?: string;
   tableViewName?: string;
-  workflowID?: number;
-  workflowTab?: "editor" | "history";
-  workflowRunKey?: string;
-  formID?: number;
+  workflowName?: string;
+  workflowTab?: WorkflowTab;
+  workflowRunID?: number;
+  appName?: string;
   roleName?: string;
+  libraryName?: string;
 };
 
 export function replaceResource<T extends { id?: number }>(items: T[], saved: T): T[] {
@@ -57,11 +67,14 @@ export function parseWorkspaceRoute(pathname: string): WorkspaceRoute | null {
   }
   const databaseName = segments[1];
   if (segments.length === 2) {
-    return { databaseName, view: "table" };
+    return { databaseName, view: "home" };
+  }
+  if (segments[2] === "admin" && segments.length === 3) {
+    return { databaseName, view: "admin" };
   }
   if (segments[2] === "tables") {
     if (!segments[3]) {
-      return { databaseName, view: "table" };
+      return { databaseName, view: "home" };
     }
     if (segments[4] === "views" && segments[5]) {
       return { databaseName, view: "table", tableName: segments[3], tableViewName: segments[5] };
@@ -69,20 +82,26 @@ export function parseWorkspaceRoute(pathname: string): WorkspaceRoute | null {
     return { databaseName, view: "table", tableName: segments[3] };
   }
   if (segments[2] === "workflows") {
+    if (!segments[3]) {
+      return { databaseName, view: "workflow" };
+    }
+    const tab = workflowTabs.find((item) => item === segments[4] && item !== "overview");
+    if (segments[4] && !tab) {
+      return null;
+    }
     return {
       databaseName,
       view: "workflow",
-      workflowID: parsePositiveInteger(segments[3]),
-      workflowTab: segments[4] === "history" ? "history" : "editor",
-      workflowRunKey: segments[4] === "history" ? segments[5] : undefined
+      workflowName: segments[3],
+      workflowTab: tab ?? "overview",
+      workflowRunID: tab === "runs" ? parsePositiveInteger(segments[5]) : undefined
     };
   }
-  if (segments[2] === "forms") {
-    return {
-      databaseName,
-      view: "form",
-      formID: parsePositiveInteger(segments[3])
-    };
+  if (segments[2] === "apps") {
+    return { databaseName, view: "app", appName: segments[3] || undefined };
+  }
+  if (segments[2] === "libraries" && segments.length <= 4) {
+    return { databaseName, view: "library", libraryName: segments[3] || undefined };
   }
   if (segments[2] === "permissions") {
     return {
@@ -99,20 +118,31 @@ export function buildWorkspacePath(route: WorkspaceRoute | null): string {
     return "/";
   }
   const database = encodePathSegment(route.databaseName);
+  if (route.view === "admin") {
+    return `/databases/${database}/admin`;
+  }
   if (route.view === "workflow") {
-    if (!route.workflowID) {
+    if (!route.workflowName) {
       return `/databases/${database}/workflows`;
     }
-    const workflowPath = `/databases/${database}/workflows/${route.workflowID}`;
-    if (route.workflowTab !== "history") {
+    const workflowPath = `/databases/${database}/workflows/${encodePathSegment(route.workflowName)}`;
+    if (!route.workflowTab || route.workflowTab === "overview") {
       return workflowPath;
     }
-    return route.workflowRunKey
-      ? `${workflowPath}/history/${encodePathSegment(route.workflowRunKey)}`
-      : `${workflowPath}/history`;
+    if (route.workflowTab === "runs" && route.workflowRunID) {
+      return `${workflowPath}/runs/${route.workflowRunID}`;
+    }
+    return `${workflowPath}/${route.workflowTab}`;
   }
-  if (route.view === "form") {
-    return route.formID ? `/databases/${database}/forms/${route.formID}` : `/databases/${database}/forms`;
+  if (route.view === "app") {
+    return route.appName
+      ? `/databases/${database}/apps/${encodePathSegment(route.appName)}`
+      : `/databases/${database}/apps`;
+  }
+  if (route.view === "library") {
+    return route.libraryName
+      ? `/databases/${database}/libraries/${encodePathSegment(route.libraryName)}`
+      : `/databases/${database}/libraries`;
   }
   if (route.view === "permission") {
     return route.roleName

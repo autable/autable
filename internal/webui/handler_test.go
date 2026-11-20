@@ -27,6 +27,32 @@ func TestHandlerRoutesAPIRequestsToAPI(t *testing.T) {
 	}
 }
 
+func TestHandlerRoutesHostedAppsToAPI(t *testing.T) {
+	var apiPaths []string
+	handler := HandlerWithFS(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		apiPaths = append(apiPaths, r.URL.Path)
+		w.WriteHeader(http.StatusTeapot)
+	}), testFrontendFS())
+
+	for _, target := range []string{"/apps/shop/widgets/", "/apps/shop/widgets/assets/app.js", "/apps/shop/widgets/@2/orders/1"} {
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, target, nil))
+		if response.Code != http.StatusTeapot {
+			t.Fatalf("expected %s to reach the API handler, got %d", target, response.Code)
+		}
+	}
+	if len(apiPaths) != 3 {
+		t.Fatalf("expected three API calls, got %v", apiPaths)
+	}
+
+	// Frontend routes that merely start with "apps" stay with the SPA.
+	route := httptest.NewRecorder()
+	handler.ServeHTTP(route, httptest.NewRequest(http.MethodGet, "/appsettings", nil))
+	if route.Code != http.StatusOK || !strings.Contains(route.Body.String(), "<main>app</main>") {
+		t.Fatalf("expected SPA fallback for /appsettings, got status=%d body=%q", route.Code, route.Body.String())
+	}
+}
+
 func TestHandlerServesFrontendAssetsAndSPAFallback(t *testing.T) {
 	handler := HandlerWithFS(http.NotFoundHandler(), testFrontendFS())
 

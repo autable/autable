@@ -2,7 +2,6 @@ package systemdb
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -15,7 +14,6 @@ import (
 	"autable/internal/permission"
 	"autable/internal/sqliteutil"
 
-	"github.com/google/uuid"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -23,39 +21,6 @@ import (
 
 type DB struct {
 	orm *gorm.DB
-}
-
-type WorkflowDefinition struct {
-	ID           int64             `json:"id"`
-	DatabaseName string            `json:"database_name"`
-	Name         string            `json:"name"`
-	Script       string            `json:"script"`
-	Enabled      bool              `json:"enabled"`
-	CreatorID    string            `json:"creator_id,omitempty"`
-	Secrets      map[string]string `json:"secrets"`
-	Variables    map[string]string `json:"variables"`
-	Runners      map[string]string `json:"runners"`
-	// HistoryRetentionDays is nil to keep run history forever, 0 to keep
-	// none, and a positive count to keep that many days.
-	HistoryRetentionDays *int64 `json:"history_retention_days"`
-	// TimeoutSeconds is nil to run with the default one-hour limit, or a
-	// positive number of seconds after which a run is aborted.
-	TimeoutSeconds  *int64           `json:"timeout_seconds"`
-	PermissionLevel permission.Level `json:"permission_level,omitempty" gorm:"-"`
-	CreatedAt            int64            `json:"created_at"`
-	UpdatedAt            int64            `json:"updated_at"`
-}
-
-type FormDefinition struct {
-	ID              int64            `json:"id"`
-	DatabaseName    string           `json:"database_name"`
-	Name            string           `json:"name"`
-	Script          string           `json:"script"`
-	PublishedToken  string           `json:"published_token,omitempty"`
-	CreatorID       string           `json:"creator_id,omitempty"`
-	PermissionLevel permission.Level `json:"permission_level,omitempty" gorm:"-"`
-	CreatedAt       int64            `json:"created_at"`
-	UpdatedAt       int64            `json:"updated_at"`
 }
 
 type RoleDefinition struct {
@@ -103,29 +68,6 @@ type permissionGrantModel struct {
 	Level     permission.Level `gorm:"not null"`
 }
 
-type databaseOwnerModel struct {
-	DatabaseName string `gorm:"primaryKey;not null"`
-	OwnerID      string `gorm:"primaryKey;not null"`
-	CreatedAt    int64  `gorm:"autoCreateTime:milli"`
-	UpdatedAt    int64  `gorm:"autoUpdateTime:milli"`
-}
-
-type workflowModel struct {
-	ID                   int64  `gorm:"primaryKey;autoIncrement"`
-	DatabaseName         string `gorm:"uniqueIndex:idx_workflow_database_name;not null"`
-	Name                 string `gorm:"uniqueIndex:idx_workflow_database_name;not null"`
-	Script               string `gorm:"not null"`
-	Enabled              bool   `gorm:"not null;default:true"`
-	CreatorID            string `gorm:"index;not null;default:''"`
-	SecretsJSON          string `gorm:"not null"`
-	VariablesJSON        string `gorm:"not null"`
-	RunnersJSON          string `gorm:"not null;default:'{}'"`
-	HistoryRetentionDays *int64
-	TimeoutSeconds       *int64
-	CreatedAt            int64 `gorm:"autoCreateTime:milli"`
-	UpdatedAt            int64 `gorm:"autoUpdateTime:milli"`
-}
-
 type fileModel struct {
 	ID           int64  `gorm:"primaryKey;autoIncrement"`
 	Name         string `gorm:"not null"`
@@ -145,17 +87,6 @@ type runnerTokenModel struct {
 	DatabaseName string `gorm:"uniqueIndex;not null"`
 	TokenHash    string `gorm:"uniqueIndex;not null"`
 	CreatedAt    int64  `gorm:"autoCreateTime:milli"`
-}
-
-type formModel struct {
-	ID             int64  `gorm:"primaryKey;autoIncrement"`
-	DatabaseName   string `gorm:"uniqueIndex:idx_form_database_name;not null"`
-	Name           string `gorm:"uniqueIndex:idx_form_database_name;not null"`
-	Script         string `gorm:"not null"`
-	PublishedToken string `gorm:"index"`
-	CreatorID      string `gorm:"index;not null;default:''"`
-	CreatedAt      int64  `gorm:"autoCreateTime:milli"`
-	UpdatedAt      int64  `gorm:"autoUpdateTime:milli"`
 }
 
 type roleModel struct {
@@ -208,13 +139,20 @@ func (db *DB) Migrate(ctx context.Context) error {
 		&userModel{},
 		&sessionModel{},
 		&permissionGrantModel{},
-		&databaseOwnerModel{},
 		&workflowModel{},
-		&formModel{},
+		&workflowVersionModel{},
+		&workflowSecretModel{},
+		&workflowVarModel{},
+		&workflowRunModel{},
+		&workflowLogModel{},
+		&appModel{},
+		&appVersionModel{},
 		&roleModel{},
 		&roleMemberModel{},
 		&runnerTokenModel{},
 		&fileModel{},
+		&libraryModel{},
+		&libraryVersionModel{},
 	)
 }
 
@@ -251,6 +189,32 @@ func (db *DB) UpsertUserByEmail(ctx context.Context, user auth.User) (auth.User,
 	}).Create(&model).Error
 	if err != nil {
 		return auth.User{}, err
+	}
+	return modelToUser(model), nil
+}
+
+// ErrEmailTaken is returned by RegisterUser for an email that already has
+// an account.
+var ErrEmailTaken = errors.New("email is already registered")
+
+// RegisterUser creates a new account and never touches an existing one: a
+// registration for a known email fails with ErrEmailTaken.
+func (db *DB) RegisterUser(ctx context.Context, user auth.User) (auth.User, error) {
+	if user.Email == "" {
+		return auth.User{}, errors.New("email is required")
+	}
+	displayName, err := auth.NormalizeDisplayName(user.DisplayName)
+	if err != nil {
+		return auth.User{}, err
+	}
+	user.DisplayName = displayName
+	model := userToModel(user)
+	result := db.orm.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&model)
+	if result.Error != nil {
+		return auth.User{}, result.Error
+	}
+	if result.RowsAffected == 0 {
+		return auth.User{}, ErrEmailTaken
 	}
 	return modelToUser(model), nil
 }
@@ -363,40 +327,6 @@ func (db *DB) DeleteGrant(ctx context.Context, subjectID string, scope permissio
 	return query.Delete(&permissionGrantModel{}).Error
 }
 
-func (db *DB) SaveDatabaseOwner(ctx context.Context, dbName, ownerID string) error {
-	model := databaseOwnerModel{DatabaseName: dbName, OwnerID: ownerID}
-	return db.orm.WithContext(ctx).Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "database_name"}, {Name: "owner_id"}},
-		DoNothing: true,
-	}).Create(&model).Error
-}
-
-// OwnsAnyDatabase reports whether the user owns at least one database;
-// database owners are the only role allowed to manage the runner token.
-func (db *DB) OwnsAnyDatabase(ctx context.Context, userID string) (bool, error) {
-	var count int64
-	err := db.orm.WithContext(ctx).
-		Model(&databaseOwnerModel{}).
-		Where(&databaseOwnerModel{OwnerID: userID}).
-		Count(&count).Error
-	if err != nil {
-		return false, err
-	}
-	return count > 0, nil
-}
-
-func (db *DB) IsDatabaseOwner(ctx context.Context, userID, dbName string) (bool, error) {
-	var count int64
-	err := db.orm.WithContext(ctx).
-		Model(&databaseOwnerModel{}).
-		Where(&databaseOwnerModel{DatabaseName: dbName, OwnerID: userID}).
-		Count(&count).Error
-	if err != nil {
-		return false, err
-	}
-	return count > 0, nil
-}
-
 func (db *DB) GrantsForSubject(ctx context.Context, subjectID string) (permission.Set, error) {
 	grants, err := db.GrantListForSubject(ctx, subjectID)
 	if err != nil {
@@ -443,160 +373,6 @@ func (db *DB) GrantListForSubject(ctx context.Context, subjectID string) ([]perm
 		grants = append(grants, modelToGrant(model))
 	}
 	return grants, nil
-}
-
-func (db *DB) SaveWorkflow(ctx context.Context, workflow WorkflowDefinition) (WorkflowDefinition, error) {
-	if workflow.DatabaseName == "" {
-		return WorkflowDefinition{}, errors.New("database_name is required")
-	}
-	if workflow.ID == 0 {
-		workflow.Enabled = true
-	}
-	if workflow.ID != 0 {
-		existing, err := db.Workflow(ctx, workflow.ID)
-		if err != nil {
-			return WorkflowDefinition{}, err
-		}
-		workflow.CreatorID = existing.CreatorID
-		workflow.Secrets = mergeStringMaps(existing.Secrets, workflow.Secrets)
-	}
-	model, err := workflowToModel(workflow)
-	if err != nil {
-		return WorkflowDefinition{}, err
-	}
-	if workflow.ID == 0 {
-		if err := db.orm.WithContext(ctx).Create(&model).Error; err != nil {
-			return WorkflowDefinition{}, err
-		}
-		return modelToWorkflow(model)
-	}
-	if err := db.orm.WithContext(ctx).Save(&model).Error; err != nil {
-		return WorkflowDefinition{}, err
-	}
-	return modelToWorkflow(model)
-}
-
-func (db *DB) DeleteWorkflow(ctx context.Context, id int64) error {
-	return db.orm.WithContext(ctx).Delete(&workflowModel{}, id).Error
-}
-
-func (db *DB) Workflow(ctx context.Context, id int64) (WorkflowDefinition, error) {
-	var model workflowModel
-	if err := db.orm.WithContext(ctx).First(&model, id).Error; err != nil {
-		return WorkflowDefinition{}, err
-	}
-	return modelToWorkflow(model)
-}
-
-func (db *DB) Workflows(ctx context.Context, databaseName string) ([]WorkflowDefinition, error) {
-	var models []workflowModel
-	err := db.orm.WithContext(ctx).
-		Where(&workflowModel{DatabaseName: databaseName}).
-		Order(clause.OrderByColumn{Column: clause.Column{Name: "id"}}).
-		Find(&models).
-		Error
-	if err != nil {
-		return nil, err
-	}
-	workflows := make([]WorkflowDefinition, 0, len(models))
-	for _, model := range models {
-		workflow, err := modelToWorkflow(model)
-		if err != nil {
-			return nil, err
-		}
-		workflows = append(workflows, workflow)
-	}
-	return workflows, nil
-}
-
-func (db *DB) SaveForm(ctx context.Context, form FormDefinition) (FormDefinition, error) {
-	if form.DatabaseName == "" {
-		return FormDefinition{}, errors.New("database_name is required")
-	}
-	if form.ID != 0 {
-		existing, err := db.Form(ctx, form.ID)
-		if err != nil {
-			return FormDefinition{}, err
-		}
-		form.CreatorID = existing.CreatorID
-		if form.PublishedToken == "" {
-			form.PublishedToken = existing.PublishedToken
-		}
-	}
-	model := formToModel(form)
-	if form.ID == 0 {
-		if err := db.orm.WithContext(ctx).Create(&model).Error; err != nil {
-			return FormDefinition{}, err
-		}
-		return modelToForm(model), nil
-	}
-	if err := db.orm.WithContext(ctx).Save(&model).Error; err != nil {
-		return FormDefinition{}, err
-	}
-	return modelToForm(model), nil
-}
-
-func (db *DB) Form(ctx context.Context, id int64) (FormDefinition, error) {
-	var model formModel
-	if err := db.orm.WithContext(ctx).First(&model, id).Error; err != nil {
-		return FormDefinition{}, err
-	}
-	return modelToForm(model), nil
-}
-
-func (db *DB) FormByPublishedToken(ctx context.Context, token string) (FormDefinition, error) {
-	if token == "" {
-		return FormDefinition{}, gorm.ErrRecordNotFound
-	}
-	var model formModel
-	if err := db.orm.WithContext(ctx).Where(&formModel{PublishedToken: token}).First(&model).Error; err != nil {
-		return FormDefinition{}, err
-	}
-	return modelToForm(model), nil
-}
-
-func (db *DB) PublishForm(ctx context.Context, id int64) (FormDefinition, error) {
-	form, err := db.Form(ctx, id)
-	if err != nil {
-		return FormDefinition{}, err
-	}
-	if form.PublishedToken == "" {
-		form.PublishedToken = uuid.NewString()
-	}
-	return db.SaveForm(ctx, form)
-}
-
-func (db *DB) UnpublishForm(ctx context.Context, id int64) (FormDefinition, error) {
-	var model formModel
-	if err := db.orm.WithContext(ctx).First(&model, id).Error; err != nil {
-		return FormDefinition{}, err
-	}
-	model.PublishedToken = ""
-	if err := db.orm.WithContext(ctx).Save(&model).Error; err != nil {
-		return FormDefinition{}, err
-	}
-	return modelToForm(model), nil
-}
-
-func (db *DB) DeleteForm(ctx context.Context, id int64) error {
-	return db.orm.WithContext(ctx).Delete(&formModel{}, id).Error
-}
-
-func (db *DB) Forms(ctx context.Context, databaseName string) ([]FormDefinition, error) {
-	var models []formModel
-	err := db.orm.WithContext(ctx).
-		Where(&formModel{DatabaseName: databaseName}).
-		Order(clause.OrderByColumn{Column: clause.Column{Name: "id"}}).
-		Find(&models).
-		Error
-	if err != nil {
-		return nil, err
-	}
-	forms := make([]FormDefinition, 0, len(models))
-	for _, model := range models {
-		forms = append(forms, modelToForm(model))
-	}
-	return forms, nil
 }
 
 func (db *DB) SaveRole(ctx context.Context, role RoleDefinition) (RoleDefinition, error) {
@@ -750,10 +526,6 @@ func RoleSubjectID(databaseName, roleName string) string {
 	return "role:" + databaseName + ":" + roleName
 }
 
-func WorkflowSubjectID(workflowID int64) string {
-	return "workflow:" + strconv.FormatInt(workflowID, 10)
-}
-
 func roleMemberSubjectID(member RoleMember) string {
 	if member.Type == "workflow" {
 		workflowID, err := strconv.ParseInt(member.ID, 10, 64)
@@ -815,87 +587,6 @@ func modelToGrant(model permissionGrantModel) permission.Grant {
 	}
 }
 
-func workflowToModel(workflow WorkflowDefinition) (workflowModel, error) {
-	secrets, err := json.Marshal(emptyStringMap(workflow.Secrets))
-	if err != nil {
-		return workflowModel{}, err
-	}
-	variables, err := json.Marshal(emptyStringMap(workflow.Variables))
-	if err != nil {
-		return workflowModel{}, err
-	}
-	runners, err := json.Marshal(emptyStringMap(workflow.Runners))
-	if err != nil {
-		return workflowModel{}, err
-	}
-	return workflowModel{
-		ID:                   workflow.ID,
-		DatabaseName:         workflow.DatabaseName,
-		Name:                 workflow.Name,
-		Script:               workflow.Script,
-		Enabled:              workflow.Enabled,
-		CreatorID:            workflow.CreatorID,
-		SecretsJSON:          string(secrets),
-		VariablesJSON:        string(variables),
-		RunnersJSON:          string(runners),
-		HistoryRetentionDays: workflow.HistoryRetentionDays,
-		TimeoutSeconds:       workflow.TimeoutSeconds,
-		CreatedAt:            workflow.CreatedAt,
-		UpdatedAt:            workflow.UpdatedAt,
-	}, nil
-}
-
-func modelToWorkflow(model workflowModel) (WorkflowDefinition, error) {
-	workflow := WorkflowDefinition{
-		ID:                   model.ID,
-		DatabaseName:         model.DatabaseName,
-		Name:                 model.Name,
-		Script:               model.Script,
-		Enabled:              model.Enabled,
-		CreatorID:            model.CreatorID,
-		HistoryRetentionDays: model.HistoryRetentionDays,
-		TimeoutSeconds:       model.TimeoutSeconds,
-		CreatedAt:            model.CreatedAt,
-		UpdatedAt:            model.UpdatedAt,
-	}
-	if err := json.Unmarshal([]byte(model.SecretsJSON), &workflow.Secrets); err != nil {
-		return WorkflowDefinition{}, err
-	}
-	if err := json.Unmarshal([]byte(model.VariablesJSON), &workflow.Variables); err != nil {
-		return WorkflowDefinition{}, err
-	}
-	if err := json.Unmarshal([]byte(model.RunnersJSON), &workflow.Runners); err != nil {
-		return WorkflowDefinition{}, err
-	}
-	return workflow, nil
-}
-
-func formToModel(form FormDefinition) formModel {
-	return formModel{
-		ID:             form.ID,
-		DatabaseName:   form.DatabaseName,
-		Name:           form.Name,
-		Script:         form.Script,
-		PublishedToken: form.PublishedToken,
-		CreatorID:      form.CreatorID,
-		CreatedAt:      form.CreatedAt,
-		UpdatedAt:      form.UpdatedAt,
-	}
-}
-
-func modelToForm(model formModel) FormDefinition {
-	return FormDefinition{
-		ID:             model.ID,
-		DatabaseName:   model.DatabaseName,
-		Name:           model.Name,
-		Script:         model.Script,
-		PublishedToken: model.PublishedToken,
-		CreatorID:      model.CreatorID,
-		CreatedAt:      model.CreatedAt,
-		UpdatedAt:      model.UpdatedAt,
-	}
-}
-
 func roleToModel(role RoleDefinition) roleModel {
 	return roleModel{
 		ID:           role.ID,
@@ -944,24 +635,6 @@ func (db *DB) roleMembers(ctx context.Context, databaseName, roleName string) ([
 		members = append(members, roleMemberFromModel(model))
 	}
 	return members, nil
-}
-
-func emptyStringMap(values map[string]string) map[string]string {
-	if values == nil {
-		return map[string]string{}
-	}
-	return values
-}
-
-func mergeStringMaps(base map[string]string, updates map[string]string) map[string]string {
-	merged := map[string]string{}
-	for key, value := range base {
-		merged[key] = value
-	}
-	for key, value := range updates {
-		merged[key] = value
-	}
-	return merged
 }
 
 type FileRecord struct {

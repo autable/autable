@@ -25,7 +25,6 @@ env:
   NODE_VERSION: 24
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
-  AI_WORKER_IMAGE_NAME: ${{ github.repository }}-ai-worker
 
 concurrency:
   group: release-main
@@ -110,9 +109,7 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
-          cache-dependency-path: |
-            web/package-lock.json
-            ai-worker/package-lock.json
+          cache-dependency-path: web/package-lock.json
       - name: Build frontend for embedding
         shell: bash
         env:
@@ -123,11 +120,6 @@ jobs:
           npm ci --prefix web
           npm --prefix web test -- --run
           ./scripts/embed-web.sh
-      - name: Test AI worker
-        shell: bash
-        run: |
-          npm ci --prefix ai-worker
-          node --check ai-worker/src/server.mjs
       - name: Test Go
         shell: bash
         env:
@@ -357,15 +349,6 @@ jobs:
             type=raw,value=${{ needs.prepare.outputs.tag }}
             type=raw,value=${{ needs.prepare.outputs.version }}
             type=raw,value=latest
-      - name: Extract AI worker Docker metadata
-        id: ai_worker_meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.AI_WORKER_IMAGE_NAME }}
-          tags: |
-            type=raw,value=${{ needs.prepare.outputs.tag }}
-            type=raw,value=${{ needs.prepare.outputs.version }}
-            type=raw,value=latest
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
         with:
@@ -380,11 +363,3 @@ jobs:
             VERSION=${{ needs.prepare.outputs.version }}
             COMMIT=${{ steps.image.outputs.commit_short }}
             BUILT_AT=${{ steps.image.outputs.built_at }}
-      - name: Build and push AI worker Docker image
-        uses: docker/build-push-action@v6
-        with:
-          context: ./ai-worker
-          platforms: linux/amd64
-          push: true
-          tags: ${{ steps.ai_worker_meta.outputs.tags }}
-          labels: ${{ steps.ai_worker_meta.outputs.labels }}

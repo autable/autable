@@ -1,0 +1,38 @@
+:root {
+  font-family: system-ui, sans-serif;
+  color: #242424;
+  background: #fafafa;
+}
+
+main {
+  max-width: 64rem;
+  margin: 0 auto;
+  padding: 1.5rem;
+}
+
+header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+  background: #fff;
+}
+
+th,
+td {
+  border: 1px solid #e0e0e0;
+  padding: 0.4rem 0.6rem;
+  text-align: left;
+}
+
+.muted {
+  color: #616161;
+}
+
+.error {
+  color: #b10e1c;
+}

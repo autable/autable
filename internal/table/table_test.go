@@ -904,10 +904,6 @@ func (failingHistoryStore) GetPrefixLimit(context.Context, string, int) ([]histo
 	return nil, nil
 }
 
-func (failingHistoryStore) GetPrefixKeysLimit(context.Context, string, int) ([]string, error) {
-	return nil, nil
-}
-
 func (failingHistoryStore) DeletePrefixBefore(context.Context, string, string) (int, error) {
 	return 0, errors.New("history delete failed")
 }

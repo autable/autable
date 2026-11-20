@@ -1,15 +1,10 @@
-import { FluentProvider, webLightTheme } from "@fluentui/react-components";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { EnumOptionCheckboxes } from "./EnumOptionCheckboxes";
 
 function renderCheckboxes(value: string, onChange = vi.fn()) {
-  render(
-    <FluentProvider theme={webLightTheme}>
-      <EnumOptionCheckboxes label="渠道" options={["邮件", "电话", "邮寄"]} value={value} onChange={onChange} />
-    </FluentProvider>
-  );
+  render(<EnumOptionCheckboxes label="渠道" options={["邮件", "电话", "邮寄"]} value={value} onChange={onChange} />);
   return onChange;
 }
 

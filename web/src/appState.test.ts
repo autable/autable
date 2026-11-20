@@ -59,7 +59,10 @@ describe("appState", () => {
 
   it("parses workspace routes", () => {
     expect(parseWorkspaceRoute("/")).toBeNull();
-    expect(parseWorkspaceRoute("/databases/workspace")).toEqual({ databaseName: "workspace", view: "table" });
+    expect(parseWorkspaceRoute("/databases/workspace")).toEqual({ databaseName: "workspace", view: "home" });
+    expect(parseWorkspaceRoute("/databases/workspace/tables")).toEqual({ databaseName: "workspace", view: "home" });
+    expect(parseWorkspaceRoute("/databases/workspace/admin")).toEqual({ databaseName: "workspace", view: "admin" });
+    expect(parseWorkspaceRoute("/databases/workspace/admin/extra")).toBeNull();
     expect(parseWorkspaceRoute("/databases/workspace/tables/contacts")).toEqual({
       databaseName: "workspace",
       view: "table",
@@ -71,24 +74,38 @@ describe("appState", () => {
       tableName: "contacts",
       tableViewName: "active"
     });
-    expect(parseWorkspaceRoute("/databases/workspace/workflows/12")).toEqual({
+    expect(parseWorkspaceRoute("/databases/workspace/workflows")).toEqual({ databaseName: "workspace", view: "workflow" });
+    expect(parseWorkspaceRoute("/databases/workspace/workflows/order-sync")).toEqual({
       databaseName: "workspace",
       view: "workflow",
-      workflowID: 12,
-      workflowTab: "editor",
-      workflowRunKey: undefined
+      workflowName: "order-sync",
+      workflowTab: "overview",
+      workflowRunID: undefined
     });
-    expect(parseWorkspaceRoute("/databases/workspace/workflows/12/history/run%2F1")).toEqual({
+    expect(parseWorkspaceRoute("/databases/workspace/workflows/order-sync/versions")).toEqual({
       databaseName: "workspace",
       view: "workflow",
-      workflowID: 12,
-      workflowTab: "history",
-      workflowRunKey: "run/1"
+      workflowName: "order-sync",
+      workflowTab: "versions",
+      workflowRunID: undefined
     });
-    expect(parseWorkspaceRoute("/databases/workspace/forms/9")).toEqual({
+    expect(parseWorkspaceRoute("/databases/workspace/workflows/order-sync/runs/42")).toEqual({
       databaseName: "workspace",
-      view: "form",
-      formID: 9
+      view: "workflow",
+      workflowName: "order-sync",
+      workflowTab: "runs",
+      workflowRunID: 42
+    });
+    expect(parseWorkspaceRoute("/databases/workspace/workflows/order-sync/editor")).toBeNull();
+    expect(parseWorkspaceRoute("/databases/workspace/apps")).toEqual({
+      databaseName: "workspace",
+      view: "app",
+      appName: undefined
+    });
+    expect(parseWorkspaceRoute("/databases/workspace/apps/orders")).toEqual({
+      databaseName: "workspace",
+      view: "app",
+      appName: "orders"
     });
     expect(parseWorkspaceRoute("/databases/workspace/permissions/admin")).toEqual({
       databaseName: "workspace",
@@ -99,28 +116,39 @@ describe("appState", () => {
 
   it("builds encoded workspace paths", () => {
     expect(buildWorkspacePath(null)).toBe("/");
+    expect(buildWorkspacePath({ databaseName: "workspace", view: "home" })).toBe("/databases/workspace");
     expect(buildWorkspacePath({ databaseName: "workspace", view: "table" })).toBe("/databases/workspace");
+    expect(buildWorkspacePath({ databaseName: "sales ops", view: "admin" })).toBe("/databases/sales%20ops/admin");
     expect(buildWorkspacePath({
       databaseName: "sales ops",
       view: "table",
       tableName: "customer/list",
       tableViewName: "needs review"
     })).toBe("/databases/sales%20ops/tables/customer%2Flist/views/needs%20review");
-    expect(buildWorkspacePath({ databaseName: "workspace", view: "workflow", workflowID: 3 })).toBe(
-      "/databases/workspace/workflows/3"
+    expect(buildWorkspacePath({ databaseName: "workspace", view: "workflow" })).toBe("/databases/workspace/workflows");
+    expect(buildWorkspacePath({ databaseName: "workspace", view: "workflow", workflowName: "order-sync", workflowTab: "overview" })).toBe(
+      "/databases/workspace/workflows/order-sync"
     );
-    expect(buildWorkspacePath({
-      databaseName: "workspace",
-      view: "workflow",
-      workflowID: 3,
-      workflowTab: "history",
-      workflowRunKey: "run/1"
-    })).toBe("/databases/workspace/workflows/3/history/run%2F1");
-    expect(buildWorkspacePath({ databaseName: "workspace", view: "form", formID: 4 })).toBe(
-      "/databases/workspace/forms/4"
+    expect(buildWorkspacePath({ databaseName: "workspace", view: "workflow", workflowName: "order-sync", workflowTab: "config" })).toBe(
+      "/databases/workspace/workflows/order-sync/config"
     );
-    expect(buildWorkspacePath({ databaseName: "workspace", view: "permission", roleName: "owner/admin" })).toBe(
-      "/databases/workspace/permissions/owner%2Fadmin"
+    expect(
+      buildWorkspacePath({ databaseName: "workspace", view: "workflow", workflowName: "order-sync", workflowTab: "runs", workflowRunID: 7 })
+    ).toBe("/databases/workspace/workflows/order-sync/runs/7");
+    expect(buildWorkspacePath({ databaseName: "workspace", view: "app" })).toBe("/databases/workspace/apps");
+    expect(buildWorkspacePath({ databaseName: "sales ops", view: "app", appName: "orders" })).toBe(
+      "/databases/sales%20ops/apps/orders"
     );
+    expect(buildWorkspacePath({ databaseName: "workspace", view: "permission", roleName: "staff/lead" })).toBe(
+      "/databases/workspace/permissions/staff%2Flead"
+    );
+  });
+
+  it("routes the instance-wide libraries inside a database's workspace", () => {
+    expect(parseWorkspaceRoute("/databases/workspace/libraries")).toEqual({ databaseName: "workspace", view: "library" });
+    expect(parseWorkspaceRoute("/databases/workspace/libraries/http")).toEqual({ databaseName: "workspace", view: "library", libraryName: "http" });
+    expect(parseWorkspaceRoute("/databases/workspace/libraries/http/extra")).toBeNull();
+    expect(buildWorkspacePath({ databaseName: "workspace", view: "library" })).toBe("/databases/workspace/libraries");
+    expect(buildWorkspacePath({ databaseName: "sales ops", view: "library", libraryName: "http" })).toBe("/databases/sales%20ops/libraries/http");
   });
 });

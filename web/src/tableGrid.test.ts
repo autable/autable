@@ -47,7 +47,7 @@ describe("tableGrid", () => {
   });
 
   it("does not make relation fields editable so double-click only opens the detail panel", () => {
-    const columns = buildTableColumns([{ name: "owner", type: "relation", relation_table: "contacts", deleted: false }]);
+    const columns = buildTableColumns([{ name: "contact", type: "relation", relation_table: "contacts", deleted: false }]);
     expect(
       typeof columns[0].editable === "function" ? columns[0].editable({ ct_record_id: 1 }) : columns[0].editable
     ).toBe(false);

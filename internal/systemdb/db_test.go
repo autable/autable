@@ -3,6 +3,7 @@ package systemdb
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -237,133 +238,64 @@ func TestPermissionGrantPersistence(t *testing.T) {
 	}
 }
 
-func TestWorkflowDefinitionStoresSecretsAndVariablesAsJSON(t *testing.T) {
+func TestAppVersionsPublishAndDelete(t *testing.T) {
 	ctx := context.Background()
 	db := openTestDB(t)
 
-	saved, err := db.SaveWorkflow(ctx, WorkflowDefinition{
-		DatabaseName: "workspace",
-		Name:         "notify",
-		Script:       "function run() {}",
-		CreatorID:    "creator",
-		Secrets:      map[string]string{"TOKEN": "secret"},
-		Variables:    map[string]string{"CHANNEL": "ops"},
-	})
+	app, err := db.CreateApp(ctx, AppDefinition{DatabaseName: "workspace", Name: "intake", Title: "Intake", CreatorID: "u1"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if saved.ID == 0 {
-		t.Fatal("expected autoincrement workflow id")
+	if app.ID == 0 || app.LatestVersion != 0 || app.PublishedVersion != 0 || app.CreatedAt <= 0 {
+		t.Fatalf("unexpected new app: %#v", app)
 	}
-	if saved.CreatedAt <= 0 || saved.UpdatedAt <= 0 {
-		t.Fatalf("expected workflow millisecond timestamps, got %#v", saved)
-	}
-
-	loaded, err := db.Workflow(ctx, saved.ID)
+	app, first, err := db.AddAppVersion(ctx, app.ID, "", AppVersion{SDK: "1.0", Message: "first", CreatedBy: "u1"}, []byte("one"), false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loaded.CreatorID != "creator" || loaded.Secrets["TOKEN"] != "secret" || loaded.Variables["CHANNEL"] != "ops" {
-		t.Fatalf("unexpected workflow JSON fields: %#v", loaded)
+	if first.Version != 1 || first.Size != 3 || app.LatestVersion != 1 || app.PublishedVersion != 0 || app.Title != "Intake" {
+		t.Fatalf("unexpected first version: %#v %#v", app, first)
 	}
-	updated, err := db.SaveWorkflow(ctx, WorkflowDefinition{
-		ID:           saved.ID,
-		DatabaseName: "workspace",
-		Name:         "notify",
-		Script:       "function run() { return {}; }",
-		CreatorID:    "attacker",
-		Secrets:      map[string]string{},
-		Variables:    map[string]string{},
-	})
+	app, second, err := db.AddAppVersion(ctx, app.ID, "Intake 2", AppVersion{SDK: "1.0", CreatedBy: "u2"}, []byte("two!"), true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if updated.CreatorID != "creator" {
-		t.Fatalf("expected workflow creator to be immutable, got %#v", updated)
+	if second.Version != 2 || app.PublishedVersion != 2 || app.Title != "Intake 2" {
+		t.Fatalf("expected publishing upload, got %#v %#v", app, second)
 	}
-	if updated.Secrets["TOKEN"] != "secret" {
-		t.Fatalf("expected omitted workflow secret to be preserved, got %#v", updated.Secrets)
-	}
-	list, err := db.Workflows(ctx, "workspace")
+	versions, err := db.AppVersions(ctx, app.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(list) != 1 || list[0].ID != saved.ID {
-		t.Fatalf("unexpected workflow list: %#v", list)
+	if len(versions) != 2 || versions[0].Version != 2 || versions[1].Message != "first" {
+		t.Fatalf("expected newest-first versions, got %#v", versions)
 	}
-}
-
-func TestFormDefinitionAutoincrementsID(t *testing.T) {
-	ctx := context.Background()
-	db := openTestDB(t)
-
-	saved, err := db.SaveForm(ctx, FormDefinition{
-		DatabaseName: "workspace",
-		Name:         "contact-intake",
-		Script:       "function render(api, root) { root.append(api.input({ field: 'email' }), api.submit('Save')); return { table: 'contacts' }; }",
-	})
+	bundle, err := db.AppVersionBundle(ctx, app.ID, 1)
+	if err != nil || string(bundle) != "one" {
+		t.Fatalf("unexpected bundle %q, %v", bundle, err)
+	}
+	app, err = db.PublishAppVersion(ctx, app.ID, 1)
+	if err != nil || app.PublishedVersion != 1 {
+		t.Fatalf("expected rollback to version 1, got %#v, %v", app, err)
+	}
+	if _, err := db.PublishAppVersion(ctx, app.ID, 9); !errors.Is(err, ErrAppVersionNotFound) {
+		t.Fatalf("expected missing version error, got %v", err)
+	}
+	if err := db.SaveGrant(ctx, permission.Grant{SubjectID: "u2", Scope: permission.ScopeApp, Resource: fmt.Sprint(app.ID), Level: permission.Read}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.DeleteApp(ctx, app.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.AppVersionBundle(ctx, app.ID, 1); !errors.Is(err, ErrAppVersionNotFound) {
+		t.Fatalf("expected versions to be deleted, got %v", err)
+	}
+	grants, err := db.GrantListForSubject(ctx, "u2")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if saved.ID != 1 {
-		t.Fatalf("expected first form id to be 1, got %d", saved.ID)
-	}
-	if saved.CreatedAt <= 0 || saved.UpdatedAt <= 0 {
-		t.Fatalf("expected form millisecond timestamps, got %#v", saved)
-	}
-	list, err := db.Forms(ctx, "workspace")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(list) != 1 || list[0].ID != saved.ID {
-		t.Fatalf("unexpected form list: %#v", list)
-	}
-}
-
-func TestFormPublishTokenPersists(t *testing.T) {
-	ctx := context.Background()
-	db := openTestDB(t)
-
-	saved, err := db.SaveForm(ctx, FormDefinition{
-		DatabaseName: "workspace",
-		Name:         "contact-intake",
-		Script:       "function render(api, root) { root.append(api.input({ field: 'email' }), api.submit('Save')); return { table: 'contacts' }; }",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	published, err := db.PublishForm(ctx, saved.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if published.PublishedToken == "" {
-		t.Fatal("expected published token")
-	}
-	republished, err := db.PublishForm(ctx, saved.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if republished.PublishedToken != published.PublishedToken {
-		t.Fatalf("expected publish to be stable, got %q then %q", published.PublishedToken, republished.PublishedToken)
-	}
-	loaded, err := db.FormByPublishedToken(ctx, published.PublishedToken)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if loaded.ID != saved.ID {
-		t.Fatalf("unexpected published form lookup: %#v", loaded)
-	}
-	updated, err := db.SaveForm(ctx, FormDefinition{
-		ID:           saved.ID,
-		DatabaseName: "workspace",
-		Name:         "contact-intake",
-		Script:       "function render(api, root) { root.append(api.input({ field: 'name' }), api.submit('Save')); return { table: 'contacts' }; }",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if updated.PublishedToken != published.PublishedToken {
-		t.Fatalf("expected update to preserve published token, got %#v", updated)
+	if len(grants) != 0 {
+		t.Fatalf("expected app grants to be deleted, got %#v", grants)
 	}
 }
 
@@ -448,12 +380,12 @@ func TestRoleDefinitionStoresReplaceableGrants(t *testing.T) {
 	}
 
 	role, err = db.ReplaceRoleGrants(ctx, "workspace", "editor", []permission.Grant{
-		{Scope: permission.ScopeForm, Resource: "3", Level: permission.Read},
+		{Scope: permission.ScopeApp, Resource: "3", Level: permission.Read},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(role.Grants) != 1 || role.Grants[0].Scope != permission.ScopeForm {
+	if len(role.Grants) != 1 || role.Grants[0].Scope != permission.ScopeApp {
 		t.Fatalf("expected replacement grants, got %#v", role.Grants)
 	}
 	roles, err := db.Roles(ctx, "workspace")
@@ -471,7 +403,7 @@ func TestRoleDefinitionStoresReplaceableGrants(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if effectivePerms.CanReadResource("u1", permission.ScopeForm, "3") {
+	if effectivePerms.CanReadResource("u1", permission.ScopeApp, "3") {
 		t.Fatal("expected removed role member to lose role grants")
 	}
 }

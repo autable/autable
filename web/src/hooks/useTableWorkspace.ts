@@ -347,17 +347,6 @@ export function useTableWorkspace({
     setSelectedRecordID(0);
   }
 
-  function addSubmittedRow(targetTableName: string, row: Record<string, unknown>) {
-    if (targetTableName !== table.name) {
-      return;
-    }
-    setRows((current) => [...current, row as TableGridRow]);
-    setTotal((current) => current + 1);
-    setRowsViewName("local");
-    setSelectedRecordID(Number(row.ct_record_id));
-    setRowHistory([]);
-  }
-
   function selectGridCell(args: CellSelectArgs<TableGridRow>) {
     const recordID = Number(args.row?.ct_record_id);
     if (Number.isFinite(recordID)) {
@@ -729,7 +718,6 @@ export function useTableWorkspace({
     temporarySort,
     addDraftRow,
     addFieldFromCanvas,
-    addSubmittedRow,
     deleteFieldFromCanvas,
     deleteSelectedRow,
     editGridRows,

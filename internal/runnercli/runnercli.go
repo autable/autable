@@ -1,3 +1,6 @@
+// Package runnercli is autable-runner: an egress proxy that connects to
+// the server and performs the HTTP requests workflows send through it
+// (fetch with `via`). It executes no workflow code.
 package runnercli
 
 import (
@@ -14,9 +17,9 @@ import (
 
 	"github.com/gorilla/websocket"
 
+	"autable/internal/egress"
 	"autable/internal/runnerhub"
 	"autable/internal/version"
-	"autable/internal/workflow"
 )
 
 const (
@@ -37,9 +40,9 @@ type Options struct {
 	Logger   *slog.Logger
 }
 
-// Run connects to the server and executes dispatched jobs until ctx is
+// Run connects to the server and performs fetch jobs until ctx is
 // cancelled, reconnecting with exponential backoff on any disconnect.
-func Run(ctx context.Context, options Options, nodes []workflow.Node) error {
+func Run(ctx context.Context, options Options) error {
 	if options.Endpoint == "" {
 		return errors.New("endpoint is required")
 	}
@@ -59,18 +62,12 @@ func Run(ctx context.Context, options Options, nodes []workflow.Node) error {
 	if err != nil {
 		return err
 	}
-	registry := map[string]workflow.Node{}
-	for _, node := range nodes {
-		registry[node.Info().Type] = node
-	}
-	if len(registry) == 0 {
-		return errors.New("at least one node is required")
-	}
+	client := egress.NewClient()
 
 	wait := reconnectMinWait
 	for {
 		connectedAt := time.Now()
-		err := serveConnection(ctx, endpoint, options, registry)
+		err := serveConnection(ctx, endpoint, options, client)
 		if ctx.Err() != nil {
 			return nil
 		}
@@ -108,7 +105,7 @@ func websocketEndpoint(raw string) (string, error) {
 	return parsed.String(), nil
 }
 
-func serveConnection(ctx context.Context, endpoint string, options Options, registry map[string]workflow.Node) error {
+func serveConnection(ctx context.Context, endpoint string, options Options, client *http.Client) error {
 	header := http.Header{"Authorization": {"Bearer " + options.Token}}
 	ws, response, err := websocket.DefaultDialer.DialContext(ctx, endpoint, header)
 	if err != nil {
@@ -119,16 +116,12 @@ func serveConnection(ctx context.Context, endpoint string, options Options, regi
 	}
 	defer ws.Close()
 
-	nodeTypes := make([]string, 0, len(registry))
-	for nodeType := range registry {
-		nodeTypes = append(nodeTypes, nodeType)
-	}
-	hello := runnerhub.HelloMessage{Kind: "hello", Name: options.Name, Version: version.String(), NodeTypes: nodeTypes}
+	hello := runnerhub.HelloMessage{Kind: "hello", Name: options.Name, Version: version.String()}
 	writeMu := &sync.Mutex{}
 	if err := writeJSON(ws, writeMu, hello); err != nil {
 		return err
 	}
-	options.Logger.Info("runner connected", "endpoint", endpoint, "name", options.Name, "nodes", len(nodeTypes))
+	options.Logger.Info("runner connected", "endpoint", endpoint, "name", options.Name)
 
 	done := make(chan struct{})
 	defer close(done)
@@ -164,7 +157,7 @@ func serveConnection(ctx context.Context, endpoint string, options Options, regi
 		if err := ws.ReadJSON(&job); err != nil {
 			return err
 		}
-		if job.Kind != "job" || job.JobID == "" {
+		if job.Kind != "fetch" || job.JobID == "" {
 			continue
 		}
 		select {
@@ -174,7 +167,7 @@ func serveConnection(ctx context.Context, endpoint string, options Options, regi
 		}
 		go func(job runnerhub.JobMessage) {
 			defer func() { <-jobs }()
-			result := executeJob(ctx, registry, options.Logger, job)
+			result := executeJob(ctx, client, options.Logger, job)
 			if err := writeJSON(ws, writeMu, result); err != nil {
 				options.Logger.Warn("job result could not be delivered", "job_id", job.JobID, "error", err)
 			}
@@ -182,39 +175,26 @@ func serveConnection(ctx context.Context, endpoint string, options Options, regi
 	}
 }
 
-func executeJob(ctx context.Context, registry map[string]workflow.Node, logger *slog.Logger, job runnerhub.JobMessage) runnerhub.ResultMessage {
-	node, ok := registry[job.NodeType]
-	if !ok {
-		return runnerhub.ResultMessage{Kind: "result", JobID: job.JobID, Error: fmt.Sprintf("node %q is not registered on this runner", job.NodeType)}
-	}
-	logger.Info("job started", "job_id", job.JobID, "node", job.NodeType, "instance", job.Runtime.InstanceID)
+func executeJob(ctx context.Context, client *http.Client, logger *slog.Logger, job runnerhub.JobMessage) runnerhub.ResultMessage {
 	started := time.Now()
-	output, err := runNode(ctx, node, job)
+	response, err := egress.Do(ctx, client, job.Request)
 	elapsed := time.Since(started).Round(time.Millisecond)
 	if err != nil {
-		logger.Warn("job failed", "job_id", job.JobID, "node", job.NodeType, "elapsed", elapsed, "error", err)
+		logger.Warn("fetch failed", "job_id", job.JobID, "method", job.Request.Method, "url", logURL(job.Request.URL), "elapsed", elapsed, "error", err)
 		return runnerhub.ResultMessage{Kind: "result", JobID: job.JobID, Error: err.Error()}
 	}
-	logger.Info("job finished", "job_id", job.JobID, "node", job.NodeType, "elapsed", elapsed)
-	return runnerhub.ResultMessage{Kind: "result", JobID: job.JobID, Output: output}
+	logger.Info("fetch finished", "job_id", job.JobID, "method", job.Request.Method, "url", logURL(job.Request.URL), "status", response.Status, "elapsed", elapsed)
+	return runnerhub.ResultMessage{Kind: "result", JobID: job.JobID, Response: &response}
 }
 
-func runNode(ctx context.Context, node workflow.Node, job runnerhub.JobMessage) (output map[string]any, err error) {
-	defer func() {
-		if recovered := recover(); recovered != nil {
-			err = fmt.Errorf("node %q panicked: %v", job.NodeType, recovered)
-		}
-	}()
-	return node.Run(ctx, job.Input, workflow.RuntimeInfo{
-		WorkflowID:   job.Runtime.WorkflowID,
-		DatabaseName: job.Runtime.DatabaseName,
-		RunID:        job.Runtime.RunID,
-		InstanceID:   job.Runtime.InstanceID,
-		NodeType:     job.NodeType,
-		CreatorID:    job.Runtime.CreatorID,
-		Secrets:      job.Secrets,
-		Variables:    job.Variables,
-	})
+// logURL drops the query and fragment, which often carry credentials.
+func logURL(raw string) string {
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return "(invalid url)"
+	}
+	parsed.RawQuery, parsed.Fragment, parsed.User = "", "", nil
+	return parsed.String()
 }
 
 func writeJSON(ws *websocket.Conn, mu *sync.Mutex, value any) error {
