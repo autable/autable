@@ -218,9 +218,6 @@ jobs:
           - target: windows-amd64
             goos: windows
             goarch: amd64
-          - target: darwin-arm64
-            goos: darwin
-            goarch: arm64
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
