@@ -3,6 +3,7 @@ import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { appBundle } from "./appBundle";
+import { workflowBundle } from "./workflowBundle";
 
 // Visual capture spec. Not an assertion test: it drives the real backend + UI
 // and writes screenshots to e2e/.shots so we can eyeball styling.
@@ -140,14 +141,23 @@ test("capture workspace screenshots", async ({ page }) => {
       values: { name, email: mail, status, score }
     });
   }
-  await api(page, "POST", `/api/databases/${databaseName}/workflows`, {
-    database_name: databaseName,
-    name: `welcome-${suffix}`,
-    script:
-      "function instances(info) {\n  return { row_change: { node: 'table.record.changed', variables: [{ name: 'label', type: 'string' }], secrets: [{ name: 'token', type: 'string' }] } };\n}\n\nfunction trigger(info) {\n  return { instance: 'row_change', params: { table: 'contacts', operations: ['create', 'update'] } };\n}\n\nfunction run(info) {\n  return { record_id: 1, name: 'Ada Lovelace' };\n}",
-    secrets: {},
-    variables: {}
+  const workflowName = `welcome-${suffix}`;
+  const pushed = await page.request.post(`/api/databases/${databaseName}/workflows/${workflowName}/versions?publish=1`, {
+    headers: { "Content-Type": "application/gzip" },
+    data: workflowBundle({
+      database: databaseName,
+      name: workflowName,
+      title: "Welcome contact",
+      release: "v1",
+      triggers: {
+        start: { kind: "manual", fields: [{ name: "note", label: "Note", type: "string" }] },
+        changed: { kind: "recordChanged", table: tableName, operations: ["create", "update"] }
+      }
+    })
   });
+  if (!pushed.ok()) {
+    throw new Error(`workflow push failed: ${pushed.status()} ${await pushed.text()}`);
+  }
   await uploadApp(page, databaseName, "orders", "Orders", "?message=First%20version&publish=1");
   await uploadApp(page, databaseName, "orders", "Orders", "?message=Adds%20a%20totals%20row&publish=1");
   await uploadApp(page, databaseName, "orders", "Orders", "?message=Work%20in%20progress");
@@ -193,27 +203,24 @@ test("capture workspace screenshots", async ({ page }) => {
   });
   await page.getByRole("button", { name: "Close" }).click({ ...bestEffort }).catch(() => undefined);
 
-  // Workflow view.
+  // Workflows: the list, one workflow's page, then a run.
   await sidebar(page).getByRole("link", { name: "Workflows", exact: true }).click();
-  await page.getByText("Instances", { exact: true }).waitFor();
-  await page.waitForTimeout(500);
-  await shot(page, "06-workflow-editor");
-  await navShot(page, "nav-02-workflow");
-
-  // Node catalog dialog.
-  await page.getByRole("button", { name: "Workflow nodes" }).click();
-  await page.getByRole("dialog", { name: "Workflow node catalog" }).waitFor();
+  await page.getByRole("table", { name: "Workflows" }).waitFor();
   await page.waitForTimeout(400);
-  await shot(page, "07-workflow-node-catalog");
-  await page.keyboard.press("Escape");
-
-  // Workflow run + history.
-  await capture(page, "08-workflow-history", async () => {
-    await page.getByRole("button", { name: "Run", exact: true }).click(bestEffort);
-    await page.getByText(/Workflow run saved/).first().waitFor(bestEffort);
-    await page.getByRole("tab", { name: "History" }).click(bestEffort);
-    await page.getByLabel("Workflow run nodes").waitFor(bestEffort);
-    await page.waitForTimeout(800);
+  await shot(page, "06-workflow-list");
+  await navShot(page, "nav-02-workflow");
+  await page.getByRole("table", { name: "Workflows" }).getByRole("link", { name: "Welcome contact" }).click();
+  await page.getByRole("group", { name: "Trigger changed" }).waitFor();
+  await page.waitForTimeout(400);
+  await shot(page, "07-workflow-detail");
+  await capture(page, "08-workflow-run", async () => {
+    await page.getByRole("button", { name: "Run", exact: true }).first().click(bestEffort);
+    const dialog = page.getByRole("dialog", { name: "Run Welcome contact" });
+    await dialog.getByLabel("Note").fill("hello", bestEffort);
+    await dialog.getByRole("button", { name: "Start run" }).click(bestEffort);
+    await dialog.getByRole("button", { name: "Open run" }).click(bestEffort);
+    await page.getByText("checked input").waitFor(bestEffort);
+    await page.waitForTimeout(400);
   });
 
   // Apps: list, then one app's versions.

@@ -1,38 +1,6 @@
 import "@testing-library/jest-dom/vitest";
 import { cleanup } from "@testing-library/react";
-import React from "react";
-import { afterEach, vi } from "vitest";
-
-// The editor is lazy-loaded behind setupMonaco; tests render the mocked
-// @monaco-editor/react below instead of pulling in the real Monaco bundle.
-vi.mock("../monacoLocal", () => ({
-  setupMonaco: () => Promise.resolve()
-}));
-
-vi.mock("@monaco-editor/react", () => ({
-  default: ({
-    className,
-    onChange,
-    options,
-    value,
-    wrapperProps
-  }: {
-    className?: string;
-    onChange?: (value: string) => void;
-    options?: { ariaLabel?: string; readOnly?: boolean };
-    value?: string;
-    wrapperProps?: Record<string, unknown>;
-  }) =>
-    React.createElement("textarea", {
-      ...wrapperProps,
-      "aria-label": options?.ariaLabel ?? String(wrapperProps?.["aria-label"] ?? ""),
-      className,
-      disabled: Boolean(options?.readOnly),
-      onChange: (event: React.ChangeEvent<HTMLTextAreaElement>) => onChange?.(event.currentTarget.value),
-      value: value ?? ""
-    }),
-  useMonaco: () => null
-}));
+import { afterEach } from "vitest";
 
 afterEach(() => {
   cleanup();

@@ -73,85 +73,128 @@ export type RowChange = {
   actor_id?: string;
 };
 
-export type WorkflowDefinition = {
-  id?: number;
+// Workflows (docs/design/workflows-v2.md): versioned code bundles pushed
+// with `autablectl workflow push`. Triggers come from the published version.
+export type WorkflowManualField = {
+  name: string;
+  label?: string;
+  type: "string" | "number" | "boolean";
+};
+
+export type WorkflowRecordOperation = "create" | "update" | "delete";
+
+export type WorkflowTrigger =
+  | { name: string; kind: "schedule"; cron: string; timezone?: string }
+  | {
+      name: string;
+      kind: "recordChanged";
+      table: string;
+      operations?: WorkflowRecordOperation[];
+      fields?: string[];
+      includeOwnWrites?: boolean;
+    }
+  | { name: string; kind: "webhook"; path: string; url?: string }
+  | { name: string; kind: "manual"; fields?: WorkflowManualField[] };
+
+export type WorkflowTriggerKind = WorkflowTrigger["kind"];
+
+export type WorkflowManualTrigger = Extract<WorkflowTrigger, { kind: "manual" }>;
+
+export type WorkflowRunStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled";
+
+export type WorkflowLogEntry = {
+  time: number;
+  level: "info" | "warn" | "error";
+  message: string;
+  data?: unknown;
+};
+
+// A run as admins see it; lists omit event and logs, and users who started
+// a run only get status, output and error.
+export type WorkflowRun = {
+  id: number;
+  workflow_id: number;
+  version?: number;
+  trigger: string;
+  status: WorkflowRunStatus;
+  event?: unknown;
+  output?: unknown;
+  error?: string;
+  started_by?: string;
+  created_at: number;
+  started_at?: number;
+  finished_at?: number;
+  logs?: WorkflowLogEntry[];
+};
+
+// WorkflowSummary names a workflow, e.g. as a role member.
+export type WorkflowSummary = {
+  id: number;
   database_name: string;
   name: string;
-  script: string;
-  enabled?: boolean;
+  title: string;
+};
+
+// WorkflowDefinition is a list entry. Admins get every field; users with a
+// run grant get the runnable workflows with their manual triggers only.
+export type WorkflowDefinition = WorkflowSummary & {
+  enabled: boolean;
+  published_version: number;
+  latest_version?: number;
+  timeout_seconds?: number;
+  history_retention_days?: number;
   creator_id?: string;
-  secrets: Record<string, number>;
-  secret_values?: Record<string, string>;
-  variables: Record<string, string>;
-  runners?: Record<string, string>;
-  history_retention_days?: number | null;
-  timeout_seconds?: number | null;
   permission_level?: 0 | 1 | 2;
   created_at?: number;
   updated_at?: number;
+  triggers: WorkflowTrigger[];
+  last_run?: WorkflowRun;
 };
 
-export type WorkflowPort = {
-  name: string;
-  type: string;
-  description?: string;
+export type WorkflowVersion = {
+  workflow_id: number;
+  version: number;
+  sdk: string;
+  message: string;
+  size: number;
+  created_by: string;
+  created_at: number;
+  published: boolean;
+  supported: boolean;
+  sdk_error?: string;
 };
 
-export type WorkflowNodeInfo = {
-  type: string;
-  display_name: string;
-  description?: string;
-  documentation?: Record<string, string>;
-  inputs: WorkflowPort[];
-  outputs: WorkflowPort[];
-  variables?: WorkflowPort[];
-  secrets?: WorkflowPort[];
-  stateless: boolean;
-  trigger: boolean;
+export type WorkflowDetail = {
+  workflow: WorkflowDefinition;
+  versions: WorkflowVersion[];
+  secrets: string[];
+  vars: Record<string, string>;
+  sdk: { version: string; min_major: number };
 };
 
-export type WorkflowInstanceDeclaration = {
-  node: string;
-  variables?: WorkflowPort[];
-  secrets?: WorkflowPort[];
-  params?: Record<string, unknown>;
+export type WorkflowSettings = {
+  enabled?: boolean;
+  timeout_seconds?: number;
+  history_retention_days?: number;
 };
 
-export type WorkflowStepRecord = {
-  node_id: string;
-  node_type?: string;
-  runner?: string;
-  input?: Record<string, unknown>;
-  output?: Record<string, unknown>;
-  error?: string;
+export type WorkflowRunFilter = {
+  status?: WorkflowRunStatus | "";
+  limit?: number;
+  before?: number;
 };
 
+// RunnerStatus is a connected runner: an egress proxy for workflow fetch
+// calls made with `via`.
 export type RunnerStatus = {
   name: string;
   version: string;
-  node_types: string[];
   connected_at: number;
 };
 
 export type RunnersResponse = {
   token: { exists: boolean; created_at?: number };
   runners: RunnerStatus[];
-  remote_node_types: string[];
-};
-
-export type WorkflowRun = {
-  workflow_id: number;
-  timestamp: number;
-  inputs?: Record<string, unknown>;
-  outputs?: Record<string, unknown>;
-  steps: WorkflowStepRecord[];
-  error?: string;
-};
-
-export type WorkflowRunResponse = {
-  history_key: string;
-  run: WorkflowRun;
-  summary?: boolean;
 };
 
 // AppDefinition is a hosted web app: a versioned static bundle uploaded with
@@ -218,7 +261,7 @@ export type RoleDefinition = {
   grants: PermissionGrant[];
   members: RoleMember[];
   member_users?: AuthUser[];
-  member_workflows?: WorkflowDefinition[];
+  member_workflows?: WorkflowSummary[];
   created_at?: number;
   updated_at?: number;
 };
@@ -649,93 +692,163 @@ export function fileDownloadURL(id: number): string {
   return `/api/files/${id}`;
 }
 
+async function errorMessage(response: Response, fallback: string): Promise<string> {
+  const body = (await response.json().catch(() => null)) as { error?: string } | null;
+  return body?.error ?? `${fallback}: ${response.status}`;
+}
+
+function workflowsPath(dbName: string): string {
+  return `/api/databases/${encodeURIComponent(dbName)}/workflows`;
+}
+
+function workflowPath(dbName: string, name: string): string {
+  return `${workflowsPath(dbName)}/${encodeURIComponent(name)}`;
+}
+
 export async function listWorkflows(dbName: string): Promise<WorkflowDefinition[]> {
-  const response = await fetch(`/api/databases/${dbName}/workflows`);
+  const response = await fetch(workflowsPath(dbName));
   if (!response.ok) {
-    throw new Error(`workflow list failed: ${response.status}`);
+    throw new Error(await errorMessage(response, "workflow list failed"));
   }
   return response.json() as Promise<WorkflowDefinition[]>;
 }
 
-export async function saveWorkflow(
-  dbName: string,
-  workflow: WorkflowDefinition
-): Promise<WorkflowDefinition> {
-  const payload = {
-    id: workflow.id,
-    database_name: workflow.database_name,
-    name: workflow.name,
-    script: workflow.script,
-    enabled: workflow.enabled ?? true,
-    creator_id: workflow.creator_id,
-    secrets: workflow.secret_values ?? {},
-    variables: workflow.variables,
-    runners: workflow.runners ?? {},
-    history_retention_days: workflow.history_retention_days ?? null,
-    timeout_seconds: workflow.timeout_seconds ?? null,
-    permission_level: workflow.permission_level,
-    created_at: workflow.created_at,
-    updated_at: workflow.updated_at
-  };
-  const response = await fetch(`/api/databases/${dbName}/workflows`, {
+export async function loadWorkflow(dbName: string, name: string): Promise<WorkflowDetail> {
+  const response = await fetch(workflowPath(dbName, name));
+  if (!response.ok) {
+    throw new Error(await errorMessage(response, "workflow load failed"));
+  }
+  return response.json() as Promise<WorkflowDetail>;
+}
+
+export async function publishWorkflowVersion(dbName: string, name: string, version: number): Promise<WorkflowDefinition> {
+  const response = await fetch(`${workflowPath(dbName, name)}/publish`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload)
+    body: JSON.stringify({ version })
   });
   if (!response.ok) {
-    throw new Error(`workflow save failed: ${response.status}`);
+    throw new Error(await errorMessage(response, "workflow publish failed"));
   }
   return response.json() as Promise<WorkflowDefinition>;
 }
 
-export async function deleteWorkflow(workflowID: number): Promise<void> {
-  const response = await fetch(`/api/workflows/${workflowID}`, { method: "DELETE" });
+export async function updateWorkflowSettings(dbName: string, name: string, settings: WorkflowSettings): Promise<WorkflowDefinition> {
+  const response = await fetch(workflowPath(dbName, name), {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(settings)
+  });
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: response.statusText }));
-    throw new Error(error.error ?? `workflow delete failed: ${response.status}`);
+    throw new Error(await errorMessage(response, "workflow update failed"));
+  }
+  return response.json() as Promise<WorkflowDefinition>;
+}
+
+export async function deleteWorkflow(dbName: string, name: string): Promise<void> {
+  const response = await fetch(workflowPath(dbName, name), { method: "DELETE" });
+  if (!response.ok) {
+    throw new Error(await errorMessage(response, "workflow delete failed"));
   }
 }
 
-export async function loadWorkflowNodes(): Promise<WorkflowNodeInfo[]> {
-  const response = await fetch("/api/workflow/nodes");
-  if (!response.ok) {
-    throw new Error(`workflow nodes failed: ${response.status}`);
-  }
-  return response.json() as Promise<WorkflowNodeInfo[]>;
+export function workflowSourceURL(dbName: string, name: string, version: number): string {
+  return `${workflowPath(dbName, name)}/versions/${version}/source`;
 }
 
-export async function runWorkflow(
-  workflowID: number,
-  inputs: Record<string, unknown>
-): Promise<WorkflowRunResponse> {
-  const response = await fetch(`/api/workflows/${workflowID}/runs`, {
+async function putWorkflowValue(dbName: string, name: string, kind: "secrets" | "vars", key: string, value: string) {
+  const response = await fetch(`${workflowPath(dbName, name)}/${kind}/${encodeURIComponent(key)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ value })
+  });
+  if (!response.ok) {
+    throw new Error(await errorMessage(response, `workflow ${kind} update failed`));
+  }
+}
+
+async function deleteWorkflowValue(dbName: string, name: string, kind: "secrets" | "vars", key: string) {
+  const response = await fetch(`${workflowPath(dbName, name)}/${kind}/${encodeURIComponent(key)}`, { method: "DELETE" });
+  if (!response.ok) {
+    throw new Error(await errorMessage(response, `workflow ${kind} delete failed`));
+  }
+}
+
+export function setWorkflowSecret(dbName: string, name: string, key: string, value: string): Promise<void> {
+  return putWorkflowValue(dbName, name, "secrets", key, value);
+}
+
+export function deleteWorkflowSecret(dbName: string, name: string, key: string): Promise<void> {
+  return deleteWorkflowValue(dbName, name, "secrets", key);
+}
+
+export function setWorkflowVar(dbName: string, name: string, key: string, value: string): Promise<void> {
+  return putWorkflowValue(dbName, name, "vars", key, value);
+}
+
+export function deleteWorkflowVar(dbName: string, name: string, key: string): Promise<void> {
+  return deleteWorkflowValue(dbName, name, "vars", key);
+}
+
+export type StartWorkflowRunRequest = {
+  trigger?: string;
+  input?: Record<string, unknown>;
+  // Wait up to 60 s for the run to finish.
+  wait?: boolean;
+};
+
+// startWorkflowRun starts a manual trigger. finished is false when the run
+// was only queued, or (with wait) is still going after 60 s.
+export async function startWorkflowRun(
+  dbName: string,
+  name: string,
+  request: StartWorkflowRunRequest
+): Promise<{ run: WorkflowRun; finished: boolean }> {
+  const response = await fetch(`${workflowPath(dbName, name)}/runs`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ inputs })
+    body: JSON.stringify(request)
   });
-  const body = await response.json().catch(() => undefined);
-  if (!response.ok && !body?.run) {
-    throw new Error(body?.error ?? `workflow run failed: ${response.status}`);
+  if (!response.ok) {
+    throw new Error(await errorMessage(response, "workflow run failed"));
   }
-  return body as WorkflowRunResponse;
+  const run = (await response.json()) as WorkflowRun;
+  return { run, finished: response.status === 200 };
 }
 
-export async function listWorkflowRuns(workflowID: number): Promise<WorkflowRunResponse[]> {
-  const response = await fetch(`/api/workflows/${workflowID}/runs`);
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: response.statusText }));
-    throw new Error(error.error ?? `workflow runs failed: ${response.status}`);
+export async function listWorkflowRuns(dbName: string, name: string, filter: WorkflowRunFilter = {}): Promise<WorkflowRun[]> {
+  const params = new URLSearchParams();
+  if (filter.status) {
+    params.set("status", filter.status);
   }
-  return response.json() as Promise<WorkflowRunResponse[]>;
+  if (filter.limit) {
+    params.set("limit", String(filter.limit));
+  }
+  if (filter.before) {
+    params.set("before", String(filter.before));
+  }
+  const query = params.toString();
+  const response = await fetch(`${workflowPath(dbName, name)}/runs${query ? `?${query}` : ""}`);
+  if (!response.ok) {
+    throw new Error(await errorMessage(response, "workflow runs failed"));
+  }
+  return response.json() as Promise<WorkflowRun[]>;
 }
 
-export async function loadWorkflowRun(workflowID: number, historyKey: string): Promise<WorkflowRunResponse> {
-  const response = await fetch(`/api/workflows/${workflowID}/runs/${encodeURIComponent(historyKey)}`);
+export async function loadWorkflowRun(dbName: string, name: string, runID: number): Promise<WorkflowRun> {
+  const response = await fetch(`${workflowPath(dbName, name)}/runs/${runID}`);
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: response.statusText }));
-    throw new Error(error.error ?? `workflow run failed: ${response.status}`);
+    throw new Error(await errorMessage(response, "workflow run failed"));
   }
-  return response.json() as Promise<WorkflowRunResponse>;
+  return response.json() as Promise<WorkflowRun>;
+}
+
+export async function cancelWorkflowRun(dbName: string, name: string, runID: number): Promise<WorkflowRun> {
+  const response = await fetch(`${workflowPath(dbName, name)}/runs/${runID}/cancel`, { method: "POST" });
+  if (!response.ok) {
+    throw new Error(await errorMessage(response, "workflow run cancel failed"));
+  }
+  return response.json() as Promise<WorkflowRun>;
 }
 
 export async function listApps(dbName: string): Promise<AppDefinition[]> {

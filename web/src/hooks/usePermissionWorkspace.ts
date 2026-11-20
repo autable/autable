@@ -13,7 +13,7 @@ import {
   type PermissionGrant,
   type RoleDefinition,
   type RoleMember,
-  type WorkflowDefinition
+  type WorkflowSummary
 } from "../api";
 import { compactRoleGrants } from "../permissionState";
 
@@ -33,7 +33,7 @@ export function usePermissionWorkspace({ currentUserID, database, isAdmin, onSta
   const [roleDraftGrants, setRoleDraftGrants] = useState<PermissionGrant[]>([]);
   const [roleDraftMembers, setRoleDraftMembers] = useState<RoleMember[]>([]);
   const [roleDraftMemberUsers, setRoleDraftMemberUsers] = useState<AuthUser[]>([]);
-  const [roleDraftMemberWorkflows, setRoleDraftMemberWorkflows] = useState<WorkflowDefinition[]>([]);
+  const [roleDraftMemberWorkflows, setRoleDraftMemberWorkflows] = useState<WorkflowSummary[]>([]);
   const [newRoleMemberQuery, setNewRoleMemberQuery] = useState("");
   const [memberSearchResults, setMemberSearchResults] = useState<AuthUser[]>([]);
   const [rolesReady, setRolesReady] = useState(false);
@@ -195,7 +195,7 @@ export function usePermissionWorkspace({ currentUserID, database, isAdmin, onSta
     setMemberSearchResults([]);
   }
 
-  function addWorkflowMember(workflow: WorkflowDefinition) {
+  function addWorkflowMember(workflow: WorkflowSummary) {
     if (!workflow.id) {
       return;
     }
@@ -247,8 +247,8 @@ function compactMemberUsers(users: AuthUser[]): AuthUser[] {
   return [...byID.values()].sort((left, right) => left.email.localeCompare(right.email));
 }
 
-function compactMemberWorkflows(workflows: WorkflowDefinition[]): WorkflowDefinition[] {
-  const byID = new Map<number, WorkflowDefinition>();
+function compactMemberWorkflows(workflows: WorkflowSummary[]): WorkflowSummary[] {
+  const byID = new Map<number, WorkflowSummary>();
   for (const workflow of workflows) {
     if (workflow.id) {
       byID.set(workflow.id, workflow);

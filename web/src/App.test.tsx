@@ -39,23 +39,66 @@ const workflowFixture = [
     id: 1,
     database_name: "workspace",
     name: "record-review",
-    script:
-      'function instances(info) { return { review_echo: { node: "echo", variables: [{ name: "CHANNEL", type: "string" }], secrets: [{ name: "TOKEN", type: "string" }] } }; }\nfunction run(info) { return info.instance("review_echo").exec({ value: info.inputs.name }); }',
-    secrets: { "review_echo.TOKEN": 12 },
-    variables: { "review_echo.CHANNEL": "ops" },
-    permission_level: 2
+    title: "Record review",
+    enabled: true,
+    published_version: 2,
+    latest_version: 2,
+    timeout_seconds: 600,
+    history_retention_days: 30,
+    creator_id: "test-user",
+    permission_level: 2,
+    created_at: 1781600000000,
+    updated_at: 1781603000000,
+    triggers: [
+      { name: "review", kind: "manual", fields: [{ name: "note", label: "Note", type: "string" }] },
+      { name: "changed", kind: "recordChanged", table: "contacts", operations: ["update"], fields: ["status"] }
+    ],
+    last_run: { id: 7, workflow_id: 1, version: 2, trigger: "review", status: "succeeded", created_at: 1781604000000 }
   },
   {
     id: 2,
     database_name: "workspace",
     name: "welcome-contact",
-    script:
-      'function instances(info) { return { welcome_echo: "echo" }; }\nfunction run(info) { return info.instance("welcome_echo").exec({ value: info.inputs.name }); }',
-    secrets: {},
-    variables: { "welcome_echo.CHANNEL": "sales" },
-    permission_level: 2
+    title: "",
+    enabled: false,
+    published_version: 1,
+    latest_version: 1,
+    timeout_seconds: 600,
+    history_retention_days: 30,
+    permission_level: 2,
+    created_at: 1781600000000,
+    updated_at: 1781600000000,
+    triggers: [{ name: "daily", kind: "schedule", cron: "0 9 * * 1-5", timezone: "Asia/Shanghai" }]
   }
 ];
+
+function workflowDetailFixture(workflow = workflowFixture[0]) {
+  return {
+    workflow,
+    versions: [
+      { workflow_id: workflow.id, version: 1, sdk: "1.0", message: "first", size: 1024, created_by: "test-user", created_at: 1781600000000, published: false, supported: true },
+      { workflow_id: workflow.id, version: 2, sdk: "1.0", message: "second", size: 2048, created_by: "test-user", created_at: 1781601000000, published: true, supported: true }
+    ],
+    secrets: ["API_TOKEN"],
+    vars: { REGION: "eu" },
+    sdk: { version: "1.0", min_major: 1 }
+  };
+}
+
+const workflowRunFixture = {
+  id: 7,
+  workflow_id: 1,
+  version: 2,
+  trigger: "review",
+  status: "succeeded",
+  event: { trigger: "review", runId: 7, input: { note: "hello" } },
+  output: { ok: true, note: "hello" },
+  started_by: "test-user",
+  created_at: 1781604000000,
+  started_at: 1781604000100,
+  finished_at: 1781604000350,
+  logs: [{ time: 1781604000200, level: "warn", message: "slow lookup", data: { ms: 120 } }]
+};
 
 const appFixture = [
   {
@@ -118,49 +161,8 @@ function appDetailFixture(app = appFixture[0]) {
 
 const runnersFixture = {
   token: { exists: true, created_at: 1781600000000 },
-  runners: [{ name: "intranet", version: "v1.0.0", node_types: ["echo", "dingtalk.robot.send"], connected_at: 1781603000000 }],
-  remote_node_types: ["dingtalk.robot.send", "echo"]
+  runners: [{ name: "intranet", version: "v1.0.0", connected_at: 1781603000000 }]
 };
-
-const workflowNodeFixture = [
-  {
-    type: "dingtalk.robot.send",
-    display_name: "DingTalk robot",
-    documentation: {
-      "en-US": "## DingTalk robot\n\n- `access_token` (`string`): DingTalk custom robot access token.",
-      "zh-CN": "## 钉钉机器人\n\n- `access_token` (`string`): 钉钉自定义机器人的 access token。"
-    },
-    inputs: [{ name: "content", type: "string" }],
-    outputs: [{ name: "status_code", type: "int" }],
-    secrets: [{ name: "access_token", type: "string" }],
-    stateless: true,
-    trigger: false
-  },
-  {
-    type: "echo",
-    display_name: "Echo",
-    documentation: {
-      "en-US": "## Echo\n\nReturns the node input unchanged.",
-      "zh-CN": "## Echo\n\n原样返回输入。"
-    },
-    inputs: [{ name: "value", type: "any" }],
-    outputs: [{ name: "value", type: "any" }],
-    stateless: true,
-    trigger: false
-  },
-  {
-    type: "table.record.changed",
-    display_name: "Record changed",
-    documentation: {
-      "en-US": "## Record changed\n\nThe node output becomes `run(info).inputs`.\n\n- `table` (`string`): Optional table name.",
-      "zh-CN": "## 记录变更\n\n节点输出会成为 `run(info).inputs`。\n\n- `table` (`string`): 可选表名。"
-    },
-    inputs: [{ name: "table", type: "string" }],
-    outputs: [{ name: "history_key", type: "string" }],
-    stateless: true,
-    trigger: true
-  }
-];
 
 const authUserFixture = {
   id: "test-user",
@@ -193,18 +195,15 @@ const memberWorkflowFixture = [
     id: 1,
     database_name: "workspace",
     name: "record-review",
+    title: "Record review",
     enabled: true,
-    script: "",
-    secrets: {},
-    variables: {},
-    runners: {},
-    history_retention_days: null,
-    timeout_seconds: null,
-    permission_level: 1
+    published_version: 2,
+    permission_level: 1,
+    triggers: [{ name: "review", kind: "manual", fields: [{ name: "note", label: "Note", type: "string" }] }]
   }
 ];
 
-const adminOnlyEndpoints = ["/api/databases/workspace/roles", "/api/databases/workspace/runners", "/api/workflow/nodes"];
+const adminOnlyEndpoints = ["/api/databases/workspace/roles", "/api/databases/workspace/runners", "/api/databases/workspace/workflows/record-review"];
 
 // memberFetch serves the non-admin view of the workspace and records every
 // request; admin-only endpoints answer 403 like the server does.
@@ -221,7 +220,7 @@ function memberFetch(requests: Array<{ url: string; init?: RequestInit }> = []) 
     if (url === "/api/databases/workspace/workflows" && !init?.method) {
       return jsonResponse(memberWorkflowFixture);
     }
-    if (adminOnlyEndpoints.includes(url) || (url.startsWith("/api/workflows/") && !init?.method)) {
+    if (adminOnlyEndpoints.includes(url) || url.includes("/workflows/record-review/runs?")) {
       return jsonResponse({ error: "admin only" }, 403);
     }
     if (url === "/api/databases/workspace/apps/orders") {
@@ -280,21 +279,20 @@ async function defaultFetch(input: RequestInfo | URL, init?: RequestInit): Promi
     return jsonResponse(rowFixture);
   }
   if (url === "/api/databases/workspace/workflows") {
-    if (init?.method === "POST") {
-      const body = JSON.parse(String(init.body)) as typeof workflowFixture[number] & { secrets: Record<string, string> };
-      return jsonResponse(
-        {
-          ...workflowFixture[0],
-          ...body,
-          id: body.id ?? workflowFixture[0].id,
-          secrets: Object.fromEntries(
-            Object.entries(body.secrets ?? {}).map(([key, value]) => [key, String(value).length])
-          )
-        },
-        201
-      );
-    }
     return jsonResponse(workflowFixture);
+  }
+  if (url === "/api/databases/workspace/workflows/record-review") {
+    return jsonResponse(workflowDetailFixture(workflowFixture[0]));
+  }
+  if (url === "/api/databases/workspace/workflows/welcome-contact") {
+    return jsonResponse(workflowDetailFixture(workflowFixture[1]));
+  }
+  if (url.startsWith("/api/databases/workspace/workflows/record-review/runs?")) {
+    const { event: _event, logs: _logs, ...listed } = workflowRunFixture;
+    return jsonResponse([listed]);
+  }
+  if (url === "/api/databases/workspace/workflows/record-review/runs/7") {
+    return jsonResponse(workflowRunFixture);
   }
   if (url === "/api/databases/workspace/apps") {
     return jsonResponse(appFixture);
@@ -308,17 +306,11 @@ async function defaultFetch(input: RequestInfo | URL, init?: RequestInit): Promi
   if (url === "/api/databases/workspace/roles") {
     return jsonResponse([]);
   }
-  if (url === "/api/workflow/nodes") {
-    return jsonResponse(workflowNodeFixture);
-  }
   if (url === "/api/databases/workspace/runners") {
     if (init?.method === "POST") {
       return jsonResponse({ token: "atr_fresh-runner-token", created_at: 1781604000000 });
     }
     return jsonResponse(runnersFixture);
-  }
-  if (url === "/api/workflows/1/runs") {
-    return jsonResponse([]);
   }
   return jsonResponse({ error: `unhandled ${url}` }, 404);
 }
@@ -448,7 +440,7 @@ describe("App", () => {
     await userEvent.click(within(nav).getByRole("link", { name: "Workflows" }));
     expect(window.location.pathname).toBe("/databases/workspace/workflows");
     await userEvent.click(await within(nav).findByRole("link", { name: /welcome-contact/ }));
-    expect(window.location.pathname).toBe("/databases/workspace/workflows/2");
+    expect(window.location.pathname).toBe("/databases/workspace/workflows/welcome-contact");
 
     await userEvent.click(within(nav).getByRole("link", { name: "Apps" }));
     expect(window.location.pathname).toBe("/databases/workspace/apps");
@@ -889,95 +881,55 @@ describe("App", () => {
     expect(screen.getAllByText(/Backend Row/).length).toBeGreaterThan(0);
   });
 
-  it("shows workflow JavaScript as the workflow view", async () => {
+  it("lists workflows with their state, triggers and last run", async () => {
+    renderApp("/databases/workspace/workflows");
+    const table = await screen.findByRole("table", { name: "Workflows" });
+    const review = within(table).getByRole("row", { name: "record-review" });
+    expect(within(review).getByRole("link", { name: "Record review" })).toHaveAttribute("href", "/databases/workspace/workflows/record-review");
+    expect(within(review).getByText("Enabled")).toBeInTheDocument();
+    expect(within(review).getByText("Manual")).toBeInTheDocument();
+    expect(within(review).getByText("On change: contacts · status")).toBeInTheDocument();
+    expect(within(review).getByText("Succeeded")).toBeInTheDocument();
+    const welcome = within(table).getByRole("row", { name: "welcome-contact" });
+    expect(within(welcome).getByText("Disabled")).toBeInTheDocument();
+    expect(within(welcome).getByText("Every weekday 09:00 (Asia/Shanghai)")).toBeInTheDocument();
+    expect(within(welcome).getByText("Never run")).toBeInTheDocument();
+    expect(screen.getByText(/autablectl workflow init my-workflow --database workspace/)).toBeInTheDocument();
+  });
+
+  it("shows a workflow's triggers, versions and runs as tabs of its page", async () => {
+    renderApp("/databases/workspace/workflows/record-review");
+    expect(await screen.findByRole("heading", { name: "Record review", level: 1 })).toBeInTheDocument();
+    expect(within(await sidebar()).getByRole("link", { name: "Record review" })).toHaveAttribute("aria-current", "page");
+    const changed = screen.getByRole("group", { name: "Trigger changed" });
+    expect(within(changed).getByText("contacts")).toBeInTheDocument();
+    expect(within(changed).getByText("Update")).toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: "Enabled" })).toBeChecked();
+
+    await userEvent.click(screen.getByRole("tab", { name: "Versions" }));
+    expect(window.location.pathname).toBe("/databases/workspace/workflows/record-review/versions");
+    const versions = await screen.findByRole("table", { name: "Versions" });
+    expect(within(versions).getByRole("button", { name: "Roll back to version 1" })).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("tab", { name: "Runs" }));
+    expect(window.location.pathname).toBe("/databases/workspace/workflows/record-review/runs");
+    await userEvent.click(await screen.findByRole("button", { name: "Run 7, Succeeded" }));
+    expect(window.location.pathname).toBe("/databases/workspace/workflows/record-review/runs/7");
+    const run = await screen.findByRole("region", { name: "Run #7" });
+    expect(within(run).getByLabelText("Output")).toHaveTextContent('"note": "hello"');
+    expect(within(run).getByText("slow lookup")).toBeInTheDocument();
+    expect(within(run).getByText("Test User")).toBeInTheDocument();
+  });
+
+  it("returns unknown workflow routes to the workflow list", async () => {
+    renderApp("/databases/workspace/workflows/missing");
+    await waitFor(() => expect(window.location.pathname).toBe("/databases/workspace/workflows"));
+    expect(await screen.findByRole("table", { name: "Workflows" })).toBeInTheDocument();
+  });
+
+  it("manages the database's remote runners from the sidebar", async () => {
     renderApp();
     await waitForDefaultTableReady();
-    await userEvent.click(await within(await sidebar()).findByRole("link", { name: "Workflows" }));
-    expect(await within(await sidebar()).findByRole("link", { name: /welcome-contact/ })).toBeInTheDocument();
-    await waitFor(() => expect((screen.getByLabelText("Workflow JavaScript") as HTMLTextAreaElement).value).toContain(
-      'info.instance("review_echo").exec'
-    ));
-    await userEvent.click(await findEnabledButton("Workflow nodes"));
-    expect(await findDialog("Workflow node catalog")).toBeInTheDocument();
-    expect(screen.getAllByText("dingtalk.robot.send").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("DingTalk robot").length).toBeGreaterThan(0);
-    expect(screen.getByText(/DingTalk custom robot access token/)).toBeInTheDocument();
-    await userEvent.click(await screen.findByRole("button", { name: /table\.record\.changed/ }));
-    expect(screen.getByText("Record changed")).toBeInTheDocument();
-    expect(screen.getByText(/run\(info\)\.inputs/)).toBeInTheDocument();
-    await userEvent.keyboard("{Escape}");
-    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Workflow node catalog" })).not.toBeInTheDocument());
-    await act(async () => {
-      await i18n.changeLanguage("zh-CN");
-    });
-    await userEvent.click(await findEnabledButton("工作流节点"));
-    expect(await findDialog("工作流节点目录")).toBeInTheDocument();
-    await userEvent.click(await screen.findByRole("button", { name: "dingtalk.robot.send" }));
-    expect(screen.getByText("钉钉机器人")).toBeInTheDocument();
-    expect(screen.getByText(/钉钉自定义机器人的 access token/)).toBeInTheDocument();
-    await userEvent.keyboard("{Escape}");
-    await waitFor(() => expect(screen.queryByRole("dialog", { name: "工作流节点目录" })).not.toBeInTheDocument());
-    await act(async () => {
-      await i18n.changeLanguage("en-US");
-    });
-    await userEvent.click(await findEnabledButton("Edit config review_echo"));
-    expect(screen.getByLabelText("Variable review_echo.CHANNEL")).toHaveValue("ops");
-    expect(screen.getByLabelText("Secret review_echo.TOKEN")).toHaveValue("x".repeat(12));
-    expect(screen.queryByText(/Saved secret length/)).not.toBeInTheDocument();
-    await userEvent.clear(screen.getByLabelText("Variable review_echo.CHANNEL"));
-    fireEvent.change(screen.getByLabelText("Variable review_echo.CHANNEL"), { target: { value: "support" } });
-    expect(screen.getByLabelText("Variable review_echo.CHANNEL")).toHaveValue("support");
-    await userEvent.click(await findEnabledButton("Save config"));
-    expect(screen.getAllByText("echo").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("review_echo").length).toBeGreaterThan(0);
-    await userEvent.click(await screen.findByRole("tab", { name: "History" }));
-    expect(screen.getAllByText("No runs yet").length).toBeGreaterThan(0);
-    await userEvent.click(await screen.findByRole("tab", { name: "Editor" }));
-    vi.useFakeTimers();
-    fireEvent.change(screen.getByLabelText("Workflow JavaScript"), {
-      target: {
-        value:
-          "function instances(info) { return { ding: { node: 'dingtalk.robot.send' } }; }\nfunction run(info) { return info.instance('ding').exec({ content: 'hello' }); }"
-      }
-    });
-    await act(async () => {
-      vi.advanceTimersByTime(5000);
-    });
-    vi.useRealTimers();
-    await userEvent.click(await findEnabledButton("Edit config ding"));
-    expect(screen.getByLabelText("Secret ding.access_token")).toBeInTheDocument();
-  }, 15_000);
-
-  it("binds workflow instances to remote runners from the config popover", async () => {
-    const saveBodies: Array<Record<string, unknown>> = [];
-    vi.mocked(fetch).mockImplementation(async (input, init) => {
-      const url = String(input);
-      if (url === "/api/databases/workspace/workflows" && init?.method === "POST") {
-        saveBodies.push(JSON.parse(String(init.body)) as Record<string, unknown>);
-      }
-      return defaultFetch(input, init);
-    });
-
-    renderApp();
-    await waitForDefaultTableReady();
-    await userEvent.click(await within(await sidebar()).findByRole("link", { name: "Workflows" }));
-    await userEvent.click(await findEnabledButton("Edit config review_echo"));
-
-    const runnerSelect = await screen.findByLabelText("Runner for review_echo");
-    expect(runnerSelect).toHaveValue("");
-    expect(within(runnerSelect as HTMLElement).getByRole("option", { name: "Server (default)" })).toBeInTheDocument();
-    await userEvent.selectOptions(runnerSelect, "intranet");
-    await userEvent.click(await findEnabledButton("Save config"));
-
-    await waitFor(() => expect(saveBodies.length).toBeGreaterThan(0));
-    expect(saveBodies.at(-1)?.runners).toEqual({ review_echo: "intranet" });
-    expect(await screen.findByText("runner intranet")).toBeInTheDocument();
-  }, 15_000);
-
-  it("manages the database's remote runners from the workflow sidebar", async () => {
-    renderApp();
-    await waitForDefaultTableReady();
-    await userEvent.click(await within(await sidebar()).findByRole("link", { name: "Workflows" }));
     await userEvent.click(await screen.findByRole("button", { name: "Remote runners" }));
 
     const dialog = await findDialog("Remote runners");
@@ -992,134 +944,52 @@ describe("App", () => {
     expect(within(dialog).getByText(/will not be shown again/)).toBeInTheDocument();
   }, 15_000);
 
-  it("loads persisted workflow runs and renders their flow", async () => {
-    vi.mocked(fetch).mockImplementation(async (input, init) => {
-      const url = String(input);
-      if (url === "/api/auth/me") {
-        return jsonResponse(authUserFixture);
-      }
-      if (url === "/api/auth/config") {
-        return jsonResponse({ password_enabled: true, oidc_enabled: false, oidc_providers: [] });
-      }
-      if (url.startsWith("/api/tables/workspace/contacts/rows")) {
-        return new Response(JSON.stringify({ error: "permission denied" }), { status: 403 });
-      }
-      if (url === "/api/workflows/1/runs") {
-        return new Response(
-          JSON.stringify([
-            {
-              history_key: "whistory_00000000000000000001_00000000000000000100",
-              run: {
-                workflow_id: 1,
-                timestamp: 1781604000000,
-                inputs: { name: "Ada" },
-                outputs: { message: "Ada" },
-                steps: [
-                  { node_id: "echo", node_type: "echo", runner: "intranet", input: { value: "Ada" }, output: { value: "Ada" } }
-                ]
-              }
-            }
-          ]),
-          { status: 200 }
-        );
-      }
-      return defaultFetch(input, init);
-    });
-
-    renderApp("/databases/workspace/workflows/1/history");
-    await waitForSignedIn();
-    expect(await within(await sidebar()).findByRole("link", { name: "Workflows" })).toHaveAttribute("aria-current", "page");
-    expect(await within(await sidebar()).findByRole("link", { name: /record-review/ })).toHaveAttribute("aria-current", "page");
-    expect(await screen.findByRole("tab", { name: "History", selected: true })).toBeInTheDocument();
-    const runHistory = await screen.findByRole("navigation", { name: "Workflow run history" });
-    await waitFor(() => expect(within(runHistory).getByRole("button", { current: true })).toBeInTheDocument());
-    expect(within(runHistory).getByRole("button", { current: true })).toHaveTextContent(
-      new Date(1781604000000).toLocaleString()
-    );
-    expect(window.location.pathname).toBe("/databases/workspace/workflows/1/history");
-    expect(screen.queryByText("whistory_00000000000000000001_00000000000000000100")).not.toBeInTheDocument();
-    expect(screen.queryByText("No runs yet")).not.toBeInTheDocument();
-    expect(screen.getAllByText("Run input").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Run output").length).toBeGreaterThan(0);
-    expect(screen.getByText(/"name": "Ada"/)).toBeInTheDocument();
-    expect(screen.getByText("echo @ intranet")).toBeInTheDocument();
-  });
-
-  it("lets non-admins run granted workflows without the editor", async () => {
+  it("lets run-granted users start a workflow and follow their own runs", async () => {
     const requests: Array<{ url: string; init?: RequestInit }> = [];
     const member = memberFetch(requests);
     vi.mocked(fetch).mockImplementation(async (input, init) => {
-      if (String(input) === "/api/workflows/1/runs" && init?.method === "POST") {
-        requests.push({ url: String(input), init });
-        return jsonResponse(
-          {
-            history_key: "whistory_00000000000000000001_00000000000000000102",
-            run: { workflow_id: 1, timestamp: 1781604000000, inputs: {}, outputs: {}, steps: [] }
-          },
-          201
-        );
+      const url = String(input);
+      if (url === "/api/databases/workspace/workflows/record-review/runs" && init?.method === "POST") {
+        requests.push({ url, init });
+        return jsonResponse({ id: 12, workflow_id: 1, trigger: "review", status: "succeeded", output: { ok: true }, created_at: 1781604000000 }, 200);
+      }
+      if (url === "/api/databases/workspace/workflows/record-review/runs/12") {
+        return jsonResponse({ id: 12, workflow_id: 1, trigger: "review", status: "succeeded", output: { ok: true }, created_at: 1781604000000 });
       }
       return member(input, init);
     });
 
     renderApp("/databases/workspace/workflows");
     await waitForSignedIn();
-    await userEvent.click(await findEnabledButton("Run record-review"));
+    expect(await screen.findByText("Runs you start appear here with their status and output.")).toBeInTheDocument();
+    await userEvent.click(await findEnabledButton("Run Record review"));
+    const dialog = await findDialog("Run Record review");
+    await userEvent.type(within(dialog).getByLabelText("Note"), "please check");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Start run" }));
     await waitFor(() =>
-      expect(
-        requests.find((request) => request.url === "/api/workflows/1/runs" && request.init?.method === "POST")?.init?.body
-      ).toBe(JSON.stringify({ inputs: {} }))
-    );
-    expect((await screen.findAllByText("Ran workflow record-review")).length).toBeGreaterThan(0);
-    expect(screen.queryByLabelText("Workflow JavaScript")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Create Workflow" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "workflow actions 1" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Workflow nodes" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("tab", { name: "History" })).not.toBeInTheDocument();
-    expect(requests.some((request) => request.url === "/api/workflows/1/runs" && !request.init?.method)).toBe(false);
-  });
-
-  it("runs workflows with only the explicit inputs JSON", async () => {
-    let runBody: unknown;
-    let runSaved = false;
-    const savedRun = {
-      history_key: "whistory_00000000000000000001_00000000000000000101",
-      run: {
-        workflow_id: 1,
-        timestamp: 1781604000000,
-        inputs: {},
-        outputs: {},
-        steps: []
-      }
-    };
-    vi.mocked(fetch).mockImplementation(async (input, init) => {
-      const url = String(input);
-      if (url === "/api/workflows/1/runs" && init?.method === "POST") {
-        runBody = JSON.parse(String(init.body));
-        runSaved = true;
-        return jsonResponse(savedRun, 201);
-      }
-      if (url === "/api/workflows/1/runs") {
-        return jsonResponse(runSaved ? [savedRun] : []);
-      }
-      return defaultFetch(input, init);
-    });
-
-    renderApp();
-    await waitForDefaultTableReady();
-    await userEvent.click(await within(await sidebar()).findByRole("link", { name: "Workflows" }));
-    await within(await sidebar()).findByRole("link", { name: /record-review/ });
-    await userEvent.click(await findEnabledButton("Run"));
-    await waitFor(() => expect(runBody).toEqual({ inputs: {} }));
-    await waitFor(() =>
-      expect(window.location.pathname).toBe(
-        "/databases/workspace/workflows/1/history/whistory_00000000000000000001_00000000000000000101"
+      expect(requests.find((request) => request.url.endsWith("/record-review/runs") && request.init?.method === "POST")?.init?.body).toBe(
+        JSON.stringify({ input: { note: "please check" }, wait: true })
       )
     );
-    expect(await screen.findByRole("tab", { name: "History", selected: true })).toBeInTheDocument();
-    expect(within(await screen.findByRole("navigation", { name: "Workflow run history" })).getByRole("button", { current: true })).toHaveTextContent(
-      new Date(1781604000000).toLocaleString()
-    );
+    expect(await within(dialog).findByLabelText("Output")).toHaveTextContent('"ok": true');
+    // Users cannot open the run's admin page.
+    expect(within(dialog).queryByRole("button", { name: "Open run" })).not.toBeInTheDocument();
+    await userEvent.keyboard("{Escape}");
+
+    const ownRuns = await screen.findByRole("list", { name: "Your recent runs" });
+    expect(within(ownRuns).getByRole("listitem", { name: "Record review run 12" })).toHaveTextContent("Succeeded");
+    expect(JSON.parse(window.localStorage.getItem("autable.workflowRuns:test-user:workspace") ?? "[]")).toEqual([{ workflow: "record-review", id: 12 }]);
+    expect(requests.some((request) => adminOnlyEndpoints.includes(request.url))).toBe(false);
+    expect(requests.some((request) => request.url.includes("/runs?"))).toBe(false);
+  });
+
+  it("keeps run-granted users on the workflow list", async () => {
+    vi.mocked(fetch).mockImplementation(memberFetch());
+    renderApp("/databases/workspace/workflows/record-review/versions");
+    await waitForSignedIn();
+    await waitFor(() => expect(window.location.pathname).toBe("/databases/workspace/workflows"));
+    expect(await screen.findByRole("list", { name: "Runnable workflows" })).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Versions" })).not.toBeInTheDocument();
   });
 
   it("lists apps with their published versions", async () => {
@@ -1371,7 +1241,7 @@ describe("App", () => {
   it("summarizes the management areas on the admin overview", async () => {
     renderApp("/databases/workspace/admin");
     expect(await screen.findByRole("heading", { name: "Manage", level: 1 })).toBeInTheDocument();
-    await waitFor(() => expect(screen.getByRole("link", { name: /Workflows.*2 workflows · 2 enabled/ })).toHaveAttribute("href", "/databases/workspace/workflows"));
+    await waitFor(() => expect(screen.getByRole("link", { name: /Workflows.*2 workflows · 1 active/ })).toHaveAttribute("href", "/databases/workspace/workflows"));
     expect(screen.getByRole("link", { name: /Apps & versions.*2 apps · 1 published/ })).toHaveAttribute("href", "/databases/workspace/apps");
     expect(screen.getByRole("link", { name: /Permissions & roles/ })).toHaveAttribute("href", "/databases/workspace/permissions");
     const tables = screen.getByRole("table", { name: "Tables & schema" });

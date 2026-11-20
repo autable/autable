@@ -4,14 +4,19 @@ import type { RoleDefinition, RoleMember } from "./api";
 // overview, admins only.
 export type WorkspaceViewName = "home" | "table" | "workflow" | "app" | "permission" | "admin";
 
+// The sections of a workflow's page; "config" holds its secrets and vars.
+export type WorkflowTab = "overview" | "runs" | "versions" | "config";
+
+const workflowTabs: WorkflowTab[] = ["overview", "runs", "versions", "config"];
+
 export type WorkspaceRoute = {
   databaseName: string;
   view: WorkspaceViewName;
   tableName?: string;
   tableViewName?: string;
-  workflowID?: number;
-  workflowTab?: "editor" | "history";
-  workflowRunKey?: string;
+  workflowName?: string;
+  workflowTab?: WorkflowTab;
+  workflowRunID?: number;
   appName?: string;
   roleName?: string;
 };
@@ -74,12 +79,19 @@ export function parseWorkspaceRoute(pathname: string): WorkspaceRoute | null {
     return { databaseName, view: "table", tableName: segments[3] };
   }
   if (segments[2] === "workflows") {
+    if (!segments[3]) {
+      return { databaseName, view: "workflow" };
+    }
+    const tab = workflowTabs.find((item) => item === segments[4] && item !== "overview");
+    if (segments[4] && !tab) {
+      return null;
+    }
     return {
       databaseName,
       view: "workflow",
-      workflowID: parsePositiveInteger(segments[3]),
-      workflowTab: segments[4] === "history" ? "history" : "editor",
-      workflowRunKey: segments[4] === "history" ? segments[5] : undefined
+      workflowName: segments[3],
+      workflowTab: tab ?? "overview",
+      workflowRunID: tab === "runs" ? parsePositiveInteger(segments[5]) : undefined
     };
   }
   if (segments[2] === "apps") {
@@ -104,16 +116,17 @@ export function buildWorkspacePath(route: WorkspaceRoute | null): string {
     return `/databases/${database}/admin`;
   }
   if (route.view === "workflow") {
-    if (!route.workflowID) {
+    if (!route.workflowName) {
       return `/databases/${database}/workflows`;
     }
-    const workflowPath = `/databases/${database}/workflows/${route.workflowID}`;
-    if (route.workflowTab !== "history") {
+    const workflowPath = `/databases/${database}/workflows/${encodePathSegment(route.workflowName)}`;
+    if (!route.workflowTab || route.workflowTab === "overview") {
       return workflowPath;
     }
-    return route.workflowRunKey
-      ? `${workflowPath}/history/${encodePathSegment(route.workflowRunKey)}`
-      : `${workflowPath}/history`;
+    if (route.workflowTab === "runs" && route.workflowRunID) {
+      return `${workflowPath}/runs/${route.workflowRunID}`;
+    }
+    return `${workflowPath}/${route.workflowTab}`;
   }
   if (route.view === "app") {
     return route.appName

@@ -1,8 +1,6 @@
 import { expect, type Page, test } from "@playwright/test";
-import { readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { appBundle } from "./appBundle";
+import { workflowBundle } from "./workflowBundle";
 
 type AuthUser = {
   id: string;
@@ -17,8 +15,6 @@ type WorkspaceSetup = {
 };
 
 let sequence = 0;
-const runtimeDir = join(dirname(fileURLToPath(import.meta.url)), ".runtime");
-const workflowEvaluationDelayMs = 5200;
 // The only global admin in the e2e config (see start-backend.mjs); everyone
 // else the specs register is an ordinary user.
 const adminEmail = "e2e-admin@example.com";
@@ -138,32 +134,6 @@ async function createRows(page: Page, databaseName: string, tableName: string, r
   );
 }
 
-async function fillMonacoEditor(page: Page, value: string) {
-  const testID = "workflow-js-editor";
-  const editor = await waitForMonacoEditor(page, testID);
-  await editor.evaluate((element, nextValue) => {
-    const win = element.ownerDocument.defaultView as Window & {
-      monaco?: {
-        editor: {
-          getEditors: () => Array<{
-            getContainerDomNode: () => HTMLElement;
-            getValue: () => string;
-            setValue: (value: string) => void;
-          }>;
-        };
-      };
-    };
-    const monacoEditor = win.monaco?.editor
-      .getEditors()
-      .find((candidate) => element.contains(candidate.getContainerDomNode()));
-    if (!monacoEditor) {
-      throw new Error("Monaco editor instance not found");
-    }
-    monacoEditor.setValue(nextValue);
-  }, value);
-  await expect.poll(() => monacoEditorValueByTestID(page, testID)).toBe(value);
-}
-
 // uploadApp pushes a hosted app version the way `autablectl app push` does.
 async function uploadApp(page: Page, databaseName: string, name: string, title: string, query = "") {
   const response = await page.request.post(`/api/databases/${databaseName}/apps/${name}/versions${query}`, {
@@ -174,56 +144,14 @@ async function uploadApp(page: Page, databaseName: string, name: string, title: 
   return ((await response.json()) as { app: { id: number; name: string; title: string } }).app;
 }
 
-async function waitForMonacoEditor(page: Page, testID: string) {
-  const editor = page.getByTestId(testID);
-  await expect(editor).toBeVisible();
-  await expect(editor.locator(".monaco-editor")).toBeVisible();
-  await expect
-    .poll(
-      () =>
-        editor.evaluate((element) => {
-          const win = element.ownerDocument.defaultView as Window & {
-            monaco?: {
-              editor: {
-                getEditors: () => Array<{
-                  getContainerDomNode: () => HTMLElement;
-                }>;
-              };
-            };
-          };
-          return Boolean(
-            win.monaco?.editor
-              .getEditors()
-              .some((candidate) => element.contains(candidate.getContainerDomNode()))
-          );
-        }),
-      { timeout: 30_000 }
-    )
-    .toBe(true);
-  return editor;
-}
-
-async function monacoEditorValueByTestID(page: Page, testID: string) {
-  const editor = await waitForMonacoEditor(page, testID);
-  return editor.evaluate((element) => {
-    const win = element.ownerDocument.defaultView as Window & {
-      monaco?: {
-        editor: {
-          getEditors: () => Array<{
-            getContainerDomNode: () => HTMLElement;
-            getValue: () => string;
-          }>;
-        };
-      };
-    };
-    const monacoEditor = win.monaco?.editor
-      .getEditors()
-      .find((candidate) => element.contains(candidate.getContainerDomNode()));
-    if (!monacoEditor) {
-      throw new Error("Monaco editor instance not found");
-    }
-    return monacoEditor.getValue();
+// pushWorkflow uploads a workflow version the way `autablectl workflow push` does.
+async function pushWorkflow(page: Page, databaseName: string, name: string, title: string, query = "?publish=1") {
+  const response = await page.request.post(`/api/databases/${databaseName}/workflows/${name}/versions${query}`, {
+    headers: { "Content-Type": "application/gzip" },
+    data: workflowBundle({ database: databaseName, name, title, release: "v1" })
   });
+  expect(response.ok(), await response.text()).toBe(true);
+  return ((await response.json()) as { workflow: { id: number; name: string; title: string } }).workflow;
 }
 
 async function createNamedResource(page: Page, buttonName: string, inputName: string, name: string) {
@@ -289,14 +217,7 @@ async function setupWorkspace(page: Page): Promise<WorkspaceSetup> {
   await api(page, "POST", `/api/tables/${databaseName}/${tableName}/rows`, {
     values: { name: "Ada Lovelace", email: "ada@example.com", status: "Active" }
   });
-  await api(page, "POST", `/api/databases/${databaseName}/workflows`, {
-    database_name: databaseName,
-    name: `welcome-contact-${suffix}`,
-    script:
-      'function instances(info) { return { welcome_echo: "echo" }; }\nfunction run(info) { const echoed = info.instance("welcome_echo").exec({ value: info.inputs.name }); return { message: echoed.value }; }',
-    secrets: {},
-    variables: {}
-  });
+  await pushWorkflow(page, databaseName, `welcome-contact-${suffix}`, "Welcome contact");
   // Selection is scoped to the URL route, so land on the table directly.
   await page.goto(`/databases/${databaseName}/tables/${tableName}`);
   await waitForTableReady(page, databaseName);
@@ -319,7 +240,8 @@ test("covers workspace navigation through the real backend", async ({ page }) =>
   await expect(page.getByRole("heading", { name: databaseName, level: 1 })).toBeVisible();
   await expect(page.getByRole("region", { name: "Tables" }).getByRole("link", { name: /Contacts/ })).toBeVisible();
   await sidebar(page).getByRole("link", { name: "Workflows", exact: true }).click();
-  await expect(sidebar(page).getByRole("link", { name: /welcome-contact/ })).toBeVisible();
+  await expect(sidebar(page).getByRole("link", { name: "Welcome contact" })).toBeVisible();
+  await expect(page.getByRole("table", { name: "Workflows" }).getByText("Manual", { exact: true })).toBeVisible();
   await sidebar(page).getByRole("link", { name: "Apps", exact: true }).click();
   await expect(page.getByText("No apps yet")).toBeVisible();
   await sidebar(page).getByRole("link", { name: "Permissions", exact: true }).click();
@@ -348,12 +270,7 @@ test("gives granted non-admins data, apps and workflows but no structure actions
     views: []
   });
   await api(page, "POST", `/api/tables/${databaseName}/contacts/rows`, { values: { name: "Ada Lovelace" } });
-  const workflow = (await api(page, "POST", `/api/databases/${databaseName}/workflows`, {
-    name: workflowName,
-    script: "function instances(info) { return { noop: 'echo' }; }\nfunction run(info) { return {}; }",
-    secrets: {},
-    variables: {}
-  })) as { id: number };
+  const workflow = await pushWorkflow(page, databaseName, workflowName, "Granted workflow");
   await uploadApp(page, databaseName, "granted-app", appTitle, "?publish=1");
   const grants = [
     { scope: "field_set", resource: `${databaseName}.contacts`, field: "", level: 3 },
@@ -393,12 +310,13 @@ test("gives granted non-admins data, apps and workflows but no structure actions
   await expect(tableCanvas.getByRole("toolbar", { name: "Table canvas actions" }).getByRole("button", { name: "Edit Row" })).toBeVisible();
 
   await sidebar(page).getByRole("link", { name: "Workflows", exact: true }).click();
-  await expect(page.getByRole("table", { name: "Runnable workflows" }).getByText(workflowName, { exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Create Workflow" })).toHaveCount(0);
-  await expect(page.getByTestId("workflow-js-editor")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Workflow nodes" })).toHaveCount(0);
-  await page.getByRole("button", { name: `Run ${workflowName}` }).click();
-  await expect(page.getByText(`Ran workflow ${workflowName}`).first()).toBeVisible();
+  await expect(page.getByRole("list", { name: "Runnable workflows" }).getByText(workflowName, { exact: true })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Versions" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Run Granted workflow" }).click();
+  const runDialog = page.getByRole("dialog", { name: "Run Granted workflow" });
+  await runDialog.getByRole("button", { name: "Start run" }).click();
+  await expect(runDialog.getByRole("region", { name: "Run result" }).getByText("Succeeded")).toBeVisible();
+  await page.keyboard.press("Escape");
 
   await sidebar(page).getByRole("link", { name: "Apps", exact: true }).click();
   const openLink = page.getByRole("table", { name: "Apps" }).getByRole("link", { name: `Open ${appTitle}` });
@@ -428,12 +346,7 @@ test("hides workflow and app resources without resource permission", async ({ pa
     fields: [{ name: "name", type: "string", deleted: false }],
     views: []
   });
-  await api(page, "POST", `/api/databases/${databaseName}/workflows`, {
-    name: workflowName,
-    script: "function instances(info) { return { noop: 'echo' }; }\nfunction run(info) { return {}; }",
-    secrets: {},
-    variables: {}
-  });
+  await pushWorkflow(page, databaseName, workflowName, "Private workflow");
   await uploadApp(page, databaseName, "private-app", appTitle);
   await api(page, "POST", "/api/permissions/grants", {
     subject_id: resourceUser.id,
@@ -454,7 +367,7 @@ test("hides workflow and app resources without resource permission", async ({ pa
   await expect(tableActions.getByRole("button", { name: "Row", exact: true })).toBeDisabled();
   await sidebar(page).getByRole("link", { name: "Workflows", exact: true }).click();
   await expect(page.getByText("No workflows yet")).toBeVisible();
-  await expect(page.getByText(workflowName)).toHaveCount(0);
+  await expect(page.getByText("Private workflow")).toHaveCount(0);
   await sidebar(page).getByRole("link", { name: "Apps", exact: true }).click();
   await expect(page.getByText("No apps yet")).toBeVisible();
   await expect(page.getByText(appTitle)).toHaveCount(0);
@@ -522,63 +435,6 @@ test("prevents partial field readers from mutating table metadata", async ({ pag
   const fieldNames = contacts?.fields.map((field) => field.name) ?? [];
   expect(fieldNames).toEqual(expect.arrayContaining(["name", "email"]));
   expect(fieldNames).not.toContain("phone");
-});
-
-test("lets run-granted non-admins run a workflow without the editor", async ({ page }) => {
-  const runner = await registerUser(page);
-  await api(page, "POST", "/api/auth/logout");
-  await signInAdmin(page);
-  const suffix = `${Date.now()}-${sequence}`;
-  const databaseName = `runonly${suffix}`;
-  const workflowName = `run-workflow-${suffix}`;
-
-  await api(page, "POST", "/api/databases", {
-    name: databaseName,
-  });
-  await api(page, "POST", `/api/databases/${databaseName}/tables`, {
-    name: "contacts",
-    display_name: "Contacts",
-    fields: [{ name: "name", type: "string", deleted: false }],
-    views: []
-  });
-  const workflow = (await api(page, "POST", `/api/databases/${databaseName}/workflows`, {
-    name: workflowName,
-    script:
-      "function instances(info) { return { notifier: { node: 'echo', variables: [{ name: 'channel', type: 'string' }], secrets: [{ name: 'token', type: 'string' }] } }; }\nfunction run(info) { return {}; }",
-    secrets: { "notifier.token": "" },
-    variables: { "notifier.channel": "ops" }
-  })) as { id: number };
-  await api(page, "POST", "/api/permissions/grants", {
-    subject_id: runner.id,
-    scope: "field_set",
-    resource: `${databaseName}.contacts`,
-    field: "",
-    level: 1
-  });
-  await api(page, "POST", "/api/permissions/grants", {
-    subject_id: runner.id,
-    scope: "workflow",
-    resource: String(workflow.id),
-    field: "",
-    level: 1
-  });
-  await api(page, "POST", "/api/auth/logout");
-  await loginUser(page, runner.email);
-  await page.goto(`/databases/${databaseName}`);
-  await waitForWorkspaceReady(page, databaseName);
-
-  await sidebar(page).getByRole("link", { name: "Workflows", exact: true }).click();
-  await expect(page.getByRole("table", { name: "Runnable workflows" })).toBeVisible();
-  await expect(page.getByRole("table", { name: "Runnable workflows" }).getByText(workflowName, { exact: true })).toBeVisible();
-  await expect(page.getByTestId("workflow-js-editor")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Edit config notifier" })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Save" })).toHaveCount(0);
-  await expect(page.getByRole("tab", { name: "History" })).toHaveCount(0);
-  await page.getByRole("button", { name: `Run ${workflowName}` }).click();
-  await expect(page.getByText(`Ran workflow ${workflowName}`).first()).toBeVisible();
-  // Definitions and run history stay admin-only.
-  const detailStatus = await page.evaluate(async (id) => (await fetch(`/api/workflows/${id}/runs`)).status, workflow.id);
-  expect(detailStatus).toBe(403);
 });
 
 test("covers database and table creation through the real backend", async ({ page }) => {
@@ -829,302 +685,6 @@ test("covers table views, row creation, and row history through the real backend
   );
 });
 
-test("covers workflow editor, node list, and run history through the real backend", async ({ page }) => {
-  const workspace = await setupWorkspace(page);
-
-  await sidebar(page).getByRole("link", { name: "Workflows", exact: true }).click();
-  const workflowName = `ui-workflow-${Date.now()}`;
-  await createNamedResource(page, "Create Workflow", "New workflow name", workflowName);
-  await expect(page.getByText(`Created workflow ${workflowName}`).first()).toBeVisible();
-  await expect(sidebar(page).getByRole("link", { name: workflowName })).toHaveAttribute("aria-current", "page");
-  const createdWorkflows = (await api(page, "GET", `/api/databases/${workspace.databaseName}/workflows`)) as Array<{
-    name: string;
-    script: string;
-  }>;
-  const defaultWorkflowScript = createdWorkflows.find((workflow) => workflow.name === workflowName)?.script ?? "";
-  expect(defaultWorkflowScript).toContain("@param {AutableWorkflowRunInfo} info");
-  expect(defaultWorkflowScript).toContain("function trigger(info)");
-  expect(defaultWorkflowScript).toContain('table: "contacts"');
-  expect(defaultWorkflowScript).toContain("table.record.changed");
-  const workflowNodes = (await api(page, "GET", "/api/workflow/nodes")) as Array<{
-    type: string;
-    documentation?: Record<string, string>;
-    inputs: Array<{ name: string; type: string }>;
-    secrets?: Array<{ name: string; type: string }>;
-  }>;
-  const dingTalkNode = workflowNodes.find((node) => node.type === "dingtalk.robot.send");
-  expect(dingTalkNode?.inputs).toEqual(
-    expect.arrayContaining([expect.objectContaining({ name: "content", type: "string" })])
-  );
-  expect(dingTalkNode?.secrets).toEqual(
-    expect.arrayContaining([expect.objectContaining({ name: "access_token", type: "string" })])
-  );
-  expect(dingTalkNode?.secrets).toHaveLength(1);
-  expect(dingTalkNode?.documentation?.["en-US"]).toContain("DingTalk robot");
-  expect(dingTalkNode?.documentation?.["zh-CN"]).toContain("钉钉机器人");
-  const headerActionLayout = await page.getByRole("button", { name: "Workflow nodes" }).evaluate((button) => {
-    const nodesButton = button as HTMLElement;
-    const saveButton = nodesButton.parentElement?.querySelector("button:last-child") as HTMLElement | null;
-    return {
-      nodesTop: Math.round(nodesButton.getBoundingClientRect().top),
-      saveTop: saveButton ? Math.round(saveButton.getBoundingClientRect().top) : -1
-    };
-  });
-  expect(headerActionLayout.nodesTop).toBe(headerActionLayout.saveTop);
-  await page.getByRole("button", { name: "Workflow nodes" }).click();
-  await expect(page.getByRole("dialog", { name: "Workflow node catalog" })).toBeVisible();
-  await page.waitForTimeout(300);
-  const dialogLayout = await page.getByRole("dialog", { name: "Workflow node catalog" }).evaluate((dialog) => {
-    return {
-      dialogWidth: Math.round((dialog as HTMLElement).getBoundingClientRect().width),
-      viewportWidth: window.innerWidth
-    };
-  });
-  expect(dialogLayout.dialogWidth).toBeGreaterThanOrEqual(dialogLayout.viewportWidth - 40);
-  await page.getByRole("button", { name: "dingtalk.robot.send" }).click();
-  await expect(page.getByText("DingTalk robot").first()).toBeVisible();
-  await page.getByRole("button", { name: /table\.record\.changed/ }).click();
-  await expect(page.getByText("Record changed").first()).toBeVisible();
-  await expect(page.getByText(/run\(info\)\.inputs/).first()).toBeVisible();
-  const nodeDialogLayout = await page.getByLabel("Workflow node documentation").evaluate((element) => {
-    const list = element as HTMLElement;
-    return {
-      overflowY: window.getComputedStyle(list).overflowY,
-      clientHeight: list.clientHeight,
-      scrollHeight: list.scrollHeight
-    };
-  });
-  expect(nodeDialogLayout.overflowY).toBe("auto");
-  expect(nodeDialogLayout.scrollHeight).toBeGreaterThanOrEqual(nodeDialogLayout.clientHeight);
-  await page.keyboard.press("Escape");
-  await page.getByRole("button", { name: "Switch language" }).click();
-  await page.getByRole("button", { name: "工作流节点" }).click();
-  await page.getByRole("button", { name: "dingtalk.robot.send" }).click();
-  await expect(page.getByText("钉钉机器人").first()).toBeVisible();
-  await page.keyboard.press("Escape");
-  await page.getByRole("button", { name: "切换语言" }).click();
-  await expect(page.getByLabel("Instances").getByText("row_change")).toBeVisible();
-  await fillMonacoEditor(
-    page,
-    "function instances(info) {\n  return { ding: { node: 'dingtalk.robot.send' } };\n}\n\nfunction run(info) {\n  return info.instance('ding').exec({ content: 'hello' });\n}"
-  );
-  await page.waitForTimeout(workflowEvaluationDelayMs);
-  await page.getByRole("button", { name: "Edit config ding" }).click();
-  await expect(page.getByLabel("Secret ding.access_token")).toBeVisible();
-  await page.keyboard.press("Escape");
-  await fillMonacoEditor(
-    page,
-    "function instances(info) {\n  return { row_change: { node: 'table.record.changed', variables: [{ name: 'label', type: 'string' }], secrets: [{ name: 'token', type: 'string' }] } };\n}\n\nfunction trigger(info) {\n  return { instance: 'row_change', params: { table: 'contacts', operations: ['create', 'update', 'delete'] } };\n}\n\nfunction run(info) {\n  return { record_id: 1, name: 'Ada Lovelace' };\n}"
-  );
-  await page.waitForTimeout(workflowEvaluationDelayMs);
-  await page.getByRole("button", { name: "Edit config row_change" }).click();
-  await page.getByLabel("Variable row_change.label").fill("review");
-  await page.getByLabel("Secret row_change.token").fill("hidden-token");
-  await page.getByRole("button", { name: "Save config" }).click();
-  await expect(page.getByText("Saved instance config row_change").first()).toBeVisible();
-  const savedWorkflows = (await api(
-    page,
-    "GET",
-    `/api/databases/${workspace.databaseName}/workflows`
-  )) as Array<{
-    id: number;
-    name: string;
-    enabled: boolean;
-    variables: Record<string, string>;
-    secrets: Record<string, number>;
-    created_at: number;
-    updated_at: number;
-  }>;
-  const savedWorkflow = savedWorkflows.find((item) => item.name === workflowName);
-  expect(savedWorkflow?.variables["row_change.label"]).toBe("review");
-  expect(savedWorkflow?.secrets["row_change.token"]).toBe("hidden-token".length);
-  expect(savedWorkflow?.enabled).toBe(true);
-  expect(typeof savedWorkflow?.created_at).toBe("number");
-  expect(typeof savedWorkflow?.updated_at).toBe("number");
-  await page.getByRole("switch", { name: "Enabled" }).click();
-  await expect(page.getByText(`${workflowName} disabled`).first()).toBeVisible();
-  const disabledWorkflows = (await api(
-    page,
-    "GET",
-    `/api/databases/${workspace.databaseName}/workflows`
-  )) as Array<{ id: number; enabled: boolean }>;
-  expect(disabledWorkflows.find((item) => item.id === savedWorkflow?.id)?.enabled).toBe(false);
-  await page.getByRole("switch", { name: "Enabled" }).click();
-  await expect(page.getByText(`${workflowName} enabled`).first()).toBeVisible();
-  await page.getByRole("button", { name: "Edit config row_change" }).click();
-  await expect(page.getByLabel("Secret row_change.token")).toHaveValue("x".repeat("hidden-token".length));
-  await expect(page.getByText(/Saved secret length/)).toHaveCount(0);
-  await page.keyboard.press("Escape");
-  // Run executes the saved script; the saved-toast text is ambiguous with
-  // earlier saves, so poll the API until the edited script is persisted.
-  await page.getByRole("button", { name: "Save", exact: true }).click();
-  await expect
-    .poll(async () => {
-      const saved = (await api(page, "GET", `/api/databases/${workspace.databaseName}/workflows`)) as Array<{
-        name: string;
-        script: string;
-      }>;
-      return saved.find((item) => item.name === workflowName)?.script ?? "";
-    })
-    .toContain("record_id: 1");
-  await page.getByRole("button", { name: "Run", exact: true }).click();
-  await expect(page.getByText(/Workflow run saved: whistory_/).first()).toBeVisible();
-  await page.getByRole("tab", { name: "History" }).click();
-  const runHistory = page.getByRole("navigation", { name: "Workflow run history" });
-  // The run just started is the one shown.
-  await expect(runHistory.locator('[aria-current="true"]')).toBeVisible();
-  const runList = page.getByLabel("Workflow run nodes");
-  await expect(runList.getByRole("button", { name: /Run input/ })).toBeVisible();
-  await expect(runList.getByRole("button", { name: /Run output/ })).toBeVisible();
-  await runList.getByRole("button", { name: /Run output/ }).click();
-  // Assert the persisted run first; it also gives the summary-detail fetch in
-  // the history panel time to land before the editor value is checked.
-  await expect
-    .poll(async () => {
-      const runs = (await api(page, "GET", `/api/workflows/${savedWorkflow?.id}/runs`)) as Array<{
-        history_key: string;
-      }>;
-      const latest = runs[runs.length - 1];
-      if (!latest) {
-        return "";
-      }
-      const detail = (await api(page, "GET", `/api/workflows/${savedWorkflow?.id}/runs/${latest.history_key}`)) as {
-        run: { outputs?: Record<string, unknown> };
-      };
-      return JSON.stringify(detail.run.outputs ?? {});
-    })
-    .toContain('"record_id":1');
-  await expect
-    .poll(() => monacoEditorValueByTestID(page, "workflow-run-output-editor"))
-    .toContain('"record_id": 1');
-  const workflowRuns = (await api(page, "GET", `/api/workflows/${savedWorkflow?.id}/runs`)) as Array<{
-    run: { timestamp: number };
-  }>;
-  expect(typeof workflowRuns[0]?.run.timestamp).toBe("number");
-});
-
-test("runs table row workflow nodes through the real backend", async ({ page }) => {
-  const workspace = await setupWorkspace(page);
-
-  await sidebar(page).getByRole("link", { name: "Workflows", exact: true }).click();
-  const workflowName = `row-node-workflow-${Date.now()}`;
-  await createNamedResource(page, "Create Workflow", "New workflow name", workflowName);
-  await expect(page.getByText(`Created workflow ${workflowName}`).first()).toBeVisible();
-  await expect(sidebar(page).getByRole("link", { name: workflowName })).toHaveAttribute("aria-current", "page");
-  const rowNodeWorkflows = (await api(page, "GET", `/api/databases/${workspace.databaseName}/workflows`)) as Array<{
-    id: number;
-    name: string;
-  }>;
-  const rowNodeWorkflow = rowNodeWorkflows.find((workflow) => workflow.name === workflowName);
-  expect(rowNodeWorkflow?.id).toBeTruthy();
-  const workflowSubject = `workflow:${rowNodeWorkflow?.id}`;
-  const tableResource = `${workspace.databaseName}.${workspace.tableName}`;
-  // Field levels are a bitmask (1 read, 2 update, 4 fill-on-create) and the
-  // list node needs view read: grant full field bits plus the all-view read.
-  await api(page, "POST", "/api/permissions/grants", {
-    subject_id: workflowSubject,
-    scope: "field_set",
-    resource: tableResource,
-    level: 7
-  });
-  await api(page, "POST", "/api/permissions/grants", {
-    subject_id: workflowSubject,
-    scope: "view_set",
-    resource: tableResource,
-    level: 1
-  });
-  await api(page, "POST", "/api/permissions/grants", {
-    subject_id: workflowSubject,
-    scope: "record",
-    resource: tableResource,
-    field: "create",
-    level: 2
-  });
-  await api(page, "POST", "/api/permissions/grants", {
-    subject_id: workflowSubject,
-    scope: "record",
-    resource: tableResource,
-    field: "delete",
-    level: 2
-  });
-  await fillMonacoEditor(
-    page,
-    "function instances(info) {\n  return {\n    create_contact: 'table.row.create',\n    list_contacts: 'table.row.list',\n    update_contact: 'table.row.update',\n    delete_contact: 'table.row.delete'\n  };\n}\n\nfunction run(info) {\n  const created = info.instance('create_contact').exec({\n    table: 'contacts',\n    values: { name: 'Grace Hopper', email: 'grace@example.com', status: 'Review' }\n  });\n  const beforeUpdate = info.instance('list_contacts').exec({ table: 'contacts' });\n  const updated = info.instance('update_contact').exec({\n    table: 'contacts',\n    record_id: created.record.record_id,\n    values: { status: 'Active' }\n  });\n  const deleted = info.instance('delete_contact').exec({\n    table: 'contacts',\n    record_id: created.record.record_id\n  });\n  return {\n    created_id: created.record.record_id,\n    before_count: beforeUpdate.rows.length,\n    updated_status: updated.record.values.status,\n    deleted_name: deleted.record.values.name\n  };\n}"
-  );
-  await page.waitForTimeout(workflowEvaluationDelayMs);
-  await expect(page.getByLabel("Instances").getByText("create_contact")).toBeVisible();
-  // Run executes the saved script; the saved-toast text is ambiguous with
-  // earlier saves, so poll the API until the edited script is persisted.
-  await page.getByRole("button", { name: "Save" }).click();
-  await expect
-    .poll(async () => {
-      const saved = (await api(page, "GET", `/api/databases/${workspace.databaseName}/workflows`)) as Array<{
-        name: string;
-        script: string;
-      }>;
-      return saved.find((item) => item.name === workflowName)?.script ?? "";
-    })
-    .toContain("create_contact");
-  await page.getByRole("button", { name: "Run", exact: true }).click();
-  await expect(page.getByText(/Workflow run saved: whistory_/).first()).toBeVisible();
-  await page.getByRole("tab", { name: "History" }).click();
-
-  const rows = (await api(
-    page,
-    "GET",
-    `/api/tables/${workspace.databaseName}/${workspace.tableName}/rows`
-  )) as Array<{ record_id: number; values: Record<string, unknown> }>;
-  expect(rows.some((row) => row.values.name === "Grace Hopper")).toBe(false);
-  const runList = page.getByLabel("Workflow run nodes");
-  await expect(runList.getByText("table.row.create")).toBeVisible();
-  await expect(runList.getByText("table.row.list")).toBeVisible();
-  await expect(runList.getByText("table.row.update")).toBeVisible();
-  await expect(runList.getByText("table.row.delete")).toBeVisible();
-  await runList.getByRole("button", { name: /create_contact/ }).click();
-  await expect
-    .poll(() => monacoEditorValueByTestID(page, "workflow-run-input-editor"))
-    .toContain("Grace Hopper");
-  await runList.getByRole("button", { name: /Run output/ }).click();
-  await expect
-    .poll(() => monacoEditorValueByTestID(page, "workflow-run-output-editor"))
-    .toContain('"updated_status": "Active"');
-});
-
-test("persists workflow JavaScript into the repository path", async ({ page }) => {
-  await signInAdmin(page);
-  const suffix = `${Date.now()}-${sequence}`;
-  const databaseName = `repo${suffix}`;
-  await api(page, "POST", "/api/databases", {
-    name: databaseName,
-  });
-
-  const workflowName = `repo-workflow-${suffix}`;
-  const workflowScript = 'function instances(info) { return { noop: "echo" }; }\nfunction run(info) { return { name: info.inputs.name }; }';
-  const workflow = (await api(page, "POST", `/api/databases/${databaseName}/workflows`, {
-    database_name: databaseName,
-    name: workflowName,
-    script: workflowScript,
-    secrets: {},
-    variables: {}
-  })) as { id: number };
-  const workflowPath = join(
-    runtimeDir,
-    "workspace",
-    "workflow",
-    databaseName,
-    `${workflowName}.js`
-  );
-  expect(readFileSync(workflowPath, "utf8")).toBe(workflowScript);
-  const editedWorkflowScript = "function instances(info) { return { noop: 'echo' }; }\nfunction run() { return { source: 'file' }; }";
-  writeFileSync(workflowPath, editedWorkflowScript);
-  const loadedWorkflow = (await api(page, "GET", `/api/workflows/${workflow.id}`)) as { script: string };
-  expect(loadedWorkflow.script).toBe(editedWorkflowScript);
-  const run = (await api(page, "POST", `/api/workflows/${workflow.id}/runs`, { inputs: {} })) as {
-    run: { outputs: { source?: string } };
-  };
-  expect(run.run.outputs.source).toBe("file");
-});
-
 test("covers role members and resource permission grants through the real backend", async ({ page }) => {
   const user = await registerUser(page);
   await api(page, "POST", "/api/auth/logout");
@@ -1132,6 +692,7 @@ test("covers role members and resource permission grants through the real backen
   const workflows = (await api(page, "GET", `/api/databases/${databaseName}/workflows`)) as Array<{
     id: number;
     name: string;
+    title: string;
   }>;
   const app = await uploadApp(page, databaseName, "role-app", "Role app");
   const workflow = workflows[0];
@@ -1154,7 +715,7 @@ test("covers role members and resource permission grants through the real backen
   await page.getByRole("button", { name: "email Update" }).click();
   await page.getByRole("button", { name: "All views Read" }).click();
   await page.getByRole("tab", { name: "Workflows" }).click();
-  await page.getByLabel(`${workflow.name} permission`).selectOption({ label: "Run" });
+  await page.getByLabel(`${workflow.title || workflow.name} permission`).selectOption({ label: "Run" });
   await page.getByRole("tab", { name: "Apps" }).click();
   await page.getByLabel(`${app.title} permission`).selectOption({ label: "Open" });
   await page.getByRole("button", { name: "Save", exact: true }).click();

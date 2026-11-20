@@ -27,7 +27,9 @@ export function AdminPage({
 }) {
   const { t } = useTranslation();
   const db = database.name;
-  const enabledWorkflows = workflows.filter((workflow) => workflow.enabled ?? true).length;
+  const enabledWorkflows = workflows.filter((workflow) => workflow.enabled && workflow.published_version > 0).length;
+  const failingWorkflows = workflows.filter((workflow) => workflow.last_run?.status === "failed").length;
+  const workflowsMeta = t("admin.workflowsMeta", { workflows: t("admin.workflowCount", { count: workflows.length }), enabled: enabledWorkflows });
   const publishedApps = apps.filter((app) => app.published_version > 0).length;
   return (
     <Page title={t("admin.title")} description={t("admin.description", { database: db })}>
@@ -38,7 +40,7 @@ export function AdminPage({
             icon={Workflow}
             title={t("admin.workflowsTitle")}
             description={t("admin.workflowsDescription")}
-            meta={t("admin.workflowsMeta", { workflows: t("admin.workflowCount", { count: workflows.length }), enabled: enabledWorkflows })}
+            meta={failingWorkflows > 0 ? `${workflowsMeta} · ${t("admin.workflowsFailing", { count: failingWorkflows })}` : workflowsMeta}
             route={{ databaseName: db, view: "workflow" }}
           />
           <AreaCard

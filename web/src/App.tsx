@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Database, Table2, Workflow } from "lucide-react";
+import { Database, Table2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { AppWorkspace } from "./components/AppWorkspace";
 import { AuthScreen } from "./components/AuthScreen";
@@ -8,7 +8,7 @@ import { LoginPage } from "./components/LoginPage";
 import { PermissionPanel } from "./components/PermissionPanel";
 import { RunnersPanel } from "./components/RunnersPanel";
 import { TableWorkspace } from "./components/TableWorkspace";
-import { WorkflowWorkspace, type WorkflowTab } from "./components/WorkflowWorkspace";
+import { WorkflowWorkspace } from "./components/WorkflowWorkspace";
 import { useNotifier } from "./notifications";
 import { useAppWorkspace } from "./hooks/useAppWorkspace";
 import { usePermissionWorkspace } from "./hooks/usePermissionWorkspace";
@@ -32,7 +32,6 @@ import {
   type OIDCProvider,
   type TableMetadata
 } from "./api";
-import { normalizeLanguage } from "./i18n";
 import { AdminPage } from "./pages/AdminPage";
 import { HomePage } from "./pages/HomePage";
 import { WorkflowRunsPage } from "./pages/WorkflowRunsPage";
@@ -61,8 +60,7 @@ export function App() {
 }
 
 function WorkspaceApp() {
-  const { i18n, t } = useTranslation();
-  const language = normalizeLanguage(i18n.resolvedLanguage ?? i18n.language);
+  const { t } = useTranslation();
   const [locationPath, setLocationPath] = useState(() => window.location.pathname);
   const [catalog, setCatalog] = useState<Catalog>(emptyCatalog);
   const [view, setView] = useState<View>("home");
@@ -117,24 +115,17 @@ function WorkspaceApp() {
     },
     onStatus: notify
   });
+  const workflowRoute = workspaceRoute?.databaseName === database.name && workspaceRoute.view === "workflow" ? workspaceRoute : null;
+  const selectedWorkflowName = workflowRoute?.workflowName ?? "";
   const workflowWorkspace = useWorkflowWorkspace({
     currentUserID: currentUser?.id,
     databaseName: database.name,
     isAdmin,
-    tableName: table.name,
+    workflowName: selectedWorkflowName,
     onStatus: notify
   });
-  const {
-    newWorkflowName,
-    resourcesReady,
-    selectedWorkflow,
-    selectedWorkflowRun,
-    workflowTrigger,
-    workflowInstances,
-    workflowNodes,
-    workflowRuns,
-    workflows
-  } = workflowWorkspace;
+  const { workflows, workflowsReady } = workflowWorkspace;
+  const selectedWorkflow = workflows.find((item) => item.name === selectedWorkflowName);
   const selectedAppName =
     workspaceRoute?.databaseName === database.name && workspaceRoute.view === "app" ? workspaceRoute.appName ?? "" : "";
   const appWorkspace = useAppWorkspace({
@@ -162,10 +153,6 @@ function WorkspaceApp() {
     roles,
     selectedRole
   } = permissionWorkspace;
-  const selectedWorkflowTab: WorkflowTab =
-    workspaceRoute?.databaseName === database.name && workspaceRoute.view === "workflow"
-      ? workspaceRoute.workflowTab ?? "editor"
-      : "editor";
 
   useEffect(() => {
     function handlePopState() {
@@ -246,11 +233,12 @@ function WorkspaceApp() {
     }
     if (
       workspaceRoute.view === "workflow" &&
-      workspaceRoute.workflowID &&
-      resourcesReady &&
-      !workflows.some((item) => item.id === workspaceRoute.workflowID)
+      workspaceRoute.workflowName &&
+      workflowsReady &&
+      (!isAdmin || !workflows.some((item) => item.name === workspaceRoute.workflowName))
     ) {
-      navigateWorkspace(null, "replace");
+      // Only admins open a workflow's page; others run workflows from the list.
+      navigateWorkspace({ databaseName: database.name, view: "workflow" }, "replace");
       return;
     }
     if (workspaceRoute.view === "app" && workspaceRoute.appName && appsReady && !apps.some((item) => item.name === workspaceRoute.appName)) {
@@ -261,34 +249,10 @@ function WorkspaceApp() {
       navigateWorkspace(null, "replace");
       return;
     }
-    if (workspaceRoute.view === "workflow" && workspaceRoute.workflowID && workflows.some((item) => item.id === workspaceRoute.workflowID)) {
-      workflowWorkspace.setSelectedWorkflowID(workspaceRoute.workflowID);
-    }
-    if (
-      workspaceRoute.view === "workflow" &&
-      workspaceRoute.workflowTab === "history" &&
-      workspaceRoute.workflowRunKey &&
-      workflowRuns.some((run) => run.history_key === workspaceRoute.workflowRunKey)
-    ) {
-      workflowWorkspace.setSelectedWorkflowRunKey(workspaceRoute.workflowRunKey);
-    }
     if (workspaceRoute.view === "permission" && workspaceRoute.roleName && roles.some((item) => item.name === workspaceRoute.roleName)) {
       permissionWorkspace.setSelectedRoleName(workspaceRoute.roleName);
     }
-  }, [apps, appsReady, database.name, locationPath, resourcesReady, roles, rolesReady, workflowRuns, workflows, workspaceRoute]);
-
-  useEffect(() => {
-    if (selectedWorkflowTab !== "history" || !selectedWorkflow?.id) {
-      return;
-    }
-    // A deep link names a workflow; until that selection is applied the
-    // current selection is still the default first workflow, and fetching
-    // its runs would race the real target and show the wrong history.
-    if (workspaceRoute?.view === "workflow" && workspaceRoute.workflowID && workspaceRoute.workflowID !== selectedWorkflow.id) {
-      return;
-    }
-    void workflowWorkspace.refreshWorkflowRuns(workspaceRoute?.workflowRunKey ?? "", selectedWorkflow.id);
-  }, [selectedWorkflow?.id, selectedWorkflowTab]);
+  }, [apps, appsReady, database.name, isAdmin, locationPath, roles, rolesReady, workflows, workflowsReady, workspaceRoute]);
 
   useEffect(() => {
     let cancelled = false;
@@ -333,7 +297,6 @@ function WorkspaceApp() {
       setMetadataReady(false);
       applyCatalogSelection(emptyCatalog, "");
       permissionWorkspace.clearRoles();
-      workflowWorkspace.clearResources();
       return () => {
         cancelled = true;
       };
@@ -367,7 +330,7 @@ function WorkspaceApp() {
       if (dbName) {
         await Promise.all([
           permissionWorkspace.refreshRoles(dbName),
-          workflowWorkspace.refreshResources(dbName),
+          workflowWorkspace.refreshWorkflows(dbName),
           appWorkspace.refreshApps(dbName)
         ]);
       }
@@ -489,56 +452,6 @@ function WorkspaceApp() {
     }
   }
 
-  async function executeWorkflowFromWorkspace() {
-    const response = await workflowWorkspace.executeWorkflow();
-    if (response?.history_key && selectedWorkflow?.id) {
-      navigateWorkspace(
-        {
-          databaseName: database.name,
-          view: "workflow",
-          workflowID: selectedWorkflow.id,
-          workflowTab: "history",
-          workflowRunKey: response.history_key
-        },
-        "push"
-      );
-    }
-  }
-
-  function selectWorkflowTabFromWorkspace(tab: WorkflowTab) {
-    if (!selectedWorkflow?.id) {
-      navigateWorkspace({ databaseName: database.name, view: "workflow" }, "push");
-      return;
-    }
-    navigateWorkspace(
-      {
-        databaseName: database.name,
-        view: "workflow",
-        workflowID: selectedWorkflow.id,
-        workflowTab: tab,
-        workflowRunKey: tab === "history" ? selectedWorkflowRun?.history_key : undefined
-      },
-      "push"
-    );
-  }
-
-  function selectWorkflowRunFromWorkspace(historyKey: string) {
-    workflowWorkspace.setSelectedWorkflowRunKey(historyKey);
-    if (!selectedWorkflow?.id) {
-      return;
-    }
-    navigateWorkspace(
-      {
-        databaseName: database.name,
-        view: "workflow",
-        workflowID: selectedWorkflow.id,
-        workflowTab: "history",
-        workflowRunKey: historyKey
-      },
-      "push"
-    );
-  }
-
   function selectAppFromNavigation(name: string) {
     navigateWorkspace({ databaseName: database.name, view: "app", appName: name }, "push");
   }
@@ -580,14 +493,6 @@ function WorkspaceApp() {
       return { databaseName, view: "table", tableName, tableViewName };
     }
     return { databaseName, view: nextView };
-  }
-
-  async function createWorkflowFromSidebar() {
-    const saved = await workflowWorkspace.createWorkflow();
-    if (saved?.id) {
-      setView("workflow");
-      navigateWorkspace({ databaseName: database.name, view: "workflow", workflowID: saved.id }, "push");
-    }
   }
 
   async function createTableView(tableName: string, viewName: string) {
@@ -654,7 +559,7 @@ function WorkspaceApp() {
     view,
     tableName: table.name,
     workflows,
-    selectedWorkflowID: selectedWorkflow?.id,
+    selectedWorkflowName,
     roles,
     selectedRoleName: selectedRole?.name,
     newDatabaseName,
@@ -663,11 +568,6 @@ function WorkspaceApp() {
     newTableName,
     onNewTableNameChange: setNewTableName,
     onCreateTable: createTableFromSidebar,
-    newWorkflowName,
-    onNewWorkflowNameChange: workflowWorkspace.setNewWorkflowName,
-    onCreateWorkflow: createWorkflowFromSidebar,
-    onDeleteWorkflow: workflowWorkspace.deleteSelectedWorkflow,
-    onRenameWorkflow: workflowWorkspace.renameSelectedWorkflow,
     newRoleName,
     onNewRoleNameChange: permissionWorkspace.setNewRoleName,
     onCreateRole: permissionWorkspace.createRoleFromSidebar,
@@ -697,7 +597,7 @@ function WorkspaceApp() {
       case "app":
         return selectedApp ? selectedApp.title || selectedApp.name : t("nav.apps");
       case "workflow":
-        return isAdmin && selectedWorkflow ? selectedWorkflow.name : t("nav.workflows");
+        return isAdmin && selectedWorkflow ? selectedWorkflow.title || selectedWorkflow.name : t("nav.workflows");
       case "permission":
         return t("nav.permissions");
       case "admin":
@@ -804,35 +704,31 @@ function WorkspaceApp() {
         );
       case "workflow":
         if (!isAdmin) {
-          return <WorkflowRunsPage databaseName={database.name} onRun={workflowWorkspace.runGrantedWorkflow} workflows={workflows} />;
+          return (
+            <WorkflowRunsPage currentUser={currentUser} databaseName={database.name} workflows={workflows} workflowsReady={workflowsReady} />
+          );
         }
-        return selectedWorkflow ? (
-            <WorkflowWorkspace
-              activeTab={selectedWorkflowTab}
-              databaseName={database.name}
-              onExecute={executeWorkflowFromWorkspace}
-              onSave={workflowWorkspace.persistWorkflow}
-              onSaveInstanceConfig={workflowWorkspace.saveSelectedWorkflowInstanceConfig}
-              onSelectRunKey={selectWorkflowRunFromWorkspace}
-              onSelectTab={selectWorkflowTabFromWorkspace}
-              onUpdateScript={workflowWorkspace.updateSelectedWorkflowScript}
-              onSetHistoryRetention={workflowWorkspace.setSelectedWorkflowHistoryRetention}
-              onSetTimeoutSeconds={workflowWorkspace.setSelectedWorkflowTimeoutSeconds}
-              onToggleEnabled={workflowWorkspace.toggleSelectedWorkflowEnabled}
-              language={language}
-              workflowTrigger={workflowTrigger}
-              workflowInstances={workflowInstances}
-              selectedRun={selectedWorkflowRun}
-              workflow={selectedWorkflow}
-              workflowNodes={workflowNodes}
-              workflowRuns={workflowRuns}
-            />
-        ) : (
-          <Page title={t("nav.workflows")}>
-            <Card>
-              <EmptyState icon={Workflow} title={t("empty.noWorkflowTitle")} description={t("empty.noWorkflowDescription")} />
-            </Card>
-          </Page>
+        return (
+          <WorkflowWorkspace
+            busy={workflowWorkspace.busy}
+            currentUser={currentUser}
+            databaseName={database.name}
+            detail={workflowWorkspace.detail}
+            workflows={workflows}
+            workflowsReady={workflowsReady}
+            workflowName={selectedWorkflowName}
+            tab={workflowRoute?.workflowTab ?? "overview"}
+            runID={workflowRoute?.workflowRunID}
+            onDelete={workflowWorkspace.removeWorkflow}
+            onPublish={workflowWorkspace.publishVersion}
+            onRemoveSecret={workflowWorkspace.removeSecret}
+            onRemoveVar={workflowWorkspace.removeVar}
+            onRunStarted={() => void workflowWorkspace.noteRunStarted()}
+            onSaveSecret={workflowWorkspace.saveSecret}
+            onSaveSettings={workflowWorkspace.saveSettings}
+            onSaveVar={workflowWorkspace.saveVar}
+            onSetEnabled={workflowWorkspace.setEnabled}
+          />
         );
       case "app":
         return (

@@ -8,7 +8,7 @@ import {
   type PermissionGrant,
   type RoleDefinition,
   type RoleMember,
-  type WorkflowDefinition
+  type WorkflowSummary
 } from "../api";
 import { compactRoleGrants } from "../permissionState";
 import { Page, SectionHeading } from "../shell/Page";
@@ -30,16 +30,16 @@ type PermissionPanelProps = {
   members: RoleMember[];
   memberOptions: AuthUser[];
   memberUsers: AuthUser[];
-  memberWorkflows: WorkflowDefinition[];
+  memberWorkflows: WorkflowSummary[];
   newMemberQuery: string;
   onAddMember: (user: AuthUser) => void;
-  onAddWorkflowMember: (workflow: WorkflowDefinition) => void;
+  onAddWorkflowMember: (workflow: WorkflowSummary) => void;
   onGrantChange: (scope: PermissionGrant["scope"], resource: string, field: string, level: PermissionGrant["level"]) => void;
   onMemberRemove: (member: RoleMember) => void;
   onNewMemberQueryChange: (value: string) => void;
   onSave: () => void;
   role?: RoleDefinition;
-  workflows: WorkflowDefinition[];
+  workflows: WorkflowSummary[];
 };
 
 /**
@@ -320,7 +320,7 @@ function WorkflowMembers({
           <option value="">{t("permission.addWorkflowMember")}</option>
           {selectable.map((workflow) => (
             <option key={workflow.id} value={String(workflow.id)}>
-              {workflow.name}
+              {workflowLabel(workflow)}
             </option>
           ))}
         </NativeSelect>
@@ -332,7 +332,7 @@ function WorkflowMembers({
           {workflowMembers.map((member) => (
             <MemberRow
               key={member.id}
-              label={workflowByID.get(member.id)?.name ?? `#${member.id}`}
+              label={workflowLabel(workflowByID.get(member.id)) ?? `#${member.id}`}
               icon={<Workflow className="size-3.5" />}
               onRemove={() => onMemberRemove(member)}
             />
@@ -341,6 +341,10 @@ function WorkflowMembers({
       )}
     </MemberSection>
   );
+}
+
+function workflowLabel(workflow: WorkflowSummary | undefined): string | undefined {
+  return workflow ? workflow.title || workflow.name : undefined;
 }
 
 type MatrixTab = "tables" | "workflows" | "apps";
@@ -400,9 +404,9 @@ function PermissionMatrix({
           itemScope="workflow"
           grants={grants}
           items={workflows.map((workflow) => ({
-            key: String(workflow.id ?? workflow.name),
-            label: workflow.name,
-            resource: String(workflow.id ?? 0),
+            key: String(workflow.id),
+            label: workflowLabel(workflow) ?? workflow.name,
+            resource: String(workflow.id),
             field: ""
           }))}
           levelLabels={{ 0: t("permission.workflowLevels.none"), 1: t("permission.workflowLevels.run") }}

@@ -32,7 +32,7 @@ export function appBundle({ database, name, title, heading, sdk = "1.0" }: AppBu
   });
 }
 
-function tarGzip(files: Record<string, string>): Buffer {
+export function tarGzip(files: Record<string, string>): Buffer {
   const blocks: Buffer[] = [];
   for (const [name, text] of Object.entries(files)) {
     const body = Buffer.from(text, "utf8");

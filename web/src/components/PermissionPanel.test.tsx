@@ -2,7 +2,7 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { PermissionPanel, compactRoleGrants } from "./PermissionPanel";
-import type { AppDefinition, PermissionGrant, TableMetadata, WorkflowDefinition } from "../api";
+import type { AppDefinition, PermissionGrant, TableMetadata, WorkflowSummary } from "../api";
 import i18n from "../i18n";
 
 describe("compactRoleGrants", () => {
@@ -71,9 +71,9 @@ const tables: TableMetadata[] = [
   }
 ];
 
-const workflows: WorkflowDefinition[] = [
-  { id: 3, database_name: "workspace", name: "nightly-sync", script: "", secrets: {}, variables: {} },
-  { id: 4, database_name: "workspace", name: "welcome-contact", script: "", secrets: {}, variables: {} }
+const workflows: WorkflowSummary[] = [
+  { id: 3, database_name: "workspace", name: "nightly-sync", title: "" },
+  { id: 4, database_name: "workspace", name: "welcome-contact", title: "" }
 ];
 
 function renderPanel(grants: PermissionGrant[], onGrantChange = vi.fn()) {

@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as XLSX from "xlsx";
 import { appBundle } from "./appBundle";
+import { workflowBundle } from "./workflowBundle";
 
 // Review captures of the redesigned screens. Not an assertion test: it seeds
 // the real backend with realistic sample data, then writes PNGs to
@@ -54,6 +55,21 @@ async function uploadApp(page: Page, name: string, title: string, query = "") {
     throw new Error(`app upload failed: ${response.status()} ${await response.text()}`);
   }
   return ((await response.json()) as { app: { id: number } }).app;
+}
+
+async function pushWorkflow(page: Page, name: string, title: string, release: string, triggers: Record<string, unknown>, query = "?publish=1") {
+  const response = await page.request.post(`/api/databases/${database}/workflows/${name}/versions${query}`, {
+    headers: { "Content-Type": "application/gzip" },
+    data: workflowBundle({ database, name, title, release, triggers })
+  });
+  if (!response.ok()) {
+    throw new Error(`workflow push failed: ${response.status()} ${await response.text()}`);
+  }
+  return ((await response.json()) as { workflow: { id: number } }).workflow;
+}
+
+async function startRun(page: Page, name: string, input: Record<string, unknown>) {
+  return (await post(page, `/api/databases/${database}/workflows/${name}/runs`, { input, wait: true })) as { id: number };
 }
 
 async function shot(page: Page, name: string) {
@@ -182,19 +198,38 @@ async function seed(page: Page) {
     await post(page, `/api/tables/${database}/widgets/rows`, { values: { 名称, sku, 数量, price, 备注 } });
   }
 
-  const welcome = (await post(page, `/api/databases/${database}/workflows`, {
-    name: "welcome-new-contact",
-    script:
-      "function instances(info) {\n  return { greet: 'echo' };\n}\n\nfunction run(info) {\n  return info.instance('greet').exec({ value: info.inputs.name });\n}",
-    secrets: {},
-    variables: {}
-  })) as { id: number };
-  await post(page, `/api/databases/${database}/workflows`, {
-    name: "nightly-stock-report",
-    script: "function instances(info) {\n  return { report: 'echo' };\n}\n\nfunction run(info) {\n  return {};\n}",
-    secrets: {},
-    variables: {}
-  });
+  // Workflows: one with every trigger kind, several versions, runs (one
+  // failed), secrets and vars; a webhook receiver; a disabled report.
+  const followUpTriggers = {
+    start: {
+      kind: "manual",
+      fields: [
+        { name: "orderNo", label: "Order number", type: "string" },
+        { name: "quantity", label: "Quantity", type: "number" },
+        { name: "notify", label: "Notify customer", type: "boolean" }
+      ]
+    },
+    changed: { kind: "recordChanged", table: "orders", operations: ["update"], fields: ["status"] },
+    nightly: { kind: "schedule", cron: "0 9 * * 1-5", timezone: "Asia/Shanghai" },
+    callback: { kind: "webhook", path: "erp/callback" }
+  };
+  await pushWorkflow(page, "order-follow-up", "Order follow-up", "1.0", followUpTriggers, "?message=First%20version&publish=1");
+  await pushWorkflow(page, "order-follow-up", "Order follow-up", "1.1", followUpTriggers, "?message=Retry%20ERP%20calls%20twice&publish=1");
+  const followUp = await pushWorkflow(page, "order-follow-up", "Order follow-up", "1.2", followUpTriggers, "?message=Send%20the%20customer%20notice%20in%20their%20language&publish=1");
+  await pushWorkflow(page, "order-follow-up", "Order follow-up", "1.3", followUpTriggers, "?message=Draft%3A%20batch%20notices");
+  await put(page, `/api/databases/${database}/workflows/order-follow-up/secrets/ERP_TOKEN`, { value: "seed-token" });
+  await put(page, `/api/databases/${database}/workflows/order-follow-up/secrets/SMTP_PASSWORD`, { value: "seed-password" });
+  await put(page, `/api/databases/${database}/workflows/order-follow-up/vars/ERP_BASE_URL`, { value: "https://erp.example.com/api" });
+  await put(page, `/api/databases/${database}/workflows/order-follow-up/vars/REGION`, { value: "eu-west" });
+  await startRun(page, "order-follow-up", { orderNo: "SO-1042", quantity: 2, notify: true });
+  await startRun(page, "order-follow-up", { orderNo: "SO-1044", fail: "ERP answered 503 for SO-1044" });
+  await startRun(page, "order-follow-up", { orderNo: "SO-1047", quantity: 12, notify: false });
+  await pushWorkflow(page, "stock-webhook", "Stock level webhook", "1.0", { levels: { kind: "webhook", path: "stock/levels" } }, "?message=Initial%20version&publish=1");
+  await pushWorkflow(page, "weekly-report", "Weekly report", "1.0", { weekly: { kind: "schedule", cron: "0 8 * * 1", timezone: "Europe/London" }, start: { kind: "manual" } }, "?message=Initial%20version&publish=1");
+  const patched = await page.request.patch(`/api/databases/${database}/workflows/weekly-report`, { data: { enabled: false } });
+  if (!patched.ok()) {
+    throw new Error(`workflow disable failed: ${patched.status()}`);
+  }
 
   await uploadApp(page, "order-desk", "Order desk", "?message=First%20release&publish=1");
   await uploadApp(page, "order-desk", "Order desk", "?message=Adds%20totals%20and%20CSV%20export&publish=1");
@@ -210,7 +245,7 @@ async function seed(page: Page) {
     { scope: "view_set", resource: `${database}.contacts`, field: "", level: 1 },
     { scope: "field_set", resource: `${database}.orders`, field: "", level: 1 },
     { scope: "view_set", resource: `${database}.orders`, field: "", level: 1 },
-    { scope: "workflow", resource: String(welcome.id), field: "", level: 1 },
+    { scope: "workflow", resource: String(followUp.id), field: "", level: 1 },
     { scope: "app", resource: String(orderDesk.app.id), field: "", level: 1 },
     { scope: "app", resource: String(stock.id), field: "", level: 1 },
     { scope: "app", resource: String(visits.id), field: "", level: 1 }
@@ -281,25 +316,34 @@ test("capture redesign review screenshots", async ({ page, browser }) => {
   await page.getByRole("heading", { name: "Manage" }).waitFor();
   await shot(page, "09-admin");
 
-  // Workflow editor: script, settings and instances; then one instance's config.
+  // Workflows: the list, then one workflow's overview, versions, runs with
+  // a run's log, secrets and vars, and the manual run form.
   await page.goto(`/databases/${database}/workflows`);
-  await page.getByLabel("Instances").getByText("greet").waitFor();
-  await page.locator(".monaco-editor").first().waitFor();
-  await shot(page, "10-workflow-editor");
-  await page.getByRole("button", { name: "Workflow nodes" }).click();
-  await page.getByRole("dialog", { name: "Workflow node catalog" }).waitFor();
-  await page.getByRole("button", { name: "table.row.update" }).click();
-  await shot(page, "11-workflow-node-catalog");
-  await page.keyboard.press("Escape");
-
-  // A run of the workflow: runs, steps, and the selected step's payload.
-  await page.getByRole("button", { name: "Run", exact: true }).click();
-  await page.getByText(/Workflow run saved/).first().waitFor();
-  await page.getByRole("tab", { name: "History" }).click();
-  await page.getByLabel("Workflow run nodes").getByRole("button", { name: /greet/ }).click();
-  await page.getByTestId("workflow-run-input-editor").locator(".monaco-editor").waitFor();
-  await page.locator('li[data-state="open"]').first().waitFor({ state: "detached", timeout: 8000 }).catch(() => undefined);
+  await page.getByRole("table", { name: "Workflows" }).waitFor();
+  await shot(page, "10-workflow-list");
+  await page.goto(`/databases/${database}/workflows/order-follow-up`);
+  await page.getByRole("group", { name: "Trigger callback" }).waitFor();
+  await shot(page, "11-workflow-overview");
+  await page.getByRole("tab", { name: "Versions" }).click();
+  await page.getByRole("table", { name: "Versions" }).waitFor();
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await shot(page, "11b-workflow-versions");
+  await page.getByRole("tab", { name: "Runs" }).click();
+  await page.getByRole("button", { name: /^Run \d+, Failed$/ }).click();
+  await page.getByText("giving up").waitFor();
   await shot(page, "12-workflow-run-detail");
+  await page.getByRole("tab", { name: "Secrets & vars" }).click();
+  await page.getByRole("list", { name: "Secrets" }).waitFor();
+  await shot(page, "12b-workflow-secrets-vars");
+  await page.getByRole("button", { name: "Run", exact: true }).click();
+  const runDialog = page.getByRole("dialog", { name: "Run Order follow-up" });
+  await runDialog.getByLabel("Order number").fill("SO-1049");
+  await runDialog.getByLabel("Quantity").fill("4");
+  await runDialog.getByRole("checkbox", { name: "Notify customer" }).check();
+  await runDialog.getByRole("button", { name: "Start run" }).click();
+  await runDialog.getByRole("region", { name: "Run result" }).waitFor();
+  await shot(page, "12c-workflow-manual-run");
+  await page.keyboard.press("Escape");
 
   // A role: access by table, members on the side; then the other tabs.
   await page.goto(`/databases/${database}/permissions/sales`);
@@ -313,7 +357,7 @@ test("capture redesign review screenshots", async ({ page, browser }) => {
   await page.getByLabel("All apps permission").waitFor();
   await shot(page, "15-permissions-apps");
   await page.getByRole("tab", { name: "Workflows" }).click();
-  await page.getByLabel("welcome-new-contact permission").waitFor();
+  await page.getByLabel("Order follow-up permission").waitFor();
   await shot(page, "16-permissions-workflows");
 
   // Remote runners, after generating a token.
@@ -355,9 +399,9 @@ test("capture redesign review screenshots", async ({ page, browser }) => {
   await page.goto(`/databases/${database}/permissions/sales`);
   await page.getByRole("button", { name: "email Update" }).waitFor();
   await shot(page, "22-permissions-dark");
-  await page.goto(`/databases/${database}/workflows`);
-  await page.locator(".monaco-editor").first().waitFor();
-  await shot(page, "23-workflow-editor-dark");
+  await page.goto(`/databases/${database}/workflows/order-follow-up`);
+  await page.getByRole("group", { name: "Trigger callback" }).waitFor();
+  await shot(page, "23-workflow-detail-dark");
   await page.emulateMedia({ colorScheme: "light" });
 
   // Ordinary user: home with granted apps and tables, and their workflows.
@@ -366,7 +410,14 @@ test("capture redesign review screenshots", async ({ page, browser }) => {
   await member.getByRole("heading", { name: "Apps" }).waitFor();
   await shot(member, "03-home-member");
   await member.goto(`/databases/${database}/workflows`);
-  await member.getByRole("table", { name: "Runnable workflows" }).waitFor();
+  await member.getByRole("list", { name: "Runnable workflows" }).waitFor();
+  await member.getByRole("button", { name: "Run Order follow-up" }).click();
+  const memberDialog = member.getByRole("dialog", { name: "Run Order follow-up" });
+  await memberDialog.getByLabel("Order number").fill("SO-1045");
+  await memberDialog.getByRole("button", { name: "Start run" }).click();
+  await memberDialog.getByRole("region", { name: "Run result" }).waitFor();
+  await member.keyboard.press("Escape");
+  await member.getByRole("list", { name: "Your recent runs" }).getByText("Order follow-up").click();
   await shot(member, "24-workflows-member");
   await member.context().close();
 
@@ -384,8 +435,11 @@ test("capture redesign review screenshots", async ({ page, browser }) => {
   await mobile.context().close();
 
   const mobileAdmin = await memberPage(browser, { width: 390, height: 844 }, adminEmail);
-  await mobileAdmin.goto(`/databases/${database}/workflows`);
-  await mobileAdmin.locator(".monaco-editor").first().waitFor();
+  await mobileAdmin.goto(`/databases/${database}/workflows/order-follow-up`);
+  await mobileAdmin.getByRole("group", { name: "Trigger callback" }).waitFor();
   await shot(mobileAdmin, "28-mobile-workflow");
+  await mobileAdmin.goto(`/databases/${database}/workflows`);
+  await mobileAdmin.getByRole("table", { name: "Workflows" }).waitFor();
+  await shot(mobileAdmin, "28b-mobile-workflow-list");
   await mobileAdmin.context().close();
 });

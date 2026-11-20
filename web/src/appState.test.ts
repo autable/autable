@@ -74,20 +74,29 @@ describe("appState", () => {
       tableName: "contacts",
       tableViewName: "active"
     });
-    expect(parseWorkspaceRoute("/databases/workspace/workflows/12")).toEqual({
+    expect(parseWorkspaceRoute("/databases/workspace/workflows")).toEqual({ databaseName: "workspace", view: "workflow" });
+    expect(parseWorkspaceRoute("/databases/workspace/workflows/order-sync")).toEqual({
       databaseName: "workspace",
       view: "workflow",
-      workflowID: 12,
-      workflowTab: "editor",
-      workflowRunKey: undefined
+      workflowName: "order-sync",
+      workflowTab: "overview",
+      workflowRunID: undefined
     });
-    expect(parseWorkspaceRoute("/databases/workspace/workflows/12/history/run%2F1")).toEqual({
+    expect(parseWorkspaceRoute("/databases/workspace/workflows/order-sync/versions")).toEqual({
       databaseName: "workspace",
       view: "workflow",
-      workflowID: 12,
-      workflowTab: "history",
-      workflowRunKey: "run/1"
+      workflowName: "order-sync",
+      workflowTab: "versions",
+      workflowRunID: undefined
     });
+    expect(parseWorkspaceRoute("/databases/workspace/workflows/order-sync/runs/42")).toEqual({
+      databaseName: "workspace",
+      view: "workflow",
+      workflowName: "order-sync",
+      workflowTab: "runs",
+      workflowRunID: 42
+    });
+    expect(parseWorkspaceRoute("/databases/workspace/workflows/order-sync/editor")).toBeNull();
     expect(parseWorkspaceRoute("/databases/workspace/apps")).toEqual({
       databaseName: "workspace",
       view: "app",
@@ -116,16 +125,16 @@ describe("appState", () => {
       tableName: "customer/list",
       tableViewName: "needs review"
     })).toBe("/databases/sales%20ops/tables/customer%2Flist/views/needs%20review");
-    expect(buildWorkspacePath({ databaseName: "workspace", view: "workflow", workflowID: 3 })).toBe(
-      "/databases/workspace/workflows/3"
+    expect(buildWorkspacePath({ databaseName: "workspace", view: "workflow" })).toBe("/databases/workspace/workflows");
+    expect(buildWorkspacePath({ databaseName: "workspace", view: "workflow", workflowName: "order-sync", workflowTab: "overview" })).toBe(
+      "/databases/workspace/workflows/order-sync"
     );
-    expect(buildWorkspacePath({
-      databaseName: "workspace",
-      view: "workflow",
-      workflowID: 3,
-      workflowTab: "history",
-      workflowRunKey: "run/1"
-    })).toBe("/databases/workspace/workflows/3/history/run%2F1");
+    expect(buildWorkspacePath({ databaseName: "workspace", view: "workflow", workflowName: "order-sync", workflowTab: "config" })).toBe(
+      "/databases/workspace/workflows/order-sync/config"
+    );
+    expect(
+      buildWorkspacePath({ databaseName: "workspace", view: "workflow", workflowName: "order-sync", workflowTab: "runs", workflowRunID: 7 })
+    ).toBe("/databases/workspace/workflows/order-sync/runs/7");
     expect(buildWorkspacePath({ databaseName: "workspace", view: "app" })).toBe("/databases/workspace/apps");
     expect(buildWorkspacePath({ databaseName: "sales ops", view: "app", appName: "orders" })).toBe(
       "/databases/sales%20ops/apps/orders"

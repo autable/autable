@@ -103,7 +103,6 @@ export function RunnersPanel({
                           <span className="block truncate text-12 text-muted">
                             {t("runners.details", {
                               version: runner.version,
-                              nodes: runner.node_types.length,
                               connectedAt: formatTime(runner.connected_at)
                             })}
                           </span>

@@ -6,14 +6,11 @@ import {
   Languages,
   LayoutDashboard,
   LogOut,
-  MoreHorizontal,
-  Pencil,
   Plus,
   RefreshCw,
   Server,
   ShieldCheck,
   Table2,
-  Trash2,
   Users,
   Workflow,
   type LucideIcon
@@ -28,9 +25,6 @@ import {
   Badge,
   Button,
   cn,
-  Dialog,
-  DialogClose,
-  DialogContent,
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -39,8 +33,6 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-  Field,
-  Input,
   ThemeToggle,
   Tooltip
 } from "../ui";
@@ -63,7 +55,7 @@ export type SidebarProps = {
   view: WorkspaceViewName;
   tableName: string;
   workflows: WorkflowDefinition[];
-  selectedWorkflowID?: number;
+  selectedWorkflowName?: string;
   roles: RoleDefinition[];
   selectedRoleName?: string;
   newDatabaseName: string;
@@ -72,11 +64,6 @@ export type SidebarProps = {
   newTableName: string;
   onNewTableNameChange: (value: string) => void;
   onCreateTable: () => void;
-  newWorkflowName: string;
-  onNewWorkflowNameChange: (value: string) => void;
-  onCreateWorkflow: () => void;
-  onDeleteWorkflow: (id: number) => void;
-  onRenameWorkflow: (name: string, id: number) => void;
   newRoleName: string;
   onNewRoleNameChange: (value: string) => void;
   onCreateRole: () => void;
@@ -264,141 +251,34 @@ function SubList({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
-function WorkflowItems({
-  database,
-  workflows,
-  selectedWorkflowID,
-  newWorkflowName,
-  onNewWorkflowNameChange,
-  onCreateWorkflow,
-  onDeleteWorkflow,
-  onRenameWorkflow,
-  onNavigated
-}: SidebarProps) {
+// Workflows are created with `autablectl workflow push`; the sidebar only
+// lists them, each with its enabled state.
+function WorkflowItems({ database, workflows, selectedWorkflowName, onNavigated }: SidebarProps) {
   const { t } = useTranslation();
-  const [rename, setRename] = useState<{ id: number; name: string } | null>(null);
-  const [pendingDelete, setPendingDelete] = useState<WorkflowDefinition | null>(null);
+  if (workflows.length === 0) {
+    return null;
+  }
   return (
     <SubList label={t("nav.workflowList")}>
       {workflows.map((workflow) => {
-        const id = workflow.id ?? 0;
-        const active = id === selectedWorkflowID;
-        const enabled = workflow.enabled ?? true;
+        const active = workflow.name === selectedWorkflowName;
         return (
-          <div key={id || workflow.name} className="group relative flex">
-            <RouteLink
-              route={{ databaseName: database.name, view: "workflow", workflowID: id }}
-              onClick={onNavigated}
-              aria-current={active ? "page" : undefined}
-              className={cn(navRowClass, subRowClass, "flex-1 pr-8", active ? navRowActiveClass : navRowIdleClass)}
-            >
-              <span
-                aria-hidden
-                title={enabled ? t("common.enabled") : t("common.disabled")}
-                className={cn("size-1.5 shrink-0 rounded-full", enabled ? "bg-success" : "bg-subtle")}
-              />
-              <span className={cn("min-w-0 truncate", !enabled && "text-muted")}>{workflow.name}</span>
-            </RouteLink>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant="quiet"
-                  size="icon-sm"
-                  aria-label={t("nav.workflowActions", { id })}
-                  className={cn(
-                    "absolute right-0.5 top-0 size-7 opacity-0 focus-visible:opacity-100 group-hover:opacity-100 data-[state=open]:opacity-100",
-                    active && "opacity-100"
-                  )}
-                >
-                  <MoreHorizontal />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" onCloseAutoFocus={(event) => event.preventDefault()}>
-                <DropdownMenuItem onSelect={() => setRename({ id, name: workflow.name })}>
-                  <Pencil />
-                  {t("common.rename")}
-                </DropdownMenuItem>
-                <DropdownMenuItem danger onSelect={() => setPendingDelete(workflow)}>
-                  <Trash2 />
-                  {t("common.delete")}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
+          <RouteLink
+            key={workflow.id}
+            route={{ databaseName: database.name, view: "workflow", workflowName: workflow.name }}
+            onClick={onNavigated}
+            aria-current={active ? "page" : undefined}
+            className={cn(navRowClass, subRowClass, active ? navRowActiveClass : navRowIdleClass)}
+          >
+            <span
+              aria-hidden
+              title={workflow.enabled ? t("workflow.enabled") : t("workflow.disabled")}
+              className={cn("size-1.5 shrink-0 rounded-full", workflow.enabled ? "bg-success" : "bg-subtle")}
+            />
+            <span className={cn("min-w-0 truncate", !workflow.enabled && "text-muted")}>{workflow.title || workflow.name}</span>
+          </RouteLink>
         );
       })}
-      <CreateNamePopover
-        title={t("nav.newWorkflowTitle")}
-        inputLabel={t("nav.newWorkflowName")}
-        placeholder={t("nav.placeholderWorkflow")}
-        name={newWorkflowName}
-        onNameChange={onNewWorkflowNameChange}
-        onSave={onCreateWorkflow}
-        trigger={
-          <button type="button" className={cn(navRowClass, subRowClass, navRowIdleClass, "text-subtle")} aria-label={t("nav.createWorkflow")}>
-            <Plus className="size-3.5 shrink-0" aria-hidden />
-            {t("nav.newWorkflowTitle")}
-          </button>
-        }
-      />
-      <Dialog open={rename !== null} onOpenChange={(open) => !open && setRename(null)}>
-        <DialogContent
-          title={t("nav.renameWorkflow")}
-          footer={
-            <>
-              <DialogClose asChild>
-                <Button>{t("common.cancel")}</Button>
-              </DialogClose>
-              <Button
-                variant="cta"
-                onClick={() => {
-                  if (rename) {
-                    onRenameWorkflow(rename.name, rename.id);
-                  }
-                  setRename(null);
-                }}
-              >
-                {t("common.save")}
-              </Button>
-            </>
-          }
-        >
-          <Field label={t("nav.name")}>
-            {(field) => (
-              <Input
-                {...field}
-                aria-label={t("nav.renameResource")}
-                value={rename?.name ?? ""}
-                onChange={(event) => setRename((current) => (current ? { ...current, name: event.target.value } : current))}
-              />
-            )}
-          </Field>
-        </DialogContent>
-      </Dialog>
-      <Dialog open={pendingDelete !== null} onOpenChange={(open) => !open && setPendingDelete(null)}>
-        <DialogContent
-          title={t("nav.deleteWorkflowTitle")}
-          description={t("nav.deleteWorkflowConfirm", { name: pendingDelete?.name ?? "" })}
-          footer={
-            <>
-              <DialogClose asChild>
-                <Button>{t("common.cancel")}</Button>
-              </DialogClose>
-              <Button
-                variant="danger"
-                onClick={() => {
-                  if (pendingDelete?.id) {
-                    onDeleteWorkflow(pendingDelete.id);
-                  }
-                  setPendingDelete(null);
-                }}
-              >
-                {t("common.delete")}
-              </Button>
-            </>
-          }
-        />
-      </Dialog>
     </SubList>
   );
 }
