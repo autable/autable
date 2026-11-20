@@ -212,9 +212,6 @@ jobs:
           - target: linux-amd64
             goos: linux
             goarch: amd64
-          - target: linux-arm64
-            goos: linux
-            goarch: arm64
           - target: windows-amd64
             goos: windows
             goarch: amd64
