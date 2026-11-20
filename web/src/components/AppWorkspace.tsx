@@ -189,6 +189,7 @@ function AppCommandHelp({ databaseName }: { databaseName: string }) {
       <CommandStep label={t("app.stepInit")} command={`autablectl app init my-app --database ${databaseName} --name my-app`} />
       <CommandStep label={t("app.stepPush")} command={"cd my-app\nautablectl app push --publish"} />
       <CommandStep label={t("app.skillHint")} command="autablectl skill install" />
+      <CommandStep label={t("app.skillExportHint")} command="autablectl skill export ./autable-skill" />
     </div>
   );
 }

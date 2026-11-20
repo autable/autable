@@ -227,6 +227,7 @@ function WorkflowCommandHelp({ databaseName }: { databaseName: string }) {
       <CommandStep label={t("workflow.stepInit")} command={`autablectl workflow init my-workflow --database ${databaseName} --name my-workflow`} />
       <CommandStep label={t("workflow.stepPush")} command={"cd my-workflow\nautablectl workflow push --publish"} />
       <CommandStep label={t("workflow.skillHint")} command="autablectl skill install" />
+      <CommandStep label={t("workflow.skillExportHint")} command="autablectl skill export ./autable-skill" />
     </div>
   );
 }

@@ -270,14 +270,40 @@ repo/
 ### Agent skill
 
 ```sh
-autablectl skill install                  # ~/.claude/skills/autable/SKILL.md
-autablectl skill install --dir ./skills/autable
-autablectl skill show                     # print it
+autablectl skill export ./autable-skill            # write the package into a new or empty directory
+autablectl skill export ./autable-skill --force    # replace a previously exported package
+autablectl skill export --tar autable-skill.tar.gz # the same package as a .tar.gz
+autablectl skill install                           # into ~/.claude/skills/autable
+autablectl skill install ./skills/autable          # into another skills directory
+autablectl skill show                              # print SKILL.md
 ```
 
-The skill is a page of rules for changing a live server plus a map of where
-each behavior lives in the source, linked at the release matching the binary.
-It deliberately does not restate behavior: the source is the reference.
+The agent skill is a self-contained package for coding agents that cannot
+see autable's source:
+
+- `SKILL.md` at the root: the rules for changing a live server (admin gate,
+  discover first, secrets, verify before reporting), the working loops for
+  workflows, apps, and libraries, and an index of the reference files.
+- `reference/`: this documentation (`cli.md`, `query.md`, `http-api.md`,
+  `permissions.md`, `design/*.md`), the app SDK (`app-sdk/`) and workflow
+  SDK (`workflow-sdk/`) sources exactly as `app sdk` and `workflow sdk`
+  vendor them, and the `AGENTS.md` of the app, workflow, and library
+  project templates (`templates/`).
+- `VERSION`, and a line at the top of `SKILL.md`, name the autablectl
+  release that wrote it. Every file is generated from what is compiled into
+  the binary, so it matches that release; export it again after upgrading.
+
+`export` refuses a non-empty directory unless `--force`, which replaces
+`SKILL.md`, `VERSION`, and `reference/` and leaves other files alone.
+`install` does the same into a directory that is empty or already holds the
+autable skill, and refuses any other. The package is a few hundred KB, has
+no scripts, and contains no inline shell commands.
+
+To distribute the skill to a team, upload the exported directory (or the
+`.tar.gz`, whose root is the package) to a skill-distribution system that
+accepts a folder with `SKILL.md` at its root, for example a team policy that
+assembles uploaded skills into the agents' plugins. Re-export and upload it
+again after each autablectl upgrade so the reference matches the server.
 
 ### Files and raw API access
 

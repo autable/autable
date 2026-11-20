@@ -70,8 +70,9 @@ func init() {
 		"app publish":           {"app publish DATABASE NAME VERSION", "make VERSION the one users get", runAppPublish},
 		"app rollback":          {"app rollback DATABASE NAME", "publish the newest version below the current one", runAppRollback},
 		"app pull":              {"app pull DATABASE NAME DIR [--version N]", "download a version's source into an empty DIR", runAppPull},
-		"skill show":            {"skill show", "print the agent skill (rules plus a map of the source)", runSkillShow},
-		"skill install":         {"skill install [--dir DIR]", "write the agent skill to DIR/SKILL.md (default ~/.claude/skills/autable)", runSkillInstall},
+		"skill show":            {"skill show", "print the agent skill's SKILL.md", runSkillShow},
+		"skill export":          {"skill export [DIR] [--tar FILE] [--force]", "write the self-contained agent skill package (SKILL.md plus reference/) for upload", runSkillExport},
+		"skill install":         {"skill install [DIR]", "install the agent skill package into DIR (default ~/.claude/skills/autable)", runSkillInstall},
 	}
 }
 

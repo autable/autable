@@ -1046,6 +1046,7 @@ describe("App", () => {
     expect(screen.getByText("autablectl app init my-app --database workspace --name my-app")).toBeInTheDocument();
     expect(screen.getByText(/autablectl app push --publish/)).toBeInTheDocument();
     expect(screen.getByText("autablectl skill install")).toBeInTheDocument();
+    expect(screen.getByText("autablectl skill export ./autable-skill")).toBeInTheDocument();
   });
 
   it("shows app versions newest first with preview, publish, rollback and source actions", async () => {

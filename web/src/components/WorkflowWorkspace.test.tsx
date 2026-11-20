@@ -94,6 +94,7 @@ describe("WorkflowWorkspace", () => {
     expect(screen.getByText("autablectl workflow init my-workflow --database ops --name my-workflow")).toBeInTheDocument();
     expect(screen.getByText(/autablectl workflow push --publish/)).toBeInTheDocument();
     expect(screen.getByText("autablectl skill install")).toBeInTheDocument();
+    expect(screen.getByText("autablectl skill export ./autable-skill")).toBeInTheDocument();
   });
 
   it("details triggers with a copyable webhook URL and edits the settings", async () => {
