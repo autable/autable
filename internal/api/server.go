@@ -1,13 +1,12 @@
 package api
 
 import (
+	"bytes"
 	"context"
-	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"mime"
 	"net/http"
 	"net/url"
@@ -29,40 +28,27 @@ import (
 	"autable/internal/runnerhub"
 	"autable/internal/systemdb"
 	"autable/internal/table"
-	"autable/internal/workflow"
-	"autable/internal/workflow/nodes"
 )
 
 type Server struct {
-	catalogMu          sync.RWMutex
-	catalog            metadata.Catalog
-	metadataPath       string
-	openDatabase       func(context.Context, string) error
-	codeFiles          codeFileStore
-	appBuilds          appBuildCache
-	repositorySync     repositorySyncer
-	system             *systemdb.DB
-	tables             *table.Service
-	history            history.Store
-	runner             *workflow.Runner
-	runnerHub          *runnerhub.Hub
-	files              FileStore
-	fileUploadLimit    int64
-	auth               config.AuthConfig
-	publicURL          string
-	workflowWorkers    map[string]*workflowEventWorker
-	workflowRunWorkers map[int64]*workflowRunWorker
-	workflowWorker     context.Context
-	workflowWorkerMu   sync.Mutex
-	cliCodes           cliAuthCodes
-	mux                *http.ServeMux
-}
-
-type codeFileStore interface {
-	SaveWorkflowScript(context.Context, systemdb.WorkflowDefinition) error
-	LoadWorkflowScript(context.Context, systemdb.WorkflowDefinition) (string, bool, error)
-	DeleteWorkflowScript(context.Context, systemdb.WorkflowDefinition) error
-	WorkflowScriptPath(systemdb.WorkflowDefinition) string
+	catalogMu       sync.RWMutex
+	catalog         metadata.Catalog
+	metadataPath    string
+	openDatabase    func(context.Context, string) error
+	appBuilds       appBuildCache
+	repositorySync  repositorySyncer
+	repositoryRoot  string
+	system          *systemdb.DB
+	tables          *table.Service
+	history         history.Store
+	runnerHub       *runnerhub.Hub
+	files           FileStore
+	fileUploadLimit int64
+	auth            config.AuthConfig
+	publicURL       string
+	workflows       *workflowEngine
+	cliCodes        cliAuthCodes
+	mux             *http.ServeMux
 }
 
 type repositorySyncer interface {
@@ -175,97 +161,23 @@ type oidcEmailClaims struct {
 	Name          string `json:"name,omitempty"`
 }
 
-type workflowRunRequest struct {
-	Inputs map[string]any `json:"inputs"`
-}
-
 type fieldPositionRequest struct {
 	Position string `json:"position,omitempty"`
 	Before   string `json:"before,omitempty"`
 	After    string `json:"after,omitempty"`
 }
 
-type workflowRunResponse struct {
-	HistoryKey string              `json:"history_key"`
-	Run        history.WorkflowRun `json:"run"`
-	Summary    bool                `json:"summary,omitempty"`
-}
-
-const (
-	defaultWorkflowRunListLimit = 100
-	maxWorkflowRunListLimit     = 500
-)
-
-type workflowDefinitionResponse struct {
-	ID                   int64             `json:"id"`
-	DatabaseName         string            `json:"database_name"`
-	Name                 string            `json:"name"`
-	Script               string            `json:"script"`
-	Enabled              bool              `json:"enabled"`
-	CreatorID            string            `json:"creator_id,omitempty"`
-	Secrets              map[string]int    `json:"secrets"`
-	Variables            map[string]string `json:"variables"`
-	Runners              map[string]string `json:"runners"`
-	HistoryRetentionDays *int64            `json:"history_retention_days"`
-	TimeoutSeconds       *int64            `json:"timeout_seconds"`
-	PermissionLevel      permission.Level  `json:"permission_level,omitempty"`
-	CreatedAt            int64             `json:"created_at"`
-	UpdatedAt            int64             `json:"updated_at"`
-}
-
 type roleDefinitionResponse struct {
-	ID              int64                        `json:"id"`
-	DatabaseName    string                       `json:"database_name"`
-	Name            string                       `json:"name"`
-	SubjectID       string                       `json:"subject_id"`
-	Grants          []permission.Grant           `json:"grants"`
-	Members         []systemdb.RoleMember        `json:"members"`
-	MemberUsers     []userResponse               `json:"member_users"`
-	MemberWorkflows []workflowDefinitionResponse `json:"member_workflows"`
-	CreatedAt       int64                        `json:"created_at"`
-	UpdatedAt       int64                        `json:"updated_at"`
-}
-
-type workflowEventKind string
-
-const (
-	workflowEventRowChange workflowEventKind = "row_change"
-	workflowEventSchedule  workflowEventKind = "schedule"
-	workflowEventWebhook   workflowEventKind = "webhook"
-)
-
-type workflowEvent struct {
-	Kind         workflowEventKind
-	DatabaseName string
-	HistoryKey   string
-	RowChange    history.RowChange
-	ScheduledAt  time.Time
-	// WorkflowID targets webhook events at exactly one workflow.
-	WorkflowID     int64
-	WebhookToken   string
-	WebhookPayload map[string]any
-	ReceivedAt     int64
-}
-
-type workflowEventWorker struct {
-	dbName string
-	events chan workflowEvent
-}
-
-// workflowRunJob is one triggered execution handed from the per-database
-// event matcher to the per-workflow run worker.
-type workflowRunJob struct {
-	definition  workflow.Definition
-	inputs      map[string]any
-	scheduledAt time.Time
-	isSchedule  bool
-}
-
-// workflowRunWorker serializes runs of a single workflow: one workflow never
-// runs concurrently with itself (upsert-style syncs would race), while
-// different workflows run in parallel.
-type workflowRunWorker struct {
-	jobs chan workflowRunJob
+	ID              int64                 `json:"id"`
+	DatabaseName    string                `json:"database_name"`
+	Name            string                `json:"name"`
+	SubjectID       string                `json:"subject_id"`
+	Grants          []permission.Grant    `json:"grants"`
+	Members         []systemdb.RoleMember `json:"members"`
+	MemberUsers     []userResponse        `json:"member_users"`
+	MemberWorkflows []workflowSummary     `json:"member_workflows"`
+	CreatedAt       int64                 `json:"created_at"`
+	UpdatedAt       int64                 `json:"updated_at"`
 }
 
 type roleGrantsRequest struct {
@@ -289,56 +201,23 @@ const (
 )
 
 func NewServer(catalog metadata.Catalog, system *systemdb.DB, tables *table.Service, historyStore history.Store) *Server {
-	return NewServerWithWorkflowRunner(
-		catalog,
-		system,
-		tables,
-		historyStore,
-		nil,
-	)
-}
-
-func NewServerWithWorkflowRunner(catalog metadata.Catalog, system *systemdb.DB, tables *table.Service, historyStore history.Store, runner *workflow.Runner) *Server {
-	return NewServerWithWorkflowRunnerAndAuth(catalog, system, tables, historyStore, runner, defaultServerAuthConfig())
+	return NewServerWithAuthConfig(catalog, system, tables, historyStore, defaultServerAuthConfig())
 }
 
 func NewServerWithAuthConfig(catalog metadata.Catalog, system *systemdb.DB, tables *table.Service, historyStore history.Store, authConfig config.AuthConfig) *Server {
-	return NewServerWithWorkflowRunnerAndAuth(
-		catalog,
-		system,
-		tables,
-		historyStore,
-		nil,
-		authConfig,
-	)
-}
-
-func NewServerWithWorkflowRunnerAndAuth(catalog metadata.Catalog, system *systemdb.DB, tables *table.Service, historyStore history.Store, runner *workflow.Runner, authConfig config.AuthConfig) *Server {
 	server := &Server{
 		catalog: catalog,
 		system:  system,
 		tables:  tables,
 		history: historyStore,
-		runner:  runner,
 		auth:    cloneAuthConfig(authConfig),
 		mux:     http.NewServeMux(),
 	}
-	if runner == nil {
-		runner = workflow.NewRunner(historyStore, nodes.All(nodes.Dependencies{
-			History: historyStore,
-			Autable: server.workflowAutableService(),
-		})...)
-	} else {
-		for _, node := range nodes.AutableNodes(server.workflowAutableService()) {
-			runner.Register(node)
-		}
-	}
-	server.runner = runner
 	server.runnerHub = runnerhub.New(func(ctx context.Context, token string) (string, bool, error) {
 		return system.LookupRunnerToken(ctx, token)
-	}, runnerhub.DefaultJobTimeout)
-	server.runner.SetRemoteDispatcher(server.runnerHub)
-	server.tables.SetRowChangeHandler(server.dispatchRowChangeEvent)
+	})
+	server.workflows = newWorkflowEngine(server)
+	server.tables.SetRowChangeHandler(server.workflows.dispatchRowChange)
 	server.tables.SetIdentityResolver(server.actorQueryIdentity)
 	server.routes()
 	return server
@@ -350,10 +229,6 @@ func (server *Server) EnableMetadataWrites(path string) {
 
 func (server *Server) SetDatabaseOpener(openDatabase func(context.Context, string) error) {
 	server.openDatabase = openDatabase
-}
-
-func (server *Server) SetCodeFileStore(store codeFileStore) {
-	server.codeFiles = store
 }
 
 func (server *Server) SetRepositorySync(syncer repositorySyncer) {
@@ -409,6 +284,7 @@ func (server *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (server *Server) routes() {
 	server.appRoutes()
+	server.workflowRoutes()
 	server.mux.HandleFunc("GET /api/auth/config", server.handleAuthConfig)
 	server.mux.HandleFunc("POST /api/auth/register", server.handleRegister)
 	server.mux.HandleFunc("POST /api/auth/login", server.handleLogin)
@@ -432,20 +308,12 @@ func (server *Server) routes() {
 	server.mux.HandleFunc("GET /api/tables/{database}/{table}/rows", server.tableRoute(server.handleListRows))
 	server.mux.HandleFunc("GET /api/tables/{database}/{table}/rows/{recordID}/history", server.handleRowHistory)
 	server.mux.HandleFunc("POST /api/databases", server.handleCreateDatabase)
-	server.mux.HandleFunc("POST /api/databases/{database}/workflows/{workflowID}/webhook", server.handleWorkflowWebhookRoute)
 	server.mux.HandleFunc("GET /api/databases/{database}/{resource}", server.handleGetDatabaseResource)
 	server.mux.HandleFunc("POST /api/databases/{database}/{resource}", server.handlePostDatabaseResource)
 	server.mux.HandleFunc("PUT /api/databases/{database}/tables/{table}", server.handleUpdateTableMetadataRoute)
 	server.mux.HandleFunc("PUT /api/databases/{database}/roles/{role}/{action}", server.handleRoleAction)
 	server.mux.HandleFunc("PATCH /api/databases/{database}/tables/{table}/fields/{field}/position", server.handleMoveFieldPosition)
-	server.mux.HandleFunc("GET /api/workflow/nodes", server.handleWorkflowNodes)
 	server.mux.HandleFunc("GET /api/runner/ws", server.runnerHub.ServeWS)
-	server.mux.HandleFunc("POST /api/workflows", server.handleSaveWorkflow)
-	server.mux.HandleFunc("POST /api/workflows/{workflowID}/runs", server.handleRunWorkflow)
-	server.mux.HandleFunc("GET /api/workflows/{workflowID}", server.handleGetWorkflow)
-	server.mux.HandleFunc("GET /api/workflows/{workflowID}/runs", server.handleWorkflowRunsRoute)
-	server.mux.HandleFunc("GET /api/workflows/{workflowID}/runs/{historyKey}", server.handleWorkflowRunRoute)
-	server.mux.HandleFunc("DELETE /api/workflows/{workflowID}", server.handleDeleteWorkflow)
 	server.mux.HandleFunc("POST /api/files", server.handleUploadFile)
 	server.mux.HandleFunc("POST /api/files/metadata", server.handleFileMetadata)
 	server.mux.HandleFunc("GET /api/files/{fileID}", server.handleDownloadFile)
@@ -903,7 +771,7 @@ func (server *Server) handleCreateFields(w http.ResponseWriter, r *http.Request,
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	fields, err := workflowFieldsInput(request)
+	fields, err := fieldsInput(request)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
@@ -913,7 +781,7 @@ func (server *Server) handleCreateFields(w http.ResponseWriter, r *http.Request,
 		writeTableMutationError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, workflowFieldMutationResponse(mutation))
+	writeJSON(w, http.StatusOK, fieldMutationResponse(mutation))
 }
 
 func (server *Server) createTableRowAs(ctx context.Context, actorID string, dbName string, tableName string, values map[string]any) (table.Row, error) {
@@ -975,10 +843,10 @@ func (server *Server) upsertTableRowAs(ctx context.Context, actorID string, dbNa
 	return server.upsertTableRow(ctx, server.catalogSnapshot(), perms, actorID, isAdmin, dbName, tableName, matchField, values)
 }
 
-func (server *Server) createTableFieldsAs(ctx context.Context, actorID string, dbName string, tableName string, fields []metadata.Field) (workflowFieldMutation, error) {
+func (server *Server) createTableFieldsAs(ctx context.Context, actorID string, dbName string, tableName string, fields []metadata.Field) (fieldMutation, error) {
 	perms, isAdmin, err := server.tablePermissions(ctx, actorID, dbName)
 	if err != nil {
-		return workflowFieldMutation{}, err
+		return fieldMutation{}, err
 	}
 	if !isAdmin {
 		// Schema is admin-only. Anyone else (every workflow subject
@@ -987,10 +855,10 @@ func (server *Server) createTableFieldsAs(ctx context.Context, actorID string, d
 		// added them.
 		tableMeta, ok := server.catalogSnapshot().Table(dbName, tableName)
 		if !ok {
-			return workflowFieldMutation{}, fmt.Errorf("database %q table %q not found", dbName, tableName)
+			return fieldMutation{}, fmt.Errorf("database %q table %q not found", dbName, tableName)
 		}
 		if !canSeeTableMetadata(perms, actorID, dbName, tableMeta) {
-			return workflowFieldMutation{}, table.ErrPermissionDenied
+			return fieldMutation{}, table.ErrPermissionDenied
 		}
 	}
 	return server.addTableFields(ctx, dbName, tableName, fields, isAdmin)
@@ -1131,101 +999,51 @@ func (server *Server) handleRowHistory(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if _, ok := server.catalogSnapshot().Table(dbName, tableName); !ok {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("table %s.%s not found", dbName, tableName))
-		return
-	}
-	perms, err := server.system.EffectiveGrantsForSubject(r.Context(), actorID)
+	changes, err := server.rowHistoryAs(r.Context(), actorID, dbName, tableName, recordID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
+		writeTableMutationError(w, err)
 		return
 	}
-	isAdmin := server.isAdmin(r.Context(), actorID)
+	writeJSON(w, http.StatusOK, changes)
+}
+
+// rowHistoryAs returns a row's changes, oldest first, for the actor. Row
+// history is row-level: the record must be inside the actor's row set, and
+// historical values are redacted to readable fields — the same double gate
+// as live reads.
+func (server *Server) rowHistoryAs(ctx context.Context, actorID, dbName, tableName string, recordID int64) ([]rowHistoryResponse, error) {
+	if _, ok := server.catalogSnapshot().Table(dbName, tableName); !ok {
+		return nil, fmt.Errorf("table %s.%s not found", dbName, tableName)
+	}
+	perms, isAdmin, err := server.tablePermissions(ctx, actorID, dbName)
+	if err != nil {
+		return nil, err
+	}
 	resource := dbName + "." + tableName
-	// Row history is row-level: the record must be inside the actor's row
-	// set, and historical values are redacted to readable fields — the
-	// same double gate as live reads.
 	if !isAdmin {
-		inRowSet, err := server.tables.RowInActorRowSet(r.Context(), server.catalogSnapshot(), perms, actorID, false, dbName, tableName, recordID)
+		inRowSet, err := server.tables.RowInActorRowSet(ctx, server.catalogSnapshot(), perms, actorID, false, dbName, tableName, recordID)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, err)
-			return
+			return nil, err
 		}
 		if !inRowSet {
-			writeError(w, http.StatusNotFound, fmt.Errorf("%w: %d", table.ErrRecordNotFound, recordID))
-			return
+			return nil, fmt.Errorf("%w: %d", table.ErrRecordNotFound, recordID)
 		}
 	}
-	entries, err := server.history.GetPrefix(r.Context(), history.RowPrefix(dbName, tableName, recordID))
+	entries, err := server.history.GetPrefix(ctx, history.RowPrefix(dbName, tableName, recordID))
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
+		return nil, err
 	}
 	changes := make([]rowHistoryResponse, 0, len(entries))
 	for _, entry := range entries {
 		change, err := history.DecodeRowChange(entry)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, err)
-			return
+			return nil, err
 		}
 		change.Values = readableHistoryValues(change.Values, perms, actorID, isAdmin, resource)
 		change.Diff = readableHistoryDiff(change.Diff, perms, actorID, isAdmin, resource)
 		changes = append(changes, rowHistoryResponse{HistoryKey: entry.Key, RowChange: change})
 	}
-	writeJSON(w, http.StatusOK, changes)
-}
-
-func (server *Server) handleSaveWorkflow(w http.ResponseWriter, r *http.Request) {
-	actorID, ok := server.requireUserID(w, r)
-	if !ok {
-		return
-	}
-	if !server.requireAdmin(w, r, actorID) {
-		return
-	}
-	var workflow systemdb.WorkflowDefinition
-	if err := readJSON(r, &workflow); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	server.saveWorkflowRequest(w, r, actorID, workflow)
-}
-
-// saveWorkflowRequest creates or updates a workflow for an admin.
-func (server *Server) saveWorkflowRequest(w http.ResponseWriter, r *http.Request, actorID string, workflow systemdb.WorkflowDefinition) {
-	if workflow.ID == 0 && !server.databaseExists(workflow.DatabaseName) {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("database %q not found", workflow.DatabaseName))
-		return
-	}
-	if workflow.ID != 0 && !server.requireExistingWorkflowDatabase(w, r, workflow.ID, workflow.DatabaseName) {
-		return
-	}
-	if workflow.ID == 0 {
-		workflow.CreatorID = actorID
-	}
-	if err := server.validateRunnerBindings(r.Context(), workflow); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	if workflow.HistoryRetentionDays != nil && *workflow.HistoryRetentionDays < 0 {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("history_retention_days must be at least 0, got %d", *workflow.HistoryRetentionDays))
-		return
-	}
-	if workflow.TimeoutSeconds != nil && *workflow.TimeoutSeconds <= 0 {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("timeout_seconds must be greater than 0, got %d", *workflow.TimeoutSeconds))
-		return
-	}
-	saved, err := server.saveWorkflowDefinition(r.Context(), actorID, workflow)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	saved.PermissionLevel = resourcePermissionLevel(true)
-	writeJSON(w, http.StatusCreated, workflowResponseFromDefinition(saved))
-}
-
-func (server *Server) handleWorkflowNodes(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, server.runner.NodeInfos())
+	return changes, nil
 }
 
 func (server *Server) handleGetDatabaseResource(w http.ResponseWriter, r *http.Request) {
@@ -1285,17 +1103,6 @@ func (server *Server) handlePostDatabaseResource(w http.ResponseWriter, r *http.
 		}
 		server.notifyRepositoryChange(r.Context(), actorID, "metadata.table.create", "created table "+dbName+"/"+tableMeta.Name, server.metadataPath)
 		writeJSON(w, http.StatusCreated, tableMeta)
-	case "workflows":
-		if !server.requireAdmin(w, r, actorID) {
-			return
-		}
-		var workflow systemdb.WorkflowDefinition
-		if err := readJSON(r, &workflow); err != nil {
-			writeError(w, http.StatusBadRequest, err)
-			return
-		}
-		workflow.DatabaseName = dbName
-		server.saveWorkflowRequest(w, r, actorID, workflow)
 	case "roles":
 		if !server.requireAdmin(w, r, actorID) {
 			return
@@ -1442,599 +1249,6 @@ func (server *Server) handleUpdateTableMetadata(w http.ResponseWriter, r *http.R
 	writeJSON(w, http.StatusOK, visibleTableMetadata(permission.Set{}, actorID, dbName, true, updated))
 }
 
-func (server *Server) handleWorkflowRunsRoute(w http.ResponseWriter, r *http.Request) {
-	workflowID, ok := pathID(r, "workflowID")
-	if !ok {
-		http.NotFound(w, r)
-		return
-	}
-	server.handleWorkflowRuns(w, r, workflowID)
-}
-
-func (server *Server) handleWorkflowRunRoute(w http.ResponseWriter, r *http.Request) {
-	workflowID, ok := pathID(r, "workflowID")
-	historyKey := r.PathValue("historyKey")
-	if !ok || historyKey == "" {
-		http.NotFound(w, r)
-		return
-	}
-	server.handleWorkflowRun(w, r, workflowID, historyKey)
-}
-
-func (server *Server) handleGetWorkflow(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(r, "workflowID")
-	if !ok {
-		http.NotFound(w, r)
-		return
-	}
-	actorID, ok := server.requireUserID(w, r)
-	if !ok {
-		return
-	}
-	if !server.requireAdmin(w, r, actorID) {
-		return
-	}
-	workflow, err := server.system.Workflow(r.Context(), id)
-	if err != nil {
-		writeError(w, http.StatusNotFound, err)
-		return
-	}
-	workflow, err = server.workflowDefinitionWithFileScript(r.Context(), workflow)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	workflow.PermissionLevel = resourcePermissionLevel(true)
-	writeJSON(w, http.StatusOK, workflowResponseFromDefinition(workflow))
-}
-
-func (server *Server) handleRunWorkflow(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(r, "workflowID")
-	if !ok {
-		http.NotFound(w, r)
-		return
-	}
-	actorID, ok := server.requireUserID(w, r)
-	if !ok {
-		return
-	}
-	// Running is the one workflow capability that can be granted. The run
-	// executes as the workflow's own subject, not as the caller.
-	perms, err := server.system.EffectiveGrantsForSubject(r.Context(), actorID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	isAdmin := server.isAdmin(r.Context(), actorID)
-	if !canRunWorkflow(perms, actorID, isAdmin, id) {
-		writeError(w, http.StatusForbidden, table.ErrPermissionDenied)
-		return
-	}
-	var request workflowRunRequest
-	if err := readJSON(r, &request); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	workflowDefinition, err := server.system.Workflow(r.Context(), id)
-	if err != nil {
-		writeError(w, http.StatusNotFound, err)
-		return
-	}
-	if !isAdmin && !workflowDefinition.Enabled {
-		// Disabling is the admin's switch; a run grant does not bypass it.
-		// Admins keep running disabled workflows from the editor to test.
-		writeError(w, http.StatusConflict, errors.New("workflow is disabled"))
-		return
-	}
-	workflowDefinition, err = server.workflowDefinitionWithFileScript(r.Context(), workflowDefinition)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	// A manual run must not die with the HTTP request: proxies cut idle
-	// connections long before slow syncs finish, which used to cancel the
-	// request context and abort the run mid-flight. The run keeps its own
-	// lifetime; the response is simply lost if the client went away.
-	run, key, err := server.runner.Run(context.WithoutCancel(r.Context()), workflow.Definition{
-		ID:                   workflowDefinition.ID,
-		DatabaseName:         workflowDefinition.DatabaseName,
-		Script:               workflowDefinition.Script,
-		CreatorID:            systemdb.WorkflowSubjectID(workflowDefinition.ID),
-		Secrets:              workflowDefinition.Secrets,
-		Variables:            workflowDefinition.Variables,
-		Runners:              workflowDefinition.Runners,
-		HistoryRetentionDays: workflowDefinition.HistoryRetentionDays,
-		TimeoutSeconds:       workflowDefinition.TimeoutSeconds,
-	}, request.Inputs)
-	status := http.StatusCreated
-	if err != nil {
-		status = http.StatusBadRequest
-	}
-	if !isAdmin {
-		// Steps carry every node's input and output, unfiltered; run
-		// history is admin-only, so callers only get the run's result.
-		run.Steps = []history.StepRecord{}
-	}
-	writeJSON(w, status, workflowRunResponse{HistoryKey: key, Run: run})
-}
-
-func (server *Server) handleWorkflowRuns(w http.ResponseWriter, r *http.Request, workflowID int64) {
-	if r.Method != http.MethodGet {
-		http.NotFound(w, r)
-		return
-	}
-	actorID, ok := server.requireUserID(w, r)
-	if !ok {
-		return
-	}
-	// Run history holds the unfiltered data the workflow processed.
-	if !server.requireAdmin(w, r, actorID) {
-		return
-	}
-	keys, err := server.history.GetPrefixKeysLimit(r.Context(), history.WorkflowPrefix(workflowID), workflowRunListLimit(r))
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	runs := make([]workflowRunResponse, 0, len(keys))
-	for _, key := range keys {
-		parsedWorkflowID, timestamp, err := history.ParseWorkflowKey(key)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, err)
-			return
-		}
-		if parsedWorkflowID != workflowID {
-			writeError(w, http.StatusInternalServerError, fmt.Errorf("workflow history key %q does not match workflow %d", key, workflowID))
-			return
-		}
-		runs = append(runs, workflowRunResponse{HistoryKey: key, Run: history.WorkflowRun{
-			WorkflowID: workflowID,
-			Timestamp:  timestamp,
-			Steps:      []history.StepRecord{},
-		}, Summary: true})
-	}
-	writeJSON(w, http.StatusOK, runs)
-}
-
-func (server *Server) handleWorkflowRun(w http.ResponseWriter, r *http.Request, workflowID int64, historyKey string) {
-	if r.Method != http.MethodGet {
-		http.NotFound(w, r)
-		return
-	}
-	actorID, ok := server.requireUserID(w, r)
-	if !ok {
-		return
-	}
-	// Run history holds the unfiltered data the workflow processed.
-	if !server.requireAdmin(w, r, actorID) {
-		return
-	}
-	parsedWorkflowID, _, err := history.ParseWorkflowKey(historyKey)
-	if err != nil || parsedWorkflowID != workflowID {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("invalid workflow history key %q", historyKey))
-		return
-	}
-	entry, err := server.history.Get(r.Context(), historyKey)
-	if errors.Is(err, history.ErrNotFound) {
-		writeError(w, http.StatusNotFound, err)
-		return
-	}
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	run, err := history.DecodeWorkflowRun(entry)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, workflowRunResponse{HistoryKey: historyKey, Run: run})
-}
-
-func (server *Server) StartWorkflowWorkers(ctx context.Context) {
-	server.workflowWorkerMu.Lock()
-	defer server.workflowWorkerMu.Unlock()
-	if server.workflowWorker != nil {
-		return
-	}
-	server.workflowWorker = ctx
-	server.workflowWorkers = map[string]*workflowEventWorker{}
-	server.workflowRunWorkers = map[int64]*workflowRunWorker{}
-	for _, database := range server.catalogSnapshot().Databases {
-		server.startWorkflowWorkerLocked(database.Name)
-	}
-}
-
-func (server *Server) startWorkflowRunWorkerLocked(workflowID int64) *workflowRunWorker {
-	if worker, ok := server.workflowRunWorkers[workflowID]; ok {
-		return worker
-	}
-	worker := &workflowRunWorker{jobs: make(chan workflowRunJob, 256)}
-	server.workflowRunWorkers[workflowID] = worker
-	go func(ctx context.Context) {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case job := <-worker.jobs:
-				server.executeWorkflowRun(ctx, job)
-			}
-		}
-	}(server.workflowWorker)
-	return worker
-}
-
-// enqueueWorkflowRun hands the run to the workflow's own worker so a slow
-// workflow only delays itself. Without workers (tests, shutdown) the run
-// executes inline.
-func (server *Server) enqueueWorkflowRun(ctx context.Context, job workflowRunJob) {
-	server.workflowWorkerMu.Lock()
-	if server.workflowWorker == nil {
-		server.workflowWorkerMu.Unlock()
-		server.executeWorkflowRun(ctx, job)
-		return
-	}
-	worker := server.startWorkflowRunWorkerLocked(job.definition.ID)
-	workerCtx := server.workflowWorker
-	server.workflowWorkerMu.Unlock()
-	select {
-	case worker.jobs <- job:
-	case <-ctx.Done():
-	case <-workerCtx.Done():
-	}
-}
-
-func (server *Server) executeWorkflowRun(ctx context.Context, job workflowRunJob) {
-	if job.isSchedule {
-		_, _, _ = server.runner.RunAt(ctx, job.definition, job.inputs, job.scheduledAt)
-		return
-	}
-	_, _, _ = server.runner.Run(ctx, job.definition, job.inputs)
-}
-
-func (server *Server) startWorkflowWorkerLocked(dbName string) *workflowEventWorker {
-	if worker, ok := server.workflowWorkers[dbName]; ok {
-		return worker
-	}
-	worker := &workflowEventWorker{
-		dbName: dbName,
-		events: make(chan workflowEvent, 256),
-	}
-	server.workflowWorkers[dbName] = worker
-	go func(ctx context.Context) {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case event := <-worker.events:
-				server.processWorkflowEvent(ctx, event)
-			}
-		}
-	}(server.workflowWorker)
-	return worker
-}
-
-func (server *Server) dispatchWorkflowEvent(ctx context.Context, event workflowEvent) {
-	if server.enqueueWorkflowEvent(ctx, event) {
-		return
-	}
-	server.processWorkflowEvent(ctx, event)
-}
-
-func (server *Server) enqueueWorkflowEvent(ctx context.Context, event workflowEvent) bool {
-	server.workflowWorkerMu.Lock()
-	if server.workflowWorker == nil {
-		server.workflowWorkerMu.Unlock()
-		return false
-	}
-	worker := server.startWorkflowWorkerLocked(event.DatabaseName)
-	server.workflowWorkerMu.Unlock()
-	select {
-	case worker.events <- event:
-		return true
-	case <-ctx.Done():
-		return true
-	case <-server.workflowWorker.Done():
-		return true
-	}
-}
-
-func (server *Server) StartWorkflowScheduler(ctx context.Context, interval time.Duration) {
-	if interval <= 0 {
-		return
-	}
-	go func() {
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case scheduledAt := <-ticker.C:
-				server.dispatchScheduleTickAll(ctx, scheduledAt.UTC())
-			}
-		}
-	}()
-}
-
-// StartHistoryCleanup deletes expired workflow run history immediately and
-// then on the given interval, compacting the store after any deletion.
-func (server *Server) StartHistoryCleanup(ctx context.Context, interval time.Duration) {
-	if interval <= 0 {
-		return
-	}
-	go func() {
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
-		for {
-			if err := server.CleanupWorkflowHistory(ctx); err != nil && ctx.Err() == nil {
-				slog.Error("workflow history cleanup failed", "error", err)
-			}
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-			}
-		}
-	}()
-}
-
-// CleanupWorkflowHistory deletes run history older than each workflow's
-// retention window; workflows without a retention setting keep everything.
-func (server *Server) CleanupWorkflowHistory(ctx context.Context) error {
-	now := time.Now().UTC().UnixMilli()
-	deleted := 0
-	for _, database := range server.catalogSnapshot().Databases {
-		workflows, err := server.system.Workflows(ctx, database.Name)
-		if err != nil {
-			return err
-		}
-		for _, workflowDefinition := range workflows {
-			if workflowDefinition.HistoryRetentionDays == nil {
-				continue
-			}
-			prefix := history.WorkflowPrefix(workflowDefinition.ID)
-			cutoff := now - *workflowDefinition.HistoryRetentionDays*24*time.Hour.Milliseconds()
-			end := history.WorkflowKey(workflowDefinition.ID, cutoff)
-			if *workflowDefinition.HistoryRetentionDays == 0 {
-				// Zero keeps nothing: also drop runs recorded this instant.
-				end = prefix + "\xff"
-			}
-			count, err := server.history.DeletePrefixBefore(ctx, prefix, end)
-			if err != nil {
-				return err
-			}
-			deleted += count
-		}
-	}
-	if deleted == 0 {
-		return nil
-	}
-	if compacter, ok := server.history.(history.Compacter); ok {
-		if err := compacter.Compact(ctx); err != nil {
-			return err
-		}
-	}
-	slog.Info("workflow history cleanup finished", "deleted", deleted)
-	return nil
-}
-
-func (server *Server) dispatchScheduleTickAll(ctx context.Context, scheduledAt time.Time) {
-	for _, database := range server.catalogSnapshot().Databases {
-		server.dispatchScheduleTick(ctx, database.Name, scheduledAt)
-	}
-}
-
-func (server *Server) dispatchScheduleTick(ctx context.Context, dbName string, scheduledAt time.Time) {
-	server.dispatchWorkflowEvent(ctx, workflowEvent{
-		Kind:         workflowEventSchedule,
-		DatabaseName: dbName,
-		ScheduledAt:  scheduledAt.UTC(),
-	})
-}
-
-func (server *Server) scheduleTriggerMatches(ctx context.Context, workflowID int64, declaration workflow.TriggerDeclaration, scheduledAt time.Time) bool {
-	if declaration.Node != "time.schedule" {
-		return false
-	}
-	latestRun, hasLatestRun, err := server.latestWorkflowRunTimestamp(ctx, workflowID)
-	if err != nil {
-		return false
-	}
-	hasSchedule := false
-	if intervalMS, ok := triggerInt64Param(declaration.Params, "interval_ms"); ok && intervalMS > 0 {
-		hasSchedule = true
-		if !hasLatestRun || scheduledAt.Sub(latestRun) >= time.Duration(intervalMS)*time.Millisecond {
-			return true
-		}
-	}
-	if dailyAt, ok := triggerStringParam(declaration.Params, "daily_at"); ok {
-		hasSchedule = true
-		if dailyScheduleDue(scheduledAt, latestRun, hasLatestRun, dailyAt) {
-			return true
-		}
-	}
-	return !hasSchedule
-}
-
-func (server *Server) latestWorkflowRunTimestamp(ctx context.Context, workflowID int64) (time.Time, bool, error) {
-	keys, err := server.history.GetPrefixKeysLimit(ctx, history.WorkflowPrefix(workflowID), 1)
-	if err != nil {
-		return time.Time{}, false, err
-	}
-	var latest int64
-	for _, key := range keys {
-		parsedWorkflowID, timestamp, err := history.ParseWorkflowKey(key)
-		if err != nil {
-			return time.Time{}, false, err
-		}
-		if parsedWorkflowID != workflowID {
-			return time.Time{}, false, fmt.Errorf("workflow history key %q does not match workflow %d", key, workflowID)
-		}
-		if timestamp > latest {
-			latest = timestamp
-		}
-	}
-	if latest == 0 {
-		return time.Time{}, false, nil
-	}
-	return time.UnixMilli(latest).UTC(), true, nil
-}
-
-func workflowRunListLimit(r *http.Request) int {
-	limit := defaultWorkflowRunListLimit
-	if value := strings.TrimSpace(r.URL.Query().Get("limit")); value != "" {
-		parsed, err := strconv.Atoi(value)
-		if err == nil {
-			limit = parsed
-		}
-	}
-	if limit <= 0 {
-		return defaultWorkflowRunListLimit
-	}
-	if limit > maxWorkflowRunListLimit {
-		return maxWorkflowRunListLimit
-	}
-	return limit
-}
-
-func dailyScheduleDue(scheduledAt, latestRun time.Time, hasLatestRun bool, dailyAt string) bool {
-	parsed, err := time.Parse("15:04", dailyAt)
-	if err != nil {
-		return false
-	}
-	scheduledAt = scheduledAt.UTC()
-	dueAt := time.Date(scheduledAt.Year(), scheduledAt.Month(), scheduledAt.Day(), parsed.Hour(), parsed.Minute(), 0, 0, time.UTC)
-	if scheduledAt.Before(dueAt) {
-		return false
-	}
-	return !hasLatestRun || latestRun.Before(dueAt)
-}
-
-func (server *Server) dispatchRowChangeEvent(ctx context.Context, historyKey string, change history.RowChange) {
-	server.dispatchWorkflowEvent(ctx, workflowEvent{
-		Kind:         workflowEventRowChange,
-		DatabaseName: change.Database,
-		HistoryKey:   historyKey,
-		RowChange:    change,
-	})
-}
-
-func (server *Server) processWorkflowEvent(ctx context.Context, event workflowEvent) {
-	workflows, err := server.system.Workflows(ctx, event.DatabaseName)
-	if err != nil {
-		return
-	}
-	workflows, err = server.workflowDefinitionsWithFileScripts(ctx, workflows)
-	if err != nil {
-		return
-	}
-	for _, workflowDefinition := range workflows {
-		if !workflowDefinition.Enabled {
-			continue
-		}
-		definition := workflow.Definition{
-			ID:                   workflowDefinition.ID,
-			DatabaseName:         workflowDefinition.DatabaseName,
-			Script:               workflowDefinition.Script,
-			CreatorID:            systemdb.WorkflowSubjectID(workflowDefinition.ID),
-			Secrets:              workflowDefinition.Secrets,
-			Variables:            workflowDefinition.Variables,
-			Runners:              workflowDefinition.Runners,
-			HistoryRetentionDays: workflowDefinition.HistoryRetentionDays,
-			TimeoutSeconds:       workflowDefinition.TimeoutSeconds,
-		}
-		declaration, err := server.runner.Trigger(ctx, definition)
-		if errors.Is(err, workflow.ErrMissingTrigger) {
-			continue
-		}
-		if err != nil {
-			slog.Debug("workflow trigger declaration failed", "workflow", workflowDefinition.ID, "error", err)
-			continue
-		}
-		if !server.workflowEventMayRun(ctx, workflowDefinition.ID, declaration, event) {
-			continue
-		}
-		triggerEvent, ok := server.workflowTriggerEventForSubject(ctx, definition.CreatorID, event)
-		if !ok {
-			slog.Debug("workflow trigger event withheld: subject cannot read the change",
-				"workflow", workflowDefinition.ID, "table", event.RowChange.Table, "subject", definition.CreatorID)
-			continue
-		}
-		inputs, matched, err := server.runner.TriggerRunInputs(ctx, definition, declaration, triggerEvent)
-		if err != nil {
-			slog.Debug("workflow trigger inputs failed", "workflow", workflowDefinition.ID, "error", err)
-			continue
-		}
-		if !matched {
-			continue
-		}
-		server.enqueueWorkflowRun(ctx, workflowRunJob{
-			definition:  definition,
-			inputs:      inputs,
-			scheduledAt: event.ScheduledAt,
-			isSchedule:  event.Kind == workflowEventSchedule,
-		})
-	}
-}
-
-func (server *Server) workflowEventMayRun(ctx context.Context, workflowID int64, declaration workflow.TriggerDeclaration, event workflowEvent) bool {
-	switch event.Kind {
-	case workflowEventSchedule:
-		return server.scheduleTriggerMatches(ctx, workflowID, declaration, event.ScheduledAt)
-	case workflowEventRowChange:
-		return declaration.Node == "table.record.changed"
-	case workflowEventWebhook:
-		return event.WorkflowID == workflowID && declaration.Node == "webhook.trigger"
-	default:
-		return false
-	}
-}
-
-func workflowTriggerEvent(event workflowEvent) workflow.TriggerEvent {
-	switch event.Kind {
-	case workflowEventSchedule:
-		return workflow.TriggerEvent{
-			Kind:        "schedule",
-			ScheduledAt: event.ScheduledAt.UTC().UnixMilli(),
-		}
-	case workflowEventRowChange:
-		return workflow.TriggerEvent{
-			Kind:       "row_change",
-			HistoryKey: event.HistoryKey,
-			RowChange:  event.RowChange,
-		}
-	case workflowEventWebhook:
-		return workflow.TriggerEvent{
-			Kind: "webhook",
-			Webhook: workflow.WebhookEvent{
-				Token:      event.WebhookToken,
-				Payload:    event.WebhookPayload,
-				ReceivedAt: event.ReceivedAt,
-			},
-		}
-	default:
-		return workflow.TriggerEvent{}
-	}
-}
-
-func (server *Server) workflowTriggerEventForSubject(ctx context.Context, subjectID string, event workflowEvent) (workflow.TriggerEvent, bool) {
-	switch event.Kind {
-	case workflowEventSchedule, workflowEventWebhook:
-		return workflowTriggerEvent(event), true
-	case workflowEventRowChange:
-		change, ok := server.readableRowChangeForSubject(ctx, subjectID, event.RowChange)
-		if !ok {
-			return workflow.TriggerEvent{}, false
-		}
-		next := event
-		next.RowChange = change
-		return workflowTriggerEvent(next), true
-	default:
-		return workflow.TriggerEvent{}, false
-	}
-}
-
 func (server *Server) readableRowChangeForSubject(ctx context.Context, subjectID string, change history.RowChange) (history.RowChange, bool) {
 	perms, isAdmin, err := server.tablePermissions(ctx, subjectID, change.Database)
 	if err != nil {
@@ -2082,150 +1296,6 @@ func filterRowChangeDiff(diff history.RowDiff, readable map[string]struct{}) his
 		}
 	}
 	return filtered
-}
-
-func triggerStringParam(params map[string]any, key string) (string, bool) {
-	value, ok := params[key].(string)
-	return value, ok && value != ""
-}
-
-func triggerInt64Param(params map[string]any, key string) (int64, bool) {
-	switch value := params[key].(type) {
-	case int:
-		return int64(value), true
-	case int64:
-		return value, true
-	case float64:
-		return int64(value), true
-	case json.Number:
-		parsed, err := value.Int64()
-		return parsed, err == nil
-	default:
-		return 0, false
-	}
-}
-
-func (server *Server) handleDeleteWorkflow(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(r, "workflowID")
-	if !ok {
-		http.NotFound(w, r)
-		return
-	}
-	actorID, ok := server.requireUserID(w, r)
-	if !ok {
-		return
-	}
-	if !server.requireAdmin(w, r, actorID) {
-		return
-	}
-	workflow, err := server.system.Workflow(r.Context(), id)
-	if err != nil {
-		writeError(w, http.StatusNotFound, err)
-		return
-	}
-	if err := server.system.DeleteWorkflow(r.Context(), id); err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	if server.codeFiles != nil {
-		if err := server.codeFiles.DeleteWorkflowScript(r.Context(), workflow); err != nil {
-			writeError(w, http.StatusInternalServerError, err)
-			return
-		}
-		server.notifyRepositoryChange(r.Context(), actorID, "workflow.delete", "deleted workflow "+workflow.DatabaseName+"/"+workflow.Name, server.codeFiles.WorkflowScriptPath(workflow))
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-const maxWebhookBodyBytes = 1 << 20
-
-// handleWorkflowWebhookRoute is registered with a wildcard pattern; webhooks
-// authenticate with their shared token instead of a session.
-func (server *Server) handleWorkflowWebhookRoute(w http.ResponseWriter, r *http.Request) {
-	workflowID, err := strconv.ParseInt(r.PathValue("workflowID"), 10, 64)
-	if err != nil || workflowID <= 0 {
-		http.NotFound(w, r)
-		return
-	}
-	server.handleWorkflowWebhook(w, r, r.PathValue("database"), workflowID)
-}
-
-type workflowWebhookRequest struct {
-	Token   string         `json:"token"`
-	Payload map[string]any `json:"payload"`
-}
-
-// handleWorkflowWebhook lets external systems push events into a workflow.
-// The shared token configured on the webhook trigger instance is the only
-// credential; no session is involved.
-func (server *Server) handleWorkflowWebhook(w http.ResponseWriter, r *http.Request, dbName string, workflowID int64) {
-	r.Body = http.MaxBytesReader(w, r.Body, maxWebhookBodyBytes)
-	// Webhook senders often omit or mislabel the content type; the token in
-	// the body is the credential, so the JSON content-type rule of readJSON
-	// does not apply.
-	var request workflowWebhookRequest
-	if err := decodeJSON(r, &request); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	if request.Token == "" {
-		writeError(w, http.StatusUnauthorized, errors.New("webhook token is required"))
-		return
-	}
-	workflowDefinition, err := server.system.Workflow(r.Context(), workflowID)
-	if err != nil || workflowDefinition.DatabaseName != dbName {
-		writeError(w, http.StatusNotFound, fmt.Errorf("workflow %d not found in database %q", workflowID, dbName))
-		return
-	}
-	if !workflowDefinition.Enabled {
-		writeError(w, http.StatusBadRequest, errors.New("workflow is disabled"))
-		return
-	}
-	workflowDefinition, err = server.workflowDefinitionWithFileScript(r.Context(), workflowDefinition)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	definition := workflow.Definition{
-		ID:                   workflowDefinition.ID,
-		DatabaseName:         workflowDefinition.DatabaseName,
-		Script:               workflowDefinition.Script,
-		CreatorID:            systemdb.WorkflowSubjectID(workflowDefinition.ID),
-		Secrets:              workflowDefinition.Secrets,
-		Variables:            workflowDefinition.Variables,
-		Runners:              workflowDefinition.Runners,
-		HistoryRetentionDays: workflowDefinition.HistoryRetentionDays,
-		TimeoutSeconds:       workflowDefinition.TimeoutSeconds,
-	}
-	declaration, err := server.runner.Trigger(r.Context(), definition)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	if declaration.Node != "webhook.trigger" {
-		writeError(w, http.StatusBadRequest, errors.New("workflow trigger is not a webhook"))
-		return
-	}
-	configured := strings.TrimSpace(definition.Secrets[declaration.Instance+".token"])
-	if configured == "" {
-		writeError(w, http.StatusUnauthorized, errors.New("webhook token is not configured on the trigger instance"))
-		return
-	}
-	if subtle.ConstantTimeCompare([]byte(configured), []byte(request.Token)) != 1 {
-		writeError(w, http.StatusUnauthorized, errors.New("invalid webhook token"))
-		return
-	}
-	server.dispatchWorkflowEvent(r.Context(), workflowEvent{
-		Kind:           workflowEventWebhook,
-		DatabaseName:   dbName,
-		WorkflowID:     workflowID,
-		WebhookToken:   request.Token,
-		WebhookPayload: request.Payload,
-		ReceivedAt:     time.Now().UTC().UnixMilli(),
-	})
-	// 200 instead of 202: webhook senders like DingTalk's HTTP connector
-	// treat any non-200 status as a delivery failure and retry.
-	writeJSON(w, http.StatusOK, map[string]any{"accepted": true})
 }
 
 // readJSON decodes a JSON request body, which must be labelled
@@ -2783,10 +1853,10 @@ func (server *Server) validateGrantResource(ctx context.Context, dbName string, 
 	return nil
 }
 
-func workflowByGrantResource(ctx context.Context, system *systemdb.DB, resource string) (systemdb.WorkflowDefinition, error) {
+func workflowByGrantResource(ctx context.Context, system *systemdb.DB, resource string) (systemdb.Workflow, error) {
 	id, err := strconv.ParseInt(resource, 10, 64)
 	if err != nil {
-		return systemdb.WorkflowDefinition{}, fmt.Errorf("grant workflow resource %q must be an id", resource)
+		return systemdb.Workflow{}, fmt.Errorf("grant workflow resource %q must be an id", resource)
 	}
 	return system.Workflow(ctx, id)
 }
@@ -2797,70 +1867,6 @@ func appByGrantResource(ctx context.Context, system *systemdb.DB, resource strin
 		return systemdb.AppDefinition{}, fmt.Errorf("grant app resource %q must be an id", resource)
 	}
 	return system.App(ctx, id)
-}
-
-func (server *Server) requireExistingWorkflowDatabase(w http.ResponseWriter, r *http.Request, id int64, dbName string) bool {
-	if dbName == "" {
-		writeError(w, http.StatusBadRequest, errors.New("database_name is required"))
-		return false
-	}
-	workflowDefinition, err := server.system.Workflow(r.Context(), id)
-	if err != nil {
-		writeError(w, http.StatusNotFound, err)
-		return false
-	}
-	if workflowDefinition.DatabaseName != dbName {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("workflow %d belongs to database %q, not %q", id, workflowDefinition.DatabaseName, dbName))
-		return false
-	}
-	return true
-}
-
-// handleListWorkflows lists the workflows of a database: admins get every
-// definition; anyone else only the enabled workflows they may run, reduced
-// to id and name — scripts, secrets, variables and settings are admin-only.
-func (server *Server) handleListWorkflows(w http.ResponseWriter, r *http.Request, actorID, dbName string) {
-	workflows, err := server.system.Workflows(r.Context(), dbName)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	if server.isAdmin(r.Context(), actorID) {
-		workflows, err = server.workflowDefinitionsWithFileScripts(r.Context(), workflows)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, err)
-			return
-		}
-		for index := range workflows {
-			workflows[index].PermissionLevel = resourcePermissionLevel(true)
-		}
-		writeJSON(w, http.StatusOK, workflowResponsesFromDefinitions(workflows))
-		return
-	}
-	perms, err := server.system.EffectiveGrantsForSubject(r.Context(), actorID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	runnable := make([]systemdb.WorkflowDefinition, 0, len(workflows))
-	for _, workflow := range workflows {
-		if !workflow.Enabled || !canRunWorkflow(perms, actorID, false, workflow.ID) {
-			continue
-		}
-		runnable = append(runnable, systemdb.WorkflowDefinition{
-			ID:              workflow.ID,
-			DatabaseName:    workflow.DatabaseName,
-			Name:            workflow.Name,
-			Enabled:         workflow.Enabled,
-			Secrets:         map[string]string{},
-			Variables:       map[string]string{},
-			Runners:         map[string]string{},
-			PermissionLevel: resourcePermissionLevel(false),
-			CreatedAt:       workflow.CreatedAt,
-			UpdatedAt:       workflow.UpdatedAt,
-		})
-	}
-	writeJSON(w, http.StatusOK, workflowResponsesFromDefinitions(runnable))
 }
 
 // filterOpenableApps keeps the apps the actor may open and annotates them
@@ -2904,101 +1910,6 @@ func readableHistoryDiff(diff history.RowDiff, perms permission.Set, actorID str
 	return readable
 }
 
-func (server *Server) workflowDefinitionsWithFileScripts(ctx context.Context, workflows []systemdb.WorkflowDefinition) ([]systemdb.WorkflowDefinition, error) {
-	if server.codeFiles == nil {
-		return workflows, nil
-	}
-	loaded := make([]systemdb.WorkflowDefinition, 0, len(workflows))
-	for _, workflow := range workflows {
-		updated, err := server.workflowDefinitionWithFileScript(ctx, workflow)
-		if err != nil {
-			return nil, err
-		}
-		loaded = append(loaded, updated)
-	}
-	return loaded, nil
-}
-
-func (server *Server) workflowDefinitionWithFileScript(ctx context.Context, workflow systemdb.WorkflowDefinition) (systemdb.WorkflowDefinition, error) {
-	if server.codeFiles == nil {
-		return workflow, nil
-	}
-	script, ok, err := server.codeFiles.LoadWorkflowScript(ctx, workflow)
-	if err != nil {
-		return systemdb.WorkflowDefinition{}, err
-	}
-	if ok {
-		workflow.Script = script
-	}
-	return workflow, nil
-}
-
-func (server *Server) saveWorkflowDefinition(ctx context.Context, actorID string, workflow systemdb.WorkflowDefinition) (systemdb.WorkflowDefinition, error) {
-	var previous *systemdb.WorkflowDefinition
-	if workflow.ID != 0 {
-		existing, err := server.system.Workflow(ctx, workflow.ID)
-		if err != nil {
-			return systemdb.WorkflowDefinition{}, err
-		}
-		previous = &existing
-	}
-	saved, err := server.system.SaveWorkflow(ctx, workflow)
-	if err != nil {
-		return systemdb.WorkflowDefinition{}, err
-	}
-	if server.codeFiles == nil {
-		return saved, nil
-	}
-	paths := []string{server.codeFiles.WorkflowScriptPath(saved)}
-	if err := server.codeFiles.SaveWorkflowScript(ctx, saved); err != nil {
-		return systemdb.WorkflowDefinition{}, err
-	}
-	if previous != nil && (previous.DatabaseName != saved.DatabaseName || previous.Name != saved.Name) {
-		paths = append(paths, server.codeFiles.WorkflowScriptPath(*previous))
-		if err := server.codeFiles.DeleteWorkflowScript(ctx, *previous); err != nil {
-			return systemdb.WorkflowDefinition{}, err
-		}
-	}
-	summary := "saved workflow " + saved.DatabaseName + "/" + saved.Name
-	action := "workflow.save"
-	if previous == nil {
-		summary = "created workflow " + saved.DatabaseName + "/" + saved.Name
-		action = "workflow.create"
-	} else if previous.DatabaseName != saved.DatabaseName || previous.Name != saved.Name {
-		summary = "renamed workflow " + previous.DatabaseName + "/" + previous.Name + " to " + saved.DatabaseName + "/" + saved.Name
-		action = "workflow.rename"
-	}
-	server.notifyRepositoryChange(ctx, actorID, action, summary, paths...)
-	return saved, nil
-}
-
-func workflowResponsesFromDefinitions(workflows []systemdb.WorkflowDefinition) []workflowDefinitionResponse {
-	responses := make([]workflowDefinitionResponse, 0, len(workflows))
-	for _, workflow := range workflows {
-		responses = append(responses, workflowResponseFromDefinition(workflow))
-	}
-	return responses
-}
-
-func workflowResponseFromDefinition(workflow systemdb.WorkflowDefinition) workflowDefinitionResponse {
-	return workflowDefinitionResponse{
-		ID:                   workflow.ID,
-		DatabaseName:         workflow.DatabaseName,
-		Name:                 workflow.Name,
-		Script:               workflow.Script,
-		Enabled:              workflow.Enabled,
-		CreatorID:            workflow.CreatorID,
-		Secrets:              secretLengths(workflow.Secrets),
-		Variables:            workflow.Variables,
-		Runners:              workflow.Runners,
-		HistoryRetentionDays: workflow.HistoryRetentionDays,
-		TimeoutSeconds:       workflow.TimeoutSeconds,
-		PermissionLevel:      workflow.PermissionLevel,
-		CreatedAt:            workflow.CreatedAt,
-		UpdatedAt:            workflow.UpdatedAt,
-	}
-}
-
 func (server *Server) roleResponses(ctx context.Context, roles []systemdb.RoleDefinition) ([]roleDefinitionResponse, error) {
 	responses := make([]roleDefinitionResponse, 0, len(roles))
 	for _, role := range roles {
@@ -3013,7 +1924,7 @@ func (server *Server) roleResponses(ctx context.Context, roles []systemdb.RoleDe
 
 func (server *Server) roleResponse(ctx context.Context, role systemdb.RoleDefinition) (roleDefinitionResponse, error) {
 	memberUsers := make([]userResponse, 0, len(role.Members))
-	memberWorkflows := make([]workflowDefinitionResponse, 0, len(role.Members))
+	memberWorkflows := make([]workflowSummary, 0, len(role.Members))
 	for _, member := range role.Members {
 		switch member.Type {
 		case "user":
@@ -3031,7 +1942,7 @@ func (server *Server) roleResponse(ctx context.Context, role systemdb.RoleDefini
 			if err != nil {
 				return roleDefinitionResponse{}, err
 			}
-			memberWorkflows = append(memberWorkflows, workflowResponseFromDefinition(workflow))
+			memberWorkflows = append(memberWorkflows, workflowSummaryOf(workflow))
 		}
 	}
 	return roleDefinitionResponse{
@@ -3046,14 +1957,6 @@ func (server *Server) roleResponse(ctx context.Context, role systemdb.RoleDefini
 		CreatedAt:       role.CreatedAt,
 		UpdatedAt:       role.UpdatedAt,
 	}, nil
-}
-
-func secretLengths(secrets map[string]string) map[string]int {
-	lengths := map[string]int{}
-	for key, value := range secrets {
-		lengths[key] = len(value)
-	}
-	return lengths
 }
 
 func resourceID(id int64) string {
@@ -3340,21 +2243,48 @@ func (server *Server) handleUploadFile(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	record, err := server.storeFile(r.Context(), actorID, dbName, tableName, recordID, header.Filename, header.Header.Get("Content-Type"), header.Size, file)
+	if err != nil {
+		writeFileStoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, record)
+}
+
+var (
+	errUnknownFileTable = errors.New("unknown table")
+	errFileObjectStore  = errors.New("store file object")
+)
+
+func writeFileStoreError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, table.ErrPermissionDenied):
+		writeError(w, http.StatusForbidden, err)
+	case errors.Is(err, errUnknownFileTable):
+		writeError(w, http.StatusBadRequest, err)
+	case errors.Is(err, errFileObjectStore):
+		writeError(w, http.StatusBadGateway, err)
+	default:
+		writeError(w, http.StatusInternalServerError, err)
+	}
+}
+
+// storeFile records and stores an upload by actor for a table (and
+// optionally the row it is for); the file stays unbound until a row's file
+// field references it.
+func (server *Server) storeFile(ctx context.Context, actorID, dbName, tableName string, recordID int64, name, contentType string, size int64, body io.Reader) (systemdb.FileRecord, error) {
 	if _, ok := server.catalogSnapshot().Table(dbName, tableName); !ok {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("table %s.%s does not exist", dbName, tableName))
-		return
+		return systemdb.FileRecord{}, fmt.Errorf("%w: table %s.%s does not exist", errUnknownFileTable, dbName, tableName)
 	}
-	if !server.canAccessTableFiles(r.Context(), actorID, dbName, tableName) {
-		writeError(w, http.StatusForbidden, table.ErrPermissionDenied)
-		return
+	if !server.canAccessTableFiles(ctx, actorID, dbName, tableName) {
+		return systemdb.FileRecord{}, table.ErrPermissionDenied
 	}
-	contentType := header.Header.Get("Content-Type")
 	if contentType == "" {
 		contentType = "application/octet-stream"
 	}
-	record, err := server.system.CreateFile(r.Context(), systemdb.FileRecord{
-		Name:         sanitizeFileName(header.Filename),
-		Size:         header.Size,
+	record, err := server.system.CreateFile(ctx, systemdb.FileRecord{
+		Name:         sanitizeFileName(name),
+		Size:         size,
 		ContentType:  contentType,
 		CreatorID:    actorID,
 		DatabaseName: dbName,
@@ -3362,14 +2292,20 @@ func (server *Server) handleUploadFile(w http.ResponseWriter, r *http.Request) {
 		RecordID:     recordID,
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
+		return systemdb.FileRecord{}, err
 	}
-	if err := server.files.Put(r.Context(), record.ID, record.Name, record.ContentType, record.Size, file); err != nil {
-		writeError(w, http.StatusBadGateway, fmt.Errorf("store file object: %w", err))
-		return
+	if err := server.files.Put(ctx, record.ID, record.Name, record.ContentType, record.Size, body); err != nil {
+		return systemdb.FileRecord{}, fmt.Errorf("%w: %w", errFileObjectStore, err)
 	}
-	writeJSON(w, http.StatusCreated, record)
+	return record, nil
+}
+
+// storeFileAs is storeFile for in-memory content (workflow uploads).
+func (server *Server) storeFileAs(ctx context.Context, actorID, dbName, tableName string, recordID int64, name, contentType string, data []byte) (systemdb.FileRecord, error) {
+	if recordID < 0 {
+		return systemdb.FileRecord{}, fmt.Errorf("record_id must not be negative, got %d", recordID)
+	}
+	return server.storeFile(ctx, actorID, dbName, tableName, recordID, name, contentType, int64(len(data)), bytes.NewReader(data))
 }
 
 type fileMetadataRequest struct {
@@ -3386,22 +2322,31 @@ func (server *Server) handleFileMetadata(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	records := make([]systemdb.FileRecord, 0, len(request.IDs))
-	for _, id := range request.IDs {
-		record, err := server.system.File(r.Context(), id)
+	records, err := server.fileMetadataAs(r.Context(), actorID, request.IDs)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, records)
+}
+
+// fileMetadataAs returns the records of the files the actor may see;
+// other ids are left out.
+func (server *Server) fileMetadataAs(ctx context.Context, actorID string, ids []int64) ([]systemdb.FileRecord, error) {
+	records := make([]systemdb.FileRecord, 0, len(ids))
+	for _, id := range ids {
+		record, err := server.system.File(ctx, id)
 		if errors.Is(err, systemdb.ErrFileNotFound) {
 			continue
 		}
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, err)
-			return
+			return nil, err
 		}
-		if !server.canViewFile(r.Context(), actorID, record) {
-			continue
+		if server.canViewFile(ctx, actorID, record) {
+			records = append(records, record)
 		}
-		records = append(records, record)
 	}
-	writeJSON(w, http.StatusOK, records)
+	return records, nil
 }
 
 func (server *Server) handleDownloadFile(w http.ResponseWriter, r *http.Request) {

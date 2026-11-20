@@ -10,7 +10,7 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	"autable/internal/workflow"
+	"autable/internal/egress"
 )
 
 func testResolver(valid string) TokenResolver {
@@ -47,30 +47,22 @@ func waitForRunner(t *testing.T, hub *Hub, name string) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		if _, ok := hub.NodeTypes("db", name); ok {
-			return
+		for _, runner := range hub.Runners("db") {
+			if runner.Name == name {
+				return
+			}
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
 	t.Fatalf("runner %q never registered", name)
 }
 
-func echoJob(runnerName string) workflow.RemoteJob {
-	return workflow.RemoteJob{
-		Input: map[string]any{"value": "Ada"},
-		Runtime: workflow.RuntimeInfo{
-			WorkflowID:   7,
-			DatabaseName: "db",
-			RunID:        "run-1",
-			InstanceID:   "remote_echo",
-			NodeType:     "echo",
-			Secrets:      map[string]string{"app_secret": "s3cret"},
-		},
-	}
+func testRequest() egress.Request {
+	return egress.Request{Method: "POST", URL: "http://intranet.test/api", Headers: [][2]string{{"X-Token", "t"}}, Body: []byte("payload")}
 }
 
 func TestHubRejectsBadTokens(t *testing.T) {
-	hub := New(testResolver("good"), 0)
+	hub := New(testResolver("good"))
 	url := startHub(t, hub)
 
 	header := http.Header{"Authorization": {"Bearer wrong"}}
@@ -83,32 +75,32 @@ func TestHubRejectsBadTokens(t *testing.T) {
 	}
 }
 
-func TestHubDispatchesJobsAndReturnsResults(t *testing.T) {
-	hub := New(testResolver("good"), 0)
+func TestHubSendsFetchJobsAndReturnsResponses(t *testing.T) {
+	hub := New(testResolver("good"))
 	url := startHub(t, hub)
-	ws := dialRunner(t, url, "good", HelloMessage{Kind: "hello", Name: "intranet", Version: "v1", NodeTypes: []string{"echo"}})
+	ws := dialRunner(t, url, "good", HelloMessage{Kind: "hello", Name: "intranet", Version: "v1"})
 	waitForRunner(t, hub, "intranet")
 
 	go func() {
 		var job JobMessage
-		if err := ws.ReadJSON(&job); err != nil {
+		if err := ws.ReadJSON(&job); err != nil || job.Kind != "fetch" {
 			return
 		}
-		ws.WriteJSON(ResultMessage{Kind: "result", JobID: job.JobID, Output: map[string]any{
-			"echoed":      job.Input["value"],
-			"secret_seen": job.Secrets["app_secret"],
-			"instance":    job.Runtime.InstanceID,
+		ws.WriteJSON(ResultMessage{Kind: "result", JobID: job.JobID, Response: &egress.Response{
+			Status:  200,
+			URL:     job.Request.URL,
+			Headers: [][2]string{{"x-seen", job.Request.Headers[0][1]}},
+			Body:    append([]byte("echo:"), job.Request.Body...),
 		}})
 	}()
 
-	output, err := hub.Dispatch(context.Background(), "intranet", echoJob("intranet"))
+	response, err := hub.Fetch(context.Background(), "db", "intranet", testRequest())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if output["echoed"] != "Ada" || output["secret_seen"] != "s3cret" || output["instance"] != "remote_echo" {
-		t.Fatalf("unexpected output: %#v", output)
+	if response.Status != 200 || string(response.Body) != "echo:payload" || response.Headers[0][1] != "t" {
+		t.Fatalf("unexpected response: %#v", response)
 	}
-
 	statuses := hub.Runners("db")
 	if len(statuses) != 1 || statuses[0].Name != "intranet" || statuses[0].Version != "v1" {
 		t.Fatalf("unexpected runner statuses: %#v", statuses)
@@ -116,15 +108,15 @@ func TestHubDispatchesJobsAndReturnsResults(t *testing.T) {
 	if others := hub.Runners("other"); len(others) != 0 {
 		t.Fatalf("expected runner to be scoped to its database, got %#v", others)
 	}
-	if _, ok := hub.NodeTypes("other", "intranet"); ok {
-		t.Fatal("expected node types to be scoped to the database")
+	if _, err := hub.Fetch(context.Background(), "other", "intranet", testRequest()); err == nil || !strings.Contains(err.Error(), "not connected") {
+		t.Fatalf("expected runners to be scoped to their database, got %v", err)
 	}
 }
 
 func TestHubReturnsRunnerErrors(t *testing.T) {
-	hub := New(testResolver("good"), 0)
+	hub := New(testResolver("good"))
 	url := startHub(t, hub)
-	ws := dialRunner(t, url, "good", HelloMessage{Kind: "hello", Name: "intranet", NodeTypes: []string{"echo"}})
+	ws := dialRunner(t, url, "good", HelloMessage{Kind: "hello", Name: "intranet"})
 	waitForRunner(t, hub, "intranet")
 
 	go func() {
@@ -132,34 +124,27 @@ func TestHubReturnsRunnerErrors(t *testing.T) {
 		if err := ws.ReadJSON(&job); err != nil {
 			return
 		}
-		ws.WriteJSON(ResultMessage{Kind: "result", JobID: job.JobID, Error: "kingdee gateway exploded"})
+		ws.WriteJSON(ResultMessage{Kind: "result", JobID: job.JobID, Error: "dial tcp: connection refused"})
 	}()
 
-	_, err := hub.Dispatch(context.Background(), "intranet", echoJob("intranet"))
-	if err == nil || !strings.Contains(err.Error(), "kingdee gateway exploded") {
+	_, err := hub.Fetch(context.Background(), "db", "intranet", testRequest())
+	if err == nil || !strings.Contains(err.Error(), `runner "intranet": dial tcp: connection refused`) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
-func TestHubFailsUnknownRunnersAndNodes(t *testing.T) {
-	hub := New(testResolver("good"), 0)
-	url := startHub(t, hub)
-
-	if _, err := hub.Dispatch(context.Background(), "intranet", echoJob("intranet")); err == nil || !strings.Contains(err.Error(), `runner "intranet" is not connected`) {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	dialRunner(t, url, "good", HelloMessage{Kind: "hello", Name: "intranet", NodeTypes: []string{"other"}})
-	waitForRunner(t, hub, "intranet")
-	if _, err := hub.Dispatch(context.Background(), "intranet", echoJob("intranet")); err == nil || !strings.Contains(err.Error(), `does not support node "echo"`) {
+func TestHubFailsUnknownRunners(t *testing.T) {
+	hub := New(testResolver("good"))
+	startHub(t, hub)
+	if _, err := hub.Fetch(context.Background(), "db", "intranet", testRequest()); err == nil || !strings.Contains(err.Error(), `runner "intranet" is not connected`) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
 func TestHubFailsInFlightJobsOnDisconnect(t *testing.T) {
-	hub := New(testResolver("good"), 0)
+	hub := New(testResolver("good"))
 	url := startHub(t, hub)
-	ws := dialRunner(t, url, "good", HelloMessage{Kind: "hello", Name: "intranet", NodeTypes: []string{"echo"}})
+	ws := dialRunner(t, url, "good", HelloMessage{Kind: "hello", Name: "intranet"})
 	waitForRunner(t, hub, "intranet")
 
 	go func() {
@@ -170,28 +155,31 @@ func TestHubFailsInFlightJobsOnDisconnect(t *testing.T) {
 		ws.Close()
 	}()
 
-	_, err := hub.Dispatch(context.Background(), "intranet", echoJob("intranet"))
-	if err == nil || !strings.Contains(err.Error(), "disconnected while the job was running") {
+	_, err := hub.Fetch(context.Background(), "db", "intranet", testRequest())
+	if err == nil || !strings.Contains(err.Error(), "disconnected while the request was running") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
-func TestHubTimesOutSilentJobs(t *testing.T) {
-	hub := New(testResolver("good"), 50*time.Millisecond)
+func TestHubTimesOutSilentRunners(t *testing.T) {
+	hub := New(testResolver("good"))
+	hub.slack = 0
 	url := startHub(t, hub)
-	dialRunner(t, url, "good", HelloMessage{Kind: "hello", Name: "intranet", NodeTypes: []string{"echo"}})
+	dialRunner(t, url, "good", HelloMessage{Kind: "hello", Name: "intranet"})
 	waitForRunner(t, hub, "intranet")
 
-	_, err := hub.Dispatch(context.Background(), "intranet", echoJob("intranet"))
-	if err == nil || !strings.Contains(err.Error(), "timed out") {
+	request := testRequest()
+	request.TimeoutMs = 50
+	_, err := hub.Fetch(context.Background(), "db", "intranet", request)
+	if err == nil || !strings.Contains(err.Error(), "did not answer") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
-func TestHubDisconnectAllDropsRunners(t *testing.T) {
-	hub := New(testResolver("good"), 0)
+func TestHubDisconnectDatabaseDropsRunners(t *testing.T) {
+	hub := New(testResolver("good"))
 	url := startHub(t, hub)
-	ws := dialRunner(t, url, "good", HelloMessage{Kind: "hello", Name: "intranet", NodeTypes: []string{"echo"}})
+	ws := dialRunner(t, url, "good", HelloMessage{Kind: "hello", Name: "intranet"})
 	waitForRunner(t, hub, "intranet")
 
 	hub.DisconnectDatabase("db")

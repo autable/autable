@@ -1,6 +1,8 @@
-// Package appbundle reads the archives autablectl uploads for hosted apps:
-// a gzip-compressed tar holding autable.app.json, the built dist/ tree and
-// the project source under source/. See docs/design/apps.md.
+// Package appbundle reads the archives autablectl uploads for hosted apps
+// and workflows: a gzip-compressed tar holding the manifest
+// (autable.app.json or autable.workflow.json), the built dist/ tree and the
+// project source under source/. See docs/design/apps.md and
+// docs/design/workflows-v2.md.
 package appbundle
 
 import (
@@ -17,9 +19,12 @@ import (
 )
 
 const (
+	// ManifestName is the manifest of an app bundle.
 	ManifestName = "autable.app.json"
-	distPrefix   = "dist/"
-	sourcePrefix = "source/"
+	// WorkflowManifestName is the manifest of a workflow bundle.
+	WorkflowManifestName = "autable.workflow.json"
+	distPrefix           = "dist/"
+	sourcePrefix         = "source/"
 
 	// MaxCompressedBytes bounds an upload; MaxUncompressedBytes and
 	// MaxEntries bound what it may expand to.
@@ -30,10 +35,23 @@ const (
 
 var namePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}$`)
 
-// ValidName reports whether name can be an app's URL slug.
+// Kind describes one bundle flavour: its manifest file and the dist file
+// it must contain.
+type Kind struct {
+	Name         string
+	ManifestName string
+	RequiredDist string
+}
+
+var (
+	App      = Kind{Name: "app", ManifestName: ManifestName, RequiredDist: "index.html"}
+	Workflow = Kind{Name: "workflow", ManifestName: WorkflowManifestName, RequiredDist: "workflow.js"}
+)
+
+// ValidName reports whether name can be an app's or workflow's URL slug.
 func ValidName(name string) error {
 	if !namePattern.MatchString(name) {
-		return fmt.Errorf("app name %q must match %s", name, namePattern)
+		return fmt.Errorf("name %q must match %s", name, namePattern)
 	}
 	return nil
 }
@@ -51,9 +69,19 @@ type Bundle struct {
 	Dist     map[string][]byte
 }
 
+// Parse validates an uploaded app archive; see Kind.Parse.
+func Parse(archive []byte) (Bundle, error) {
+	return App.Parse(archive)
+}
+
+// Source returns the source of an app archive; see Kind.Source.
+func Source(archive []byte) ([]byte, error) {
+	return App.Source(archive)
+}
+
 // Parse validates an uploaded archive and returns its manifest and dist
 // files. Source files are checked for safe paths but not kept.
-func Parse(archive []byte) (Bundle, error) {
+func (kind Kind) Parse(archive []byte) (Bundle, error) {
 	if len(archive) > MaxCompressedBytes {
 		return Bundle{}, fmt.Errorf("bundle is %d bytes; the limit is %d", len(archive), MaxCompressedBytes)
 	}
@@ -61,12 +89,12 @@ func Parse(archive []byte) (Bundle, error) {
 	manifestSeen := false
 	err := walk(archive, func(name string, body []byte) error {
 		switch {
-		case name == ManifestName:
+		case name == kind.ManifestName:
 			manifestSeen = true
 			// Unknown fields are ignored so newer autablectl releases can
 			// add manifest fields without breaking uploads to older servers.
 			if err := json.Unmarshal(body, &bundle.Manifest); err != nil {
-				return fmt.Errorf("%s: %w", ManifestName, err)
+				return fmt.Errorf("%s: %w", kind.ManifestName, err)
 			}
 		case strings.HasPrefix(name, distPrefix):
 			bundle.Dist[strings.TrimPrefix(name, distPrefix)] = body
@@ -80,32 +108,32 @@ func Parse(archive []byte) (Bundle, error) {
 		return Bundle{}, err
 	}
 	if !manifestSeen {
-		return Bundle{}, fmt.Errorf("bundle has no %s", ManifestName)
+		return Bundle{}, fmt.Errorf("bundle has no %s", kind.ManifestName)
 	}
-	if _, ok := bundle.Dist["index.html"]; !ok {
-		return Bundle{}, errors.New("bundle has no dist/index.html")
+	if _, ok := bundle.Dist[kind.RequiredDist]; !ok {
+		return Bundle{}, fmt.Errorf("bundle has no dist/%s", kind.RequiredDist)
 	}
 	if err := ValidName(bundle.Manifest.Name); err != nil {
 		return Bundle{}, err
 	}
 	if bundle.Manifest.Database == "" {
-		return Bundle{}, fmt.Errorf("%s: database is required", ManifestName)
+		return Bundle{}, fmt.Errorf("%s: database is required", kind.ManifestName)
 	}
 	return bundle, nil
 }
 
 // Source returns a gzip-compressed tar of the manifest and the source tree,
 // with the source/ prefix removed, ready to unpack as a project directory.
-func Source(archive []byte) ([]byte, error) {
+func (kind Kind) Source(archive []byte) ([]byte, error) {
 	var out bytes.Buffer
 	gz := gzip.NewWriter(&out)
 	tw := tar.NewWriter(gz)
 	err := walk(archive, func(name string, body []byte) error {
 		target := ""
 		switch {
-		case name == ManifestName:
-			target = ManifestName
-		case name == sourcePrefix+ManifestName:
+		case name == kind.ManifestName:
+			target = kind.ManifestName
+		case name == sourcePrefix+kind.ManifestName:
 			// The root manifest is the authoritative copy of the same file.
 			return nil
 		case strings.HasPrefix(name, sourcePrefix):

@@ -16,7 +16,7 @@
 |---|---|---|
 | 用户 | user id | 登录用户 |
 | 角色 | `role:<db>:<name>` | 一组授权的集合;成员(用户或 workflow)继承角色的全部授权,取并集 |
-| workflow | `workflow:<id>` | workflow 内的表操作节点以此身份执行,数据授权由管理员配置 |
+| workflow | `workflow:<id>` | workflow 代码中的 `tables` / `users` / `files` 以此身份执行,数据授权由管理员配置 |
 
 有效权限 = 直接授权 ∪ 所属各角色的授权,同一权限取最高档。
 
@@ -102,7 +102,7 @@
 - 视图的新建、修改、删除。
 - 授权(grants)与角色(roles)的一切管理,包括列出角色。
 - runner 列表与 runner token(`GET` / `POST /api/databases/{db}/runners`)。
-- 工作流:创建、编辑、删除,读取定义(脚本、secrets、variables、runners),运行历史的列表与详情,在编辑器中运行(响应含完整 steps)。
+- 工作流:上传 / push(首次 push 即创建工作流)、发布、回滚、源码下载、删除、版本列表与详情(触发器、设置、secret 名称、vars),设置(启用/停用、超时、保留天数),设置 secrets 与 vars,运行记录的列表与完整详情(event、日志),取消运行。secret 的值任何 API 都不返回。
 - 应用:上传 / push(首次 push 即创建应用)、发布、回滚、预览 `/apps/{db}/{name}/@N/`、源码下载、删除、版本列表。
 
 ## 应用与工作流
@@ -126,11 +126,16 @@
 
 ### 运行工作流
 
-- 有运行权的用户可以 `POST /api/workflows/{id}/runs`。运行**仍以 `workflow:<id>` 为主体执行**,即使用工作流自己的授权,而不是调用者的授权。
-- `GET /api/databases/{db}/workflows` 对有运行权的用户列出该工作流的 id 与 name;script、secrets、variables、runners 被置空。非管理员看不到运行历史。
-- 非管理员得到的运行响应只含 `workflow_id`、时间戳、inputs、outputs 与 error,`steps` 恒为空。
-- 停用(`enabled: false`)是管理员的开关,运行权不能绕过:已停用的工作流不出现在非管理员的列表中,非管理员运行它 → 409。管理员仍可在编辑器中运行已停用的工作流做测试。
+- 有运行权的用户可以启动工作流的 **manual 触发器**:`POST /api/databases/{db}/workflows/{name}/runs`(`{trigger?, input?, wait?}`)。运行**仍以 `workflow:<id>` 为主体执行**,即使用工作流自己的授权,而不是调用者的授权。schedule、recordChanged、webhook 触发器不能由用户启动。
+- `GET /api/databases/{db}/workflows` 对有运行权的用户只列出已启用、已发布且有 manual 触发器的工作流,只含 id、name、title、已发布版本与 manual 触发器(及其 `fields`);版本、设置、secrets、vars 与其他触发器不返回。
+- 有运行权的用户只能读取**自己启动的**运行:`GET .../runs/{id}` 只含状态、触发器、output、error 与时间戳,不含 event 与日志;别人的运行一律 404。运行列表、取消运行只对管理员开放。
+- 停用(`enabled: false`)是管理员的开关,运行权不能绕过:已停用的工作流不出现在非管理员的列表中,非管理员启动它 → 409。管理员仍可启动已停用工作流的 manual 触发器做测试。
 - 授予运行权等于把工作流本身的权力委托给调用者,这是刻意的设计,见[已知的非强制边界](#已知的非强制边界)。
+
+### 工作流触发与 webhook
+
+- **recordChanged**:行变更交给工作流前按 `workflow:<id>` 的字段读权限过滤(值、diff、变更字段列表);该主体读不到任何字段时不触发。工作流自己的运行写入的变更默认不触发它自己(`includeOwnWrites: false`)。
+- **webhook**:`/api/hooks/{db}/{name}/{path}` 不使用会话、不做 CSRF 检查,任何人都能请求;请求原样交给代码,由代码自行认证(签名、共享密钥)。已停用或未发布的工作流的 webhook 返回 404。
 
 ## API 行为规范
 
@@ -141,12 +146,12 @@
 3. **行历史**(`GET /rows/{id}/history`):对有权限的用户开放。目标行必须 ∈ 行集(否则 404,与不存在不可区分),历史值与 diff 按字段读权限过滤。
 4. **文件**(`GET /files/{id}`、`POST /files/metadata`):行级校验(见上)。
 5. 查询/排序/搜索中引用无读权限的字段 → 403(防侧信道);全文搜索只在可读字段上构建。
-6. **workflow 表节点**(`table.row.*`、`table.field.create`)以 `workflow:<id>` 为主体走完全相同的检查,无任何捷径。workflow 主体的数据授权与用户一样由管理员配置。
-7. **新增字段**(`POST /api/tables/{db}/{table}/fields` 与 `table.field.create` 节点):管理员新建或恢复字段。其他任何人(包括所有 workflow 主体)的请求只有在**不会改变任何东西**时成功——所请求的字段全部已存在、未删除且类型相同——否则 403 `adding fields requires an admin`。这样幂等的"确保字段存在"脚本在管理员加好列之后可以继续运行。非管理员(包括 workflow 主体)另需对该表有任意授权。
+6. **workflow 的数据访问**(代码中的 `tables`、`users`、`files`)以 `workflow:<id>` 为主体走完全相同的检查,无任何捷径。workflow 主体的数据授权与用户一样由管理员配置。
+7. **新增字段**(`POST /api/tables/{db}/{table}/fields`):管理员新建或恢复字段。其他任何人(包括所有 workflow 主体)的请求只有在**不会改变任何东西**时成功——所请求的字段全部已存在、未删除且类型相同——否则 403 `adding fields requires an admin`。这样幂等的"确保字段存在"脚本在管理员加好列之后可以继续运行。非管理员(包括 workflow 主体)另需对该表有任意授权。
 8. **授权校验**(`POST /api/permissions/grants`,管理员独占):已移除的 scope `field_add`、`field_modify`、`workflow_set` → 400 unsupported scope;`app_set` / `app` / `workflow` 的 level > 1 → 400;`view_set` / `view` 的 level > 1 → 400(视图授权只读)。
 9. **身份与目录**:`GET /api/auth/me` 以及登录、注册的响应包含 `is_admin`,仅供界面展示;服务端对每个请求独立判定。目录(`GET /api/metadata`)中数据库不带任何 permission level;表的 `permission_level` 为 2(管理员)或 1(可见);字段带位掩码(管理员为 7);视图对管理员为 2、对有读授权者为 1。
 10. **注册**:`POST /api/auth/register` 遇到已注册的 email → 409(不会覆盖已有账号的密码)。
-11. **跨站请求防护(CSRF)**:适用于 `/api/` 下不带 `Authorization: Bearer` 的 POST / PUT / PATCH / DELETE 请求。带 bearer 的请求(autablectl、脚本)不受限;runner WebSocket 是 GET;workflow webhook(`POST /api/databases/{db}/workflows/{id}/webhook`)完全豁免——token 在请求体中,不使用会话,不限 content type。
+11. **跨站请求防护(CSRF)**:适用于 `/api/` 下不带 `Authorization: Bearer` 的 POST / PUT / PATCH / DELETE 请求。带 bearer 的请求(autablectl、脚本)不受限;runner WebSocket 是 GET;workflow webhook(`/api/hooks/...`,任何方法)完全豁免——不使用会话,不限 content type,由工作流代码认证请求。
     - 有 `Sec-Fetch-Site` 时,必须是 `same-origin` 或 `none`,否则 403。
     - 没有 `Sec-Fetch-Site` 而有 `Origin` 时,Origin 必须等于 `server.public_url` 的 origin,或其 host[:port] 等于请求的 Host 头,否则 403;`Origin: null` 一律拒绝。
     - JSON 端点要求 `Content-Type: application/json`(允许带 charset 参数),否则 415。
@@ -158,7 +163,8 @@
 
 - **公式字段是管理员定义的投影**:公式可读全行。给某人某公式字段的读权限,等于让他看到公式所表达的任何信息。管理员写公式时自行负责。
 - **运行工作流 = 借用工作流的权力**:运行以 `workflow:<id>` 的授权执行,不受调用者自身授权限制;运行输出原样返回给调用者,不做字段过滤。授予某人某工作流的运行权,等于允许他让该工作流以它的授权做脚本所做的一切,并看到脚本返回的一切。管理员写工作流时自行负责。
-- **workflow 运行历史含数据**:run 的输入/输出/步骤会包含它处理过的行数据,且不做字段过滤。因此运行历史只对管理员开放。
+- **workflow 运行记录含数据**:run 的 event、output 与日志会包含它处理过的行数据,且不做字段过滤。因此运行列表与完整详情只对管理员开放;启动者只看到自己运行的状态与 output。
+- **webhook 是公开入口**:谁都能调用 webhook 地址,认证完全由工作流代码负责。管理员写工作流时自行负责。
 - 字段名、表名、视图名等 schema 信息对有该表任意授权的用户可见,不保密。
 - **管理员按 email 识别**:开放密码注册时,谁先用某个管理员 email 注册,谁就得到管理员权限。管理员应在部署该配置之前或同时注册自己的账号,或改用 OIDC(OIDC 登录会拒绝 `email_verified` 为 false 的身份;应使用会验证 email 的身份提供方)。
 
@@ -177,6 +183,12 @@
 
 - https 部署因会话 cookie 改名为 `__Host-autable_session`,升级后所有人在浏览器中需要重新登录一次;autablectl 的 bearer token 不受影响。
 - 行级边界(内置 `all` 视图需授权)当初上线时采用**一刀切默认拒绝**:非管理员主体在获得视图授权前读不到任何行。按需授权视图(通常从 `view:all read` 或一个 `$current_user` 隔离视图开始);不做自动补发,换取模型从第一天起就是干净的默认拒绝。
+
+系统数据库迁移 7 → 8(workflows v2,见 `docs/design/workflows-v2.md`):
+
+- 删除旧的节点式工作流表;新工作流 id 从头开始。旧的运行历史(LevelDB 中的 `whistory_` 键)在服务启动时删除。
+- 删除一切 `workflow:<id>` 主体持有的授权与角色成员身份(否则新工作流会继承旧工作流的授权),以及一切 `workflow` scope 的运行授权。工作流改写为项目并发布后,管理员需要重新授权。
+- 仓库同步不再提交 `workflow/` 目录;已有的脚本文件原样保留。
 
 ## 当前状态
 

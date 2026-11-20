@@ -132,25 +132,21 @@ export interface FileRecord {
   created_at: number;
 }
 
-export interface WorkflowStep {
-  node_id: string;
-  node_type?: string;
-  runner?: string;
-  input?: Record<string, unknown>;
-  output?: Record<string, unknown>;
-  error?: string;
-}
+export type WorkflowRunStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled";
 
-export interface WorkflowRun {
-  history_key: string;
-  run: {
-    workflow_id: number;
-    timestamp: number;
-    inputs?: Record<string, unknown>;
-    outputs?: Record<string, unknown>;
-    steps: WorkflowStep[];
-    error?: string;
-  };
+/** A workflow run as the user who started it sees it. */
+export interface WorkflowRun<O = unknown> {
+  id: number;
+  workflow_id: number;
+  trigger: string;
+  status: WorkflowRunStatus;
+  /** What the workflow's run() returned (absent when it returned nothing). */
+  output?: O;
+  error?: string;
+  /** Milliseconds since the Unix epoch. */
+  created_at: number;
+  started_at?: number;
+  finished_at?: number;
 }
 
 /** A failed request. message is the server's explanation. */
@@ -341,26 +337,40 @@ export function searchUsers(query = ""): Promise<User[]> {
 
 // Workflows.
 
+export interface RunWorkflowOptions {
+  /** The manual trigger to start; may be omitted when the workflow has exactly one. */
+  trigger?: string;
+}
+
+function workflowRunsPath(name: string, ...rest: (string | number)[]): string {
+  return ["/api/databases", segment(DATABASE), "workflows", segment(name), "runs", ...rest.map((part) => segment(String(part)))].join("/");
+}
+
 /**
- * Runs a workflow of the app's database by name and waits for it to
- * finish. The user needs write access to the workflow. A failed run
- * throws an AutableError whose body is the WorkflowRun.
+ * Starts a manual trigger of a workflow of the app's database and waits
+ * (up to 60 s) for the run to finish. The user needs a run grant on the
+ * workflow; the run executes with the workflow's own permissions.
+ *
+ * Resolves with the succeeded run. Throws an AutableError whose body is the
+ * run when it failed or was cancelled (status 200), or when it is still
+ * going after 60 s (status 202; poll it with workflowRun).
  */
-export async function runWorkflow(name: string, inputs: Record<string, unknown> = {}): Promise<WorkflowRun> {
-  const workflows = await call<{ id: number; name: string }[]>("GET", `/api/databases/${segment(DATABASE)}/workflows`);
-  const workflow = workflows.find((candidate) => candidate.name === name);
-  if (!workflow) {
-    throw new AutableError(404, `Workflow ${JSON.stringify(name)} not found in database ${JSON.stringify(DATABASE)} (or not readable).`);
+export async function runWorkflow<O = unknown>(name: string, input: Record<string, unknown> = {}, options: RunWorkflowOptions = {}): Promise<WorkflowRun<O>> {
+  const run = await call<WorkflowRun<O>>("POST", workflowRunsPath(name), { trigger: options.trigger, input, wait: true });
+  switch (run.status) {
+    case "succeeded":
+      return run;
+    case "queued":
+    case "running":
+      throw new AutableError(202, `Workflow ${JSON.stringify(name)} is still ${run.status} after 60 s (run ${run.id}).`, run);
+    default:
+      throw new AutableError(200, `Workflow ${JSON.stringify(name)} ${run.status}: ${run.error ?? "unknown error"}`, run);
   }
-  try {
-    return await call<WorkflowRun>("POST", `/api/workflows/${workflow.id}/runs`, { inputs });
-  } catch (error) {
-    const run = error instanceof AutableError ? (error.body as Partial<WorkflowRun> | undefined)?.run : undefined;
-    if (error instanceof AutableError && run) {
-      throw new AutableError(error.status, `Workflow ${JSON.stringify(name)} failed: ${run.error ?? "unknown error"}`, error.body);
-    }
-    throw error;
-  }
+}
+
+/** A run the user started, e.g. to poll one that outlasted runWorkflow's wait. */
+export function workflowRun<O = unknown>(name: string, runId: number): Promise<WorkflowRun<O>> {
+  return call<WorkflowRun<O>>("GET", workflowRunsPath(name, runId));
 }
 
 // Location.

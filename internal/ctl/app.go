@@ -14,6 +14,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"autable/internal/version"
 )
@@ -28,6 +29,8 @@ type app struct {
 	openURL    func(string) error
 	// runNPM replaces running npm, for tests; nil runs the real npm.
 	runNPM func(dir string, env []string, out io.Writer, args ...string) error
+	// pollEvery is how often `workflow run --wait` polls; zero means 2 s.
+	pollEvery time.Duration
 }
 
 type command struct {
@@ -84,15 +87,15 @@ func (a *app) run(args []string) int {
 	return 0
 }
 
-// lookupCommand matches the longest command name ("rows list" before "rows").
+// lookupCommand matches the longest command name ("workflow secret set"
+// before "workflow secret", "rows list" before "rows").
 func lookupCommand(args []string) (command, []string, bool) {
-	if len(args) >= 2 {
-		if cmd, ok := commands[args[0]+" "+args[1]]; ok {
-			return cmd, args[2:], true
+	for words := min(3, len(args)); words >= 1; words-- {
+		if cmd, ok := commands[strings.Join(args[:words], " ")]; ok {
+			return cmd, args[words:], true
 		}
 	}
-	cmd, ok := commands[args[0]]
-	return cmd, args[1:], ok
+	return command{}, nil, false
 }
 
 func (a *app) printHelp() {
@@ -101,7 +104,7 @@ func (a *app) printHelp() {
 Output is JSON on stdout. Sign in once with "autablectl login --server URL";
 AUTABLE_SERVER and AUTABLE_TOKEN override the stored login.
 
-JSON arguments (--values, --query, --inputs, ...) accept inline JSON,
+JSON arguments (--values, --query, --input, ...) accept inline JSON,
 @path to read a file, or - to read stdin.
 
 Commands:

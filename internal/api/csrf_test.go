@@ -137,28 +137,6 @@ func TestBearerRequestsAreExemptFromBrowserChecks(t *testing.T) {
 	}
 }
 
-func TestWebhookIsExemptFromBrowserChecks(t *testing.T) {
-	ctx := context.Background()
-	server, system := newTestServer(t)
-	hooked, err := system.SaveWorkflow(ctx, systemdb.WorkflowDefinition{
-		DatabaseName: "db",
-		Name:         "hooked",
-		Enabled:      true,
-		Script:       `function instances(info) { return { hook: "webhook.trigger", main: "echo" }; } function trigger(info) { return { instance: "hook" }; } function run(info) { return {}; }`,
-		Secrets:      map[string]string{"hook.token": "shared-secret"},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Webhook senders often omit the content type; the token in the body
-	// is the credential.
-	request := rawRequest(http.MethodPost, "/api/databases/db/workflows/"+resourceID(hooked.ID)+"/webhook", `{"token":"shared-secret","payload":{"n":1}}`)
-	request.Header.Set("Origin", "https://sender.example")
-	if recorder := serve(server, request); recorder.Code != http.StatusOK {
-		t.Fatalf("expected webhook 200, got %d: %s", recorder.Code, recorder.Body.String())
-	}
-}
-
 func TestSessionCookieNameAndFlagsFollowPublicURL(t *testing.T) {
 	register := func(server *Server, email string) *http.Cookie {
 		t.Helper()

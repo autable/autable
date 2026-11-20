@@ -1,293 +1,79 @@
-# Remote Runner Design
+# Runners: egress proxies for workflows
 
-Status: implemented (server core, `autable-runner` CLI, web UI).
+Status: implemented (`internal/runnerhub`, `internal/runnercli`,
+`cmd/autable-runner`). Replaces the node-executing runners of the
+node-based workflows.
 
 ## Problem
 
-Workflow nodes execute inside the autable server process. Nodes that call
-external services (`dingtalk.*`, `github.*`, a future `kingdee.*`) therefore
-require the target system to be reachable **from the server**. When autable is
-deployed on a public host and the target system lives inside a private network
-(on-premise ERP such as Kingdee K3Cloud, internal databases, MES systems), the
-server cannot reach it and the node model breaks down.
+Workflows run inside the autable server. A workflow that calls a system
+inside a private network (an on-premise ERP, an internal database API)
+cannot reach it when autable is hosted elsewhere.
 
-Solving this per integration (standalone sync daemons, VPN tunnels into the
-private network) either abandons the shared node model or widens the private
-network's attack surface. The general fix is a **remote runner**: a worker
-process that runs inside the private network, connects *outbound* to the
-autable server, and executes individual node steps on the server's behalf.
-Nodes stay ordinary registry nodes that every autable deployment can use;
-where they execute becomes a deployment concern.
+## Model
 
-## Non-goals
-
-- Running workflow orchestration (the goja `run(info)` script) remotely. The
-  script, trigger evaluation, history persistence, and secret storage stay on
-  the server.
-- Running trigger nodes remotely. Triggers respond to server-side events
-  (`schedule` ticks, `table.record.changed` history keys) and never leave the
-  server.
-- Running `table.*` / autable-service nodes remotely. They need direct access
-  to server-side stores.
-- Per-user runner permissions. Runners and their tokens are database-scoped
-  and managed by the database owner (see Token); finer-grained permissions
-  are not modeled.
-- Guaranteed (at-least-once) job delivery. A step dispatched to a runner that
-  disconnects mid-flight fails visibly, like any other node error.
-
-## Design overview
+A **runner** is a small process inside the private network. It connects
+*outbound* to the server over WebSocket and performs HTTP requests on the
+server's behalf: `fetch(url, { via: "office" })` in a workflow sends the
+request through the runner named `office` of the workflow's database.
 
 ```
   private network                        public network
- ┌───────────────────────┐             ┌─────────────────────────────┐
- │ Kingdee / internal DB │             │ autable server              │
- │          ▲            │             │                             │
- │          │ local call │             │  goja run(info)             │
- │  autable-runner  ─────┼── outbound ─▶  runner hub (WS endpoint)   │
- │  (node subset)        │  WebSocket  │  workflow.Runner            │
- └───────────────────────┘             └─────────────────────────────┘
+ ┌───────────────────────┐             ┌──────────────────────────┐
+ │ internal HTTP service │             │ autable server           │
+ │          ▲            │             │  workflow run            │
+ │          │ HTTP       │             │   fetch(..., {via})      │
+ │  autable-runner  ─────┼── outbound ─▶  runner hub (WebSocket)  │
+ └───────────────────────┘  WebSocket  └──────────────────────────┘
 ```
 
-Every node instance executes on a **runner**. The default is the **server
-runner**: the node registry inside the autable server process, which is what
-all instances use today — it is not a separate process and has no connection
-or token. Remote runners are additional named executors that node instances
-can be bound to.
-
-1. `autable-runner` (a new CLI in `cmd/autable-runner`) starts inside the
-   private network with an endpoint URL and the runner token. It opens a
-   persistent outbound WebSocket connection to the server and advertises its
-   name and the node types it can execute.
-2. A node instance may be bound to a remote runner in the web UI, in the same
-   editor area where instance variables and secrets are already configured.
-   When the goja script calls `info.instance("x").exec(input)` on a bound
-   instance, the server serializes the node input (plus resolved
-   secrets/variables) into a job, sends it to the connected runner, and
-   blocks the step until the result message returns.
-3. The runner executes the node locally — inside the network where the target
-   system is reachable — and sends the output map back. The step result is
-   recorded in run history exactly like a local step.
-
-No inbound connectivity, port forwarding, or VPN into the private network is
-required. The runner only needs outbound HTTPS/WSS to the server.
-
-## Runner binding
-
-Runner bindings are **per-instance configuration, not part of the workflow
-script**. They live exactly where instance variables and secrets already
-live: edited in the web UI next to the secrets/variables JSON editors, stored
-on the workflow record in `system.sqlite` (a `RunnersJSON` column beside
-`SecretsJSON`/`VariablesJSON`), keyed by instance ID:
-
-```jsonc
-// runners map on a workflow
-{ "pull_orders": "intranet" }
-```
-
-- An instance absent from the map runs on the server runner. The UI presents
-  the binding as a selector defaulting to "server", listing connected remote
-  runners that advertise the instance's node type.
-- The workflow script (`instances`, `trigger`, `run`) is unchanged and stays
-  deployment-portable: the git-managed repository never references runner
-  names, so the same repository works across deployments whose runners are
-  named differently — bindings are local deployment data, like secrets.
-- Trigger instances and server-only node types cannot be bound to a remote
-  runner; the save API rejects such bindings.
-- If the bound runner has no live connection when `exec` is called, the step
-  fails with an explicit error (`runner "intranet" is not connected`). There
-  is no fallback to the server runner, matching the project rule that
-  non-normal paths fail visibly instead of degrading.
-
-`workflow.Definition` gains `Runners map[string]string` alongside `Secrets`
-and `Variables`, populated from the workflow record when the definition is
-assembled.
-
-## Node eligibility
-
-`internal/workflow/nodes/registry.go` already separates nodes by their
-dependencies. That boundary becomes explicit:
-
-- **Remote-capable**: nodes constructible with no server-side dependencies —
-  currently `echo`, `dingtalk.robot.*`, `dingtalk.notable.*`,
-  `github.file.content`, and future integration nodes such as `kingdee.*`.
-  The registry gains a `Remote() []workflow.Node` constructor listing exactly
-  these.
-- **Server-only**: trigger nodes (`time.schedule`, `table.record.changed`)
-  and everything from `AutableNodes` (needs `autable.Service`).
-
-`cmd/autable-runner` is built from the same module and registers
-`nodes.Remote()`. Because server and runner share one registry source, a node
-added to `Remote()` is automatically available both locally and remotely;
-there is no separate plugin mechanism or node distribution problem. The
-handshake carries the runner's node type list and binary version so the
-server never dispatches a job the runner cannot handle and version skew is
-visible in the runners API.
-
-## Execution path
-
-`workflow.Runner` gains an optional dispatcher, injected from the API server:
-
-```go
-type RemoteDispatcher interface {
-    Dispatch(ctx context.Context, runnerName string, job RemoteJob) (map[string]any, error)
-    NodeTypes(databaseName, runnerName string) ([]string, bool) // false when not connected
-}
-
-type RemoteJob struct {
-    RunID      string
-    InstanceID string
-    NodeType   string
-    Input      map[string]any
-    Secrets    map[string]string
-    Variables  map[string]string
-    Runtime    RuntimeInfo
-}
-```
-
-`runInstance` looks up `definition.Runners[instanceID]`: when a remote runner
-is bound it routes to the dispatcher, otherwise it runs the registered node
-in-process as today (the server runner). The dispatcher blocks until the
-runner returns a result, the per-job timeout elapses, or the runner
-disconnects. `history.StepRecord` gains an optional `Runner string` field so
-run history shows where a step executed; nothing else about history changes.
-
-The server-side hub lives in a new `internal/runnerhub` package: it owns the
-WebSocket endpoint, the set of live connections, job correlation
-(`job_id → waiting channel`), and implements `RemoteDispatcher`.
-
-## Protocol
-
-Transport: WebSocket over the existing HTTP server, endpoint
-`GET /api/runner/ws`, authenticated by `Authorization: Bearer <token>`.
-`gorilla/websocket` is already in the dependency tree (indirect); it becomes
-a direct dependency. Messages are JSON text frames:
-
-```jsonc
-// runner → server, once after connect
-{ "kind": "hello", "name": "intranet", "version": "v0.3.1",
-  "node_types": ["kingdee.bill.query", "dingtalk.robot.send", "..."] }
-
-// server → runner
-{ "kind": "job", "job_id": "uuid", "node_type": "kingdee.bill.query",
-  "input": {}, "secrets": {}, "variables": {}, "runtime": {} }
-
-// runner → server
-{ "kind": "result", "job_id": "uuid", "output": {} }
-{ "kind": "result", "job_id": "uuid", "error": "message" }
-```
-
-Keepalive and reconnection are the runner CLI's responsibility:
-
-- Runner sends WebSocket pings every 30s; the server closes connections with
-  no ping for 90s. Intermediate proxies and NAT gateways drop idle
-  connections well below common TCP timeouts, so the interval is deliberately
-  short.
-- On any disconnect the runner reconnects with exponential backoff plus
-  jitter (1s doubling to a 60s cap), re-sending `hello` each time.
-- Jobs are at-most-once: the server fails all in-flight jobs for a connection
-  the moment it drops, and the runner discards results it cannot deliver.
-  A reconnect does not resume jobs.
-
-Multiple runner processes may connect under the same name; the hub picks any
-live connection per job. This gives basic availability during runner restarts
-without a coordination protocol.
-
-Per-job timeout: server-side, default 10 minutes, applied by the dispatcher.
+- A runner executes **no code** and stores nothing. Each request carries
+  everything it needs (method, URL, headers, body, timeout), so new
+  integrations never require updating a runner.
+- The runner applies the same limits as the server's own `fetch`
+  (`internal/egress`): 20 MiB response cap, at most 10 redirects, the
+  request's timeout (default 30 s).
+- A request to a runner that is offline, or that disconnects mid-request,
+  fails the `fetch` call visibly. There is no queueing or retry.
 
 ## Token
 
-Runners are database-scoped: each database has its own static token, and the
-token a runner presents decides which database it serves — a runner cannot
-claim another database's namespace, and workflow bindings only resolve
-against runners of the workflow's own database. There is no global runner
-concept.
+Runner tokens are per database: `POST /api/databases/{db}/runners`
+(admins) issues a new token and disconnects that database's runners;
+`GET /api/databases/{db}/runners` lists the token's creation time and the
+connected runners (`name`, `version`, `connected_at`). The token decides
+the database, so a runner can only serve the workflows of its database.
+When several runners connect with the same name, the newest connection
+receives the requests.
 
-- Tokens are stored in `system.sqlite` as SHA-256 hashes, one row per
-  database. The plaintext (`atr_` + 43 URL-safe base64 chars, 256 bits) is
-  returned exactly once by the reset call and never displayed again.
-- `POST /api/databases/{db}/runners` generates/replaces the database's
-  token; only the database owner may call it. Resetting drops that
-  database's runner connections immediately (others are untouched); runners
-  are reconfigured with the new token and reconnect.
-- `GET /api/databases/{db}/runners` returns the database's connected runners
-  (name, version, node types, connect time) for any signed-in user — the
-  binding selector needs the list — plus token metadata (created timestamp,
-  never the value) for the database owner only.
+## Protocol
 
-Tokens are deliberately **not** stored in the git-managed repository:
-`repository.path` is synced to remote git hosting, and a credential committed
-there survives in history even after rotation. `system.sqlite` keeps them
-server-local, resettable at runtime without a server restart, and out of
-version control.
+`GET /api/runner/ws` with `Authorization: Bearer <runner token>`, then
+JSON text frames:
 
-## Secrets
+| Direction | Frame |
+|---|---|
+| runner → server, first frame | `{"kind": "hello", "name": "office", "version": "v0.1.70"}` |
+| server → runner | `{"kind": "fetch", "job_id": "…", "request": {"method", "url", "headers": [[name, value], …], "body": "<base64>", "timeout_ms"}}` |
+| runner → server | `{"kind": "result", "job_id": "…", "response": {"status", "status_text", "url", "headers": [[name, value], …], "body": "<base64>"}}` or `{"kind": "result", "job_id": "…", "error": "…"}` |
 
-Server-stored workflow secrets keep working unchanged: the server resolves
-the instance's declared secret ports from `Definition.Secrets` and ships the
-values inside the job payload over WSS, exactly as they are injected into
-local node runs. There is no runner-side secret mechanism and no distinction
-between secrets that may or may not be sent: a runner holding the token is
-**inside the trust boundary** by definition — it executes arbitrary node jobs
-with their inputs, so withholding secrets from it would add complexity
-without adding a meaningful boundary. Operators who cannot extend that trust
-to a machine should not connect a runner from it.
+The runner pings every 30 s; the server drops connections silent for
+90 s. The server gives up on a request 15 s after its own timeout.
 
 ## Runner CLI
 
 ```
-autable-runner \
-  --endpoint wss://autable.example.com \
-  --token atr_... \            # or AUTABLE_RUNNER_TOKEN
-  --name intranet \            # default: hostname
-  --max-jobs 4                 # concurrent job limit, default 4
+autable-runner --endpoint https://autable.example.com --token "$AUTABLE_RUNNER_TOKEN" --name office [--max-jobs 4]
 ```
 
-Behavior: connect, hello, execute jobs concurrently up to `--max-jobs`,
-ping/reconnect as described above. Logs to stdout via `slog` like the server.
-It is a long-running foreground process; process supervision (systemd,
-container restart policy) is the operator's problem, and crash-looping is
-safe because the protocol is stateless across connections.
-
-Release builds ship `autable-runner` alongside `autable` for the same
-platform matrix.
+It reconnects with exponential backoff and logs each request's method,
+URL without query or credentials, status and duration.
 
 ## Security considerations
 
-- **Inversion of trust**: compared to tunneling the private system out (VPN /
-  mesh network to the server), the runner model gives the public server zero
-  reachability into the private network. A compromised server can at most
-  dispatch jobs to nodes the runner registers, with inputs it controls — it
-  cannot open arbitrary connections behind the firewall.
-- **Token scope**: possession of a database's runner token allows connecting
-  as any runner name **within that database**, receiving jobs routed to those
-  names (including their secret payloads), and returning forged outputs into
-  that database's workflow runs. It grants no other API access and no reach
-  into other databases. TLS (`wss://`) is required outside local development.
-- **Job payloads** can contain secrets and row data; they exist transiently
-  in runner memory and are not persisted by the CLI.
-
-## Implementation phases
-
-1. **Server core**: per-instance runner bindings (`RunnersJSON` storage, save
-   API validation, `Definition.Runners`), `RemoteDispatcher` seam in
-   `workflow.Runner`, `internal/runnerhub` with WS endpoint, token storage +
-   `/api/runner-token/reset` + `/api/runners`, `nodes.Remote()`.
-2. **Runner CLI**: `cmd/autable-runner` with connect/hello/execute/keepalive,
-   release packaging.
-3. **Web UI**: runner binding selector beside the instance secrets/variables
-   editors (default "server"), runners page (connected runners, token reset),
-   runner badge on workflow steps in run history.
-4. **First real consumer**: a `kingdee.*` node family.
-
-Phases 1–2 are independently testable: unit tests fake the dispatcher on the
-workflow side and fake the hub on the CLI side; an integration test boots the
-server with `httptest`, connects a real runner process, and drives a workflow
-whose remote step executes an `echo` node.
-
-## Open questions
-
-- Job payload size: row-heavy nodes could return large outputs; is a hard
-  frame size limit (e.g. 16 MiB) enough, or do large results need chunking?
-- A binding referencing a runner that never connects only surfaces at exec
-  time; should the runners page flag bindings whose runner is currently
-  absent?
+- A runner sends whatever requests the workflows of its database ask for,
+  so it should run with network access limited to the systems those
+  workflows need.
+- Secrets used in a request (an `Authorization` header) travel with that
+  request over the runner's TLS connection; the runner neither logs nor
+  keeps them.

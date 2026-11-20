@@ -84,7 +84,7 @@ func noGitAbove(t *testing.T, dir string) {
 }
 
 func TestGenerateSchemaMapsFieldTypes(t *testing.T) {
-	schema := generateSchema("名称 db", []schemaTable{
+	schema := generateSchema("app", "名称 db", []schemaTable{
 		{Name: "联系人", DisplayName: "Contacts */ list", Fields: []schemaField{
 			{Name: "名称", Type: "string"},
 			{Name: "数量", Type: "int"},
@@ -101,6 +101,7 @@ func TestGenerateSchemaMapsFieldTypes(t *testing.T) {
 	})
 	for _, want := range []string{
 		`export const DATABASE = "名称 db";`,
+		"run `autablectl app sdk` again",
 		"  /** Contacts *\\/ list */\n  \"联系人\": {\n",
 		`    "名称": string | null;`,
 		`    "数量": number | null;`,
@@ -122,8 +123,8 @@ func TestGenerateSchemaMapsFieldTypes(t *testing.T) {
 		t.Errorf("deleted fields must not be typed:\n%s", schema)
 	}
 
-	empty := generateSchema("db", nil)
-	for _, want := range []string{"export interface Tables {}", "export interface ReadOnlyFields {}", "export const TABLE_NAMES = [] as const;"} {
+	empty := generateSchema("workflow", "db", nil)
+	for _, want := range []string{"run `autablectl workflow sdk` again", "export interface Tables {}", "export interface ReadOnlyFields {}", "export const TABLE_NAMES = [] as const;"} {
 		if !strings.Contains(empty, want) {
 			t.Errorf("empty schema lacks %q:\n%s", want, empty)
 		}
@@ -193,7 +194,7 @@ func TestAppSDKRefreshesSchemaAndManifest(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeFiles(t, dir, map[string]string{
-		"src/autable/retired.ts": sdkFileMarker + " A file a newer SDK dropped.\n",
+		"src/autable/retired.ts": appProject.sdkMarker + " A file a newer SDK dropped.\n",
 		"src/autable/mine.ts":    "export const mine = 1;\n",
 	})
 	env.run(0, "fields", "add", "db", "contacts", "--fields", `[{"name":"数量","type":"int"}]`)
@@ -316,16 +317,10 @@ func TestPackAppInGitUsesGitFileList(t *testing.T) {
 }
 
 func TestRollbackTargetIsNewestBelowPublished(t *testing.T) {
-	versions := func(numbers ...int64) []appVersionSummary {
-		out := []appVersionSummary{}
-		for _, number := range numbers {
-			out = append(out, appVersionSummary{Version: number})
-		}
-		return out
-	}
+	versions := func(numbers ...int64) []int64 { return numbers }
 	cases := []struct {
 		published int64
-		versions  []appVersionSummary
+		versions  []int64
 		want      int64
 	}{
 		{3, versions(4, 3, 2, 1), 2},

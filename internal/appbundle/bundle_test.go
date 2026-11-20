@@ -103,7 +103,7 @@ func TestParseRejectsInvalidBundles(t *testing.T) {
 		},
 		"bad name": {
 			append(without(ManifestName), file(ManifestName, `{"database":"shop","name":"Bad_Name","sdk":"1.0"}`)),
-			"app name",
+			`name "Bad_Name"`,
 		},
 		"missing database": {
 			append(without(ManifestName), file(ManifestName, `{"name":"widgets","sdk":"1.0"}`)),
@@ -196,5 +196,31 @@ func TestSourceKeepsManifestAndSourceOnly(t *testing.T) {
 	}
 	if _, err := Source([]byte("plain text")); err == nil {
 		t.Fatal("expected invalid archive to fail")
+	}
+}
+
+func TestWorkflowKindRequiresWorkflowScript(t *testing.T) {
+	entries := []entry{
+		file(WorkflowManifestName, manifest),
+		file("dist/workflow.js", "var __workflow = {}"),
+		file("source/src/index.ts", "export {}"),
+	}
+	bundle, err := Workflow.Parse(archive(t, entries...))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bundle.Manifest.Name != "widgets" || string(bundle.Dist["workflow.js"]) != "var __workflow = {}" {
+		t.Fatalf("unexpected workflow bundle %#v", bundle)
+	}
+	if _, err := Workflow.Parse(archive(t, entries[0], entries[2])); err == nil || !strings.Contains(err.Error(), "no dist/workflow.js") {
+		t.Fatalf("expected a missing workflow.js error, got %v", err)
+	}
+	// An app manifest is not a workflow manifest.
+	if _, err := Workflow.Parse(archive(t, validEntries()...)); err == nil || !strings.Contains(err.Error(), "unexpected bundle entry") && !strings.Contains(err.Error(), "no "+WorkflowManifestName) {
+		t.Fatalf("expected an app bundle to be rejected as a workflow, got %v", err)
+	}
+	source, err := Workflow.Source(archive(t, entries...))
+	if err != nil || len(source) == 0 {
+		t.Fatalf("expected workflow source, got %v", err)
 	}
 }

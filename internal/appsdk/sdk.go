@@ -5,10 +5,8 @@ package appsdk
 
 import (
 	"embed"
-	"fmt"
-	"io/fs"
-	"strconv"
-	"strings"
+
+	"autable/internal/sdkversion"
 )
 
 // The SDK version is MAJOR.MINOR. A minor release only adds API; a major
@@ -29,54 +27,18 @@ var embedded embed.FS
 
 // Version returns the SDK version this server ships.
 func Version() string {
-	return fmt.Sprintf("%d.%d", Major, Minor)
+	return sdkRange.Version()
 }
 
 // Files returns the SDK source files keyed by file name.
 func Files() map[string]string {
-	files := map[string]string{}
-	entries, err := fs.ReadDir(embedded, "files")
-	if err != nil {
-		panic(err)
-	}
-	for _, entry := range entries {
-		data, err := embedded.ReadFile("files/" + entry.Name())
-		if err != nil {
-			panic(err)
-		}
-		files[entry.Name()] = string(data)
-	}
-	return files
+	return sdkversion.Files(embedded, "files")
 }
 
 // Check returns nil when an app built against version can run on this
 // server, and an error explaining why not otherwise.
 func Check(version string) error {
-	major, minor, err := parse(version)
-	if err != nil {
-		return err
-	}
-	switch {
-	case major < MinMajor:
-		return fmt.Errorf("app SDK %s is no longer supported: this server runs SDK %d.x to %s; update the SDK with `autablectl app sdk` and rebuild", version, MinMajor, Version())
-	case major > Major || (major == Major && minor > Minor):
-		return fmt.Errorf("app SDK %s is newer than this server's SDK %s; upgrade autable or rebuild with this server's SDK", version, Version())
-	}
-	return nil
+	return sdkRange.Check(version)
 }
 
-func parse(version string) (int, int, error) {
-	majorText, minorText, ok := strings.Cut(version, ".")
-	if !ok {
-		return 0, 0, fmt.Errorf("app SDK version %q must be MAJOR.MINOR", version)
-	}
-	major, err := strconv.Atoi(majorText)
-	if err != nil || major < 0 {
-		return 0, 0, fmt.Errorf("app SDK version %q must be MAJOR.MINOR", version)
-	}
-	minor, err := strconv.Atoi(minorText)
-	if err != nil || minor < 0 {
-		return 0, 0, fmt.Errorf("app SDK version %q must be MAJOR.MINOR", version)
-	}
-	return major, minor, nil
-}
+var sdkRange = sdkversion.Range{Kind: "app", RefreshCommand: "autablectl app sdk", Major: Major, Minor: Minor, MinMajor: MinMajor}

@@ -17,7 +17,6 @@ type Store interface {
 	Get(ctx context.Context, key string) (Entry, error)
 	GetPrefix(ctx context.Context, prefix string) ([]Entry, error)
 	GetPrefixLimit(ctx context.Context, prefix string, limit int) ([]Entry, error)
-	GetPrefixKeysLimit(ctx context.Context, prefix string, limit int) ([]string, error)
 	// DeletePrefixBefore deletes every key that starts with prefix and
 	// sorts lexicographically below end, returning how many were deleted.
 	DeletePrefixBefore(ctx context.Context, prefix string, end string) (int, error)
@@ -51,54 +50,12 @@ type FieldDiff struct {
 	New any `json:"new"`
 }
 
-type WorkflowRun struct {
-	WorkflowID int64          `json:"workflow_id"`
-	Timestamp  int64          `json:"timestamp"`
-	Inputs     map[string]any `json:"inputs,omitempty"`
-	Outputs    map[string]any `json:"outputs,omitempty"`
-	Steps      []StepRecord   `json:"steps"`
-	Error      string         `json:"error,omitempty"`
-}
-
-type StepRecord struct {
-	NodeID   string         `json:"node_id"`
-	NodeType string         `json:"node_type,omitempty"`
-	Runner   string         `json:"runner,omitempty"`
-	Input    map[string]any `json:"input,omitempty"`
-	Output   map[string]any `json:"output,omitempty"`
-	Error    string         `json:"error,omitempty"`
-}
-
 func RowKey(database, table string, recordID int64, timestamp int64) string {
 	return fmt.Sprintf("rhistory_%s_%s_%020d_%020d", clean(database), clean(table), recordID, timestamp)
 }
 
 func RowPrefix(database, table string, recordID int64) string {
 	return fmt.Sprintf("rhistory_%s_%s_%020d_", clean(database), clean(table), recordID)
-}
-
-func WorkflowKey(workflowID int64, timestamp int64) string {
-	return fmt.Sprintf("whistory_%020d_%020d", workflowID, timestamp)
-}
-
-func WorkflowPrefix(workflowID int64) string {
-	return fmt.Sprintf("whistory_%020d_", workflowID)
-}
-
-func ParseWorkflowKey(key string) (int64, int64, error) {
-	parts := strings.Split(key, "_")
-	if len(parts) != 3 || parts[0] != "whistory" {
-		return 0, 0, fmt.Errorf("invalid workflow history key %q", key)
-	}
-	workflowID, err := strconv.ParseInt(parts[1], 10, 64)
-	if err != nil {
-		return 0, 0, fmt.Errorf("invalid workflow history key %q: %w", key, err)
-	}
-	timestamp, err := strconv.ParseInt(parts[2], 10, 64)
-	if err != nil {
-		return 0, 0, fmt.Errorf("invalid workflow history key %q: %w", key, err)
-	}
-	return workflowID, timestamp, nil
 }
 
 func SaveRowChange(ctx context.Context, store Store, change RowChange) (string, error) {
@@ -113,24 +70,6 @@ func SaveRowChange(ctx context.Context, store Store, change RowChange) (string, 
 	}
 	change.Timestamp = timestamp
 	value, err := json.Marshal(change)
-	if err != nil {
-		return "", err
-	}
-	return key, store.Put(ctx, key, value)
-}
-
-func SaveWorkflowRun(ctx context.Context, store Store, run WorkflowRun) (string, error) {
-	if run.Timestamp == 0 {
-		run.Timestamp = time.Now().UTC().UnixMilli()
-	}
-	key, timestamp, err := uniqueHistoryKey(ctx, store, run.Timestamp, func(timestamp int64) string {
-		return WorkflowKey(run.WorkflowID, timestamp)
-	})
-	if err != nil {
-		return "", err
-	}
-	run.Timestamp = timestamp
-	value, err := json.Marshal(run)
 	if err != nil {
 		return "", err
 	}
@@ -155,10 +94,26 @@ func DecodeRowChange(entry Entry) (RowChange, error) {
 	return change, err
 }
 
-func DecodeWorkflowRun(entry Entry) (WorkflowRun, error) {
-	var run WorkflowRun
-	err := json.Unmarshal(entry.Value, &run)
-	return run, err
+// legacyWorkflowRunPrefix starts the keys of node-workflow run history
+// (workflows v1), which workflows v2 replaced with run records in the
+// system database.
+const legacyWorkflowRunPrefix = "whistory_"
+
+// DeleteLegacyWorkflowRuns removes the run history of node workflows and
+// compacts the store when anything was deleted. It runs at every startup
+// and is a cheap no-op once the keys are gone (see docs/design/workflows-v2.md,
+// migration 7 → 8).
+func DeleteLegacyWorkflowRuns(ctx context.Context, store Store) (int, error) {
+	deleted, err := store.DeletePrefixBefore(ctx, legacyWorkflowRunPrefix, legacyWorkflowRunPrefix+"\xff")
+	if err != nil || deleted == 0 {
+		return deleted, err
+	}
+	if compacter, ok := store.(Compacter); ok {
+		if err := compacter.Compact(ctx); err != nil {
+			return deleted, err
+		}
+	}
+	return deleted, nil
 }
 
 func clean(value string) string {

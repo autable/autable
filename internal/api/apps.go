@@ -248,6 +248,10 @@ func (server *Server) handleUploadAppVersion(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	app.PermissionLevel = resourcePermissionLevel(true)
+	server.mirrorVersion(r.Context(), actorID, appbundle.App, dbName, name, archive, mirroredVersion{
+		Version: version.Version, PublishedVersion: app.PublishedVersion, SDK: version.SDK,
+		Message: version.Message, CreatedBy: version.CreatedBy, CreatedAt: version.CreatedAt,
+	})
 	status := http.StatusOK
 	if created {
 		status = http.StatusCreated
@@ -304,6 +308,7 @@ func (server *Server) handlePublishApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	published.PermissionLevel = app.PermissionLevel
+	server.mirrorPublish(r.Context(), actorID, appbundle.App, app.DatabaseName, app.Name, published.PublishedVersion)
 	writeJSON(w, http.StatusOK, appResponse{AppDefinition: published, URL: appURL(published)})
 }
 
@@ -362,6 +367,7 @@ func (server *Server) handleDeleteApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	server.appBuilds.forget(app.ID)
+	server.mirrorDelete(r.Context(), actorID, appbundle.App, app.DatabaseName, app.Name)
 	w.WriteHeader(http.StatusNoContent)
 }
 

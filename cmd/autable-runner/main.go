@@ -11,14 +11,13 @@ import (
 
 	"autable/internal/runnercli"
 	"autable/internal/version"
-	"autable/internal/workflow/nodes"
 )
 
 func main() {
 	endpoint := flag.String("endpoint", "", "autable server URL, e.g. wss://autable.example.com")
 	token := flag.String("token", os.Getenv("AUTABLE_RUNNER_TOKEN"), "runner token (defaults to AUTABLE_RUNNER_TOKEN)")
-	name := flag.String("name", defaultName(), "runner name workflow instances bind to (defaults to hostname)")
-	maxJobs := flag.Int("max-jobs", 4, "maximum concurrent jobs")
+	name := flag.String("name", defaultName(), "runner name workflows send requests through with fetch(..., { via }) (defaults to hostname)")
+	maxJobs := flag.Int("max-jobs", 4, "maximum concurrent requests")
 	showVersion := flag.Bool("version", false, "print autable-runner version and exit")
 	flag.Parse()
 	if *showVersion {
@@ -35,7 +34,7 @@ func main() {
 		Name:     *name,
 		MaxJobs:  *maxJobs,
 		Logger:   slog.Default(),
-	}, nodes.Remote())
+	})
 	if err != nil {
 		slog.Error("autable-runner stopped", "error", err)
 		os.Exit(1)

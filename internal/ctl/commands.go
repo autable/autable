@@ -19,42 +19,50 @@ var commands map[string]command
 
 func init() {
 	commands = map[string]command{
-		"login":            {"login --server URL [--token TOKEN] [--no-browser]", "sign in through the browser (or store a token)", runLogin},
-		"logout":           {"logout", "revoke the stored token and forget it", runLogout},
-		"whoami":           {"whoami", "show the signed-in user", runWhoami},
-		"api":              {"api METHOD PATH [--data JSON]", "call any API endpoint, e.g. api GET /api/metadata", runAPI},
-		"meta":             {"meta [DATABASE [TABLE]]", "show databases, tables, fields, and views", runMeta},
-		"nodes":            {"nodes", "list workflow node types with their params", runNodes},
-		"fields add":       {"fields add DATABASE TABLE --fields JSON", "add fields to a table", runFieldsAdd},
-		"rows list":        {"rows list DATABASE TABLE [--query JSON] [--sorts JSON] [--view V] [--search S] [--limit N] [--offset N]", "query rows; prints {rows, total}", runRowsList},
-		"rows get":         {"rows get DATABASE TABLE RECORD_ID", "fetch one row", runRowsGet},
-		"rows create":      {"rows create DATABASE TABLE --values JSON", "create a row", runRowsCreate},
-		"rows update":      {"rows update DATABASE TABLE RECORD_ID --values JSON", "update fields of a row", runRowsUpdate},
-		"rows upsert":      {"rows upsert DATABASE TABLE --match FIELD --values JSON", "update the row whose FIELD matches, else create", runRowsUpsert},
-		"rows delete":      {"rows delete DATABASE TABLE RECORD_ID", "delete a row", runRowsDelete},
-		"rows history":     {"rows history DATABASE TABLE RECORD_ID", "show a row's change history", runRowsHistory},
-		"workflow list":    {"workflow list DATABASE", "list workflows", runWorkflowList},
-		"workflow get":     {"workflow get DATABASE WORKFLOW [--script]", "show a workflow (secret values are never shown)", runWorkflowGet},
-		"workflow set":     {"workflow set DATABASE WORKFLOW [--enabled BOOL] [--var K=V]... [--unset-var K]... [--timeout SECONDS]", "change a workflow's settings", runWorkflowSet},
-		"workflow run":     {"workflow run DATABASE WORKFLOW [--inputs JSON]", "run a workflow now and print the run", runWorkflowRun},
-		"workflow runs":    {"workflow runs DATABASE WORKFLOW [--limit N]", "list recent runs (newest first)", runWorkflowRuns},
-		"workflow run-log": {"workflow run-log DATABASE WORKFLOW HISTORY_KEY", "show the steps, inputs, and outputs of one run", runWorkflowRunLog},
-		"file upload":      {"file upload PATH [--database DB --table TABLE [--record ID]]", "upload a file; prints its id for file fields", runFileUpload},
-		"file download":    {"file download FILE_ID --output PATH", "download a stored file", runFileDownload},
-		"pull":             {"pull [--dir DIR] [--database DB]... [--force]", "write workflow scripts into DIR", runPull},
-		"status":           {"status [--dir DIR]", "show scripts changed locally since the last pull/push", runStatus},
-		"push":             {"push [--dir DIR] [--dry-run] [--force]", "save changed and new scripts to the server", runPush},
-		"app init":         {"app init DIR --database DB --name NAME [--title T]", "create an app project (Vite, React, TypeScript, the SDK)", runAppInit},
-		"app sdk":          {"app sdk [DIR]", "refresh the vendored SDK and the schema types", runAppSDK},
-		"app dev":          {"app dev [DIR]", "run npm run dev with /api proxied to the server as you", runAppDev},
-		"app push":         {"app push [DIR] [-m MSG] [--publish] [--no-build]", "build and upload a new version; prints its preview URL", runAppPush},
-		"app list":         {"app list DATABASE", "list apps", runAppList},
-		"app versions":     {"app versions DATABASE NAME", "show an app and its versions", runAppVersions},
-		"app publish":      {"app publish DATABASE NAME VERSION", "make VERSION the one users get", runAppPublish},
-		"app rollback":     {"app rollback DATABASE NAME", "publish the newest version below the current one", runAppRollback},
-		"app pull":         {"app pull DATABASE NAME DIR [--version N]", "download a version's source into an empty DIR", runAppPull},
-		"skill show":       {"skill show", "print the agent skill (rules plus a map of the source)", runSkillShow},
-		"skill install":    {"skill install [--dir DIR]", "write the agent skill to DIR/SKILL.md (default ~/.claude/skills/autable)", runSkillInstall},
+		"login":                 {"login --server URL [--token TOKEN] [--no-browser]", "sign in through the browser (or store a token)", runLogin},
+		"logout":                {"logout", "revoke the stored token and forget it", runLogout},
+		"whoami":                {"whoami", "show the signed-in user", runWhoami},
+		"api":                   {"api METHOD PATH [--data JSON]", "call any API endpoint, e.g. api GET /api/metadata", runAPI},
+		"meta":                  {"meta [DATABASE [TABLE]]", "show databases, tables, fields, and views", runMeta},
+		"fields add":            {"fields add DATABASE TABLE --fields JSON", "add fields to a table", runFieldsAdd},
+		"rows list":             {"rows list DATABASE TABLE [--query JSON] [--sorts JSON] [--view V] [--search S] [--limit N] [--offset N]", "query rows; prints {rows, total}", runRowsList},
+		"rows get":              {"rows get DATABASE TABLE RECORD_ID", "fetch one row", runRowsGet},
+		"rows create":           {"rows create DATABASE TABLE --values JSON", "create a row", runRowsCreate},
+		"rows update":           {"rows update DATABASE TABLE RECORD_ID --values JSON", "update fields of a row", runRowsUpdate},
+		"rows upsert":           {"rows upsert DATABASE TABLE --match FIELD --values JSON", "update the row whose FIELD matches, else create", runRowsUpsert},
+		"rows delete":           {"rows delete DATABASE TABLE RECORD_ID", "delete a row", runRowsDelete},
+		"rows history":          {"rows history DATABASE TABLE RECORD_ID", "show a row's change history", runRowsHistory},
+		"workflow init":         {"workflow init DIR --database DB --name NAME [--title T]", "create a workflow project (TypeScript, esbuild, the SDK)", runWorkflowInit},
+		"workflow sdk":          {"workflow sdk [DIR]", "refresh the vendored workflow SDK and the schema types", runWorkflowSDK},
+		"workflow push":         {"workflow push [DIR] [-m MSG] [--publish] [--no-build]", "build dist/workflow.js and upload a new version", runWorkflowPush},
+		"workflow list":         {"workflow list DATABASE", "list workflows (non-admins: the ones they may run)", runWorkflowList},
+		"workflow versions":     {"workflow versions DATABASE NAME", "show a workflow: versions, triggers, settings, secret names, vars", runWorkflowVersions},
+		"workflow publish":      {"workflow publish DATABASE NAME VERSION", "make VERSION the one that runs", runWorkflowPublish},
+		"workflow rollback":     {"workflow rollback DATABASE NAME", "publish the newest version below the current one", runWorkflowRollback},
+		"workflow pull":         {"workflow pull DATABASE NAME DIR [--version N]", "download a version's source into an empty DIR", runWorkflowPull},
+		"workflow delete":       {"workflow delete DATABASE NAME", "delete a workflow with its versions, settings, and runs", runWorkflowDelete},
+		"workflow run":          {"workflow run DATABASE NAME [--trigger T] [--input JSON] [--wait]", "start a manual trigger; --wait prints the finished run", runWorkflowRun},
+		"workflow runs":         {"workflow runs DATABASE NAME [--status S] [--limit N] [--before RUN_ID]", "list runs (newest first)", runWorkflowRuns},
+		"workflow run-log":      {"workflow run-log DATABASE NAME RUN_ID", "show one run with its event, output, error, and logs", runWorkflowRunLog},
+		"workflow secret set":   {"workflow secret set DATABASE NAME KEY", "set a secret; the value is read from stdin or a prompt, never argv", runWorkflowSecretSet},
+		"workflow secret unset": {"workflow secret unset DATABASE NAME KEY", "remove a secret", runWorkflowSecretUnset},
+		"workflow var set":      {"workflow var set DATABASE NAME KEY VALUE", "set a variable", runWorkflowVarSet},
+		"workflow var unset":    {"workflow var unset DATABASE NAME KEY", "remove a variable", runWorkflowVarUnset},
+		"workflow enable":       {"workflow enable DATABASE NAME", "let the workflow's triggers start runs", setWorkflowEnabled(true)},
+		"workflow disable":      {"workflow disable DATABASE NAME", "stop the workflow's triggers from starting runs", setWorkflowEnabled(false)},
+		"file upload":           {"file upload PATH [--database DB --table TABLE [--record ID]]", "upload a file; prints its id for file fields", runFileUpload},
+		"file download":         {"file download FILE_ID --output PATH", "download a stored file", runFileDownload},
+		"app init":              {"app init DIR --database DB --name NAME [--title T]", "create an app project (Vite, React, TypeScript, the SDK)", runAppInit},
+		"app sdk":               {"app sdk [DIR]", "refresh the vendored SDK and the schema types", runAppSDK},
+		"app dev":               {"app dev [DIR]", "run npm run dev with /api proxied to the server as you", runAppDev},
+		"app push":              {"app push [DIR] [-m MSG] [--publish] [--no-build]", "build and upload a new version; prints its preview URL", runAppPush},
+		"app list":              {"app list DATABASE", "list apps", runAppList},
+		"app versions":          {"app versions DATABASE NAME", "show an app and its versions", runAppVersions},
+		"app publish":           {"app publish DATABASE NAME VERSION", "make VERSION the one users get", runAppPublish},
+		"app rollback":          {"app rollback DATABASE NAME", "publish the newest version below the current one", runAppRollback},
+		"app pull":              {"app pull DATABASE NAME DIR [--version N]", "download a version's source into an empty DIR", runAppPull},
+		"skill show":            {"skill show", "print the agent skill (rules plus a map of the source)", runSkillShow},
+		"skill install":         {"skill install [--dir DIR]", "write the agent skill to DIR/SKILL.md (default ~/.claude/skills/autable)", runSkillInstall},
 	}
 }
 
@@ -245,13 +253,6 @@ func runMeta(a *app, args []string) error {
 	return fmt.Errorf("database %q not found (or not readable)", values[0])
 }
 
-func runNodes(a *app, args []string) error {
-	if _, err := a.parse(a.newFlags("nodes"), args); err != nil {
-		return err
-	}
-	return a.get("/api/workflow/nodes")
-}
-
 func runFieldsAdd(a *app, args []string) error {
 	fs := a.newFlags("fields add")
 	fieldsArg := fs.String("fields", "", `fields to add: [{"name":"数量","type":"int"}], or {"name":"type"}`)
@@ -429,260 +430,6 @@ func runRowsHistory(a *app, args []string) error {
 		return err
 	}
 	return a.get(apiPath("tables", values[0], values[1], "rows", values[2], "history"))
-}
-
-// remoteScript is the part of a workflow response the CLI needs.
-// Workflow settings stay raw so saving sends back exactly what was read.
-type remoteScript struct {
-	ID           int64  `json:"id"`
-	DatabaseName string `json:"database_name"`
-	Name         string `json:"name"`
-	Script       string `json:"script"`
-	UpdatedAt    int64  `json:"updated_at"`
-	// PermissionLevel is 2 for admins, who get the full definition, and 1
-	// for users who may only run the workflow (its script comes back empty).
-	PermissionLevel int `json:"permission_level"`
-}
-
-// errScriptsAdminOnly explains the blank scripts a non-admin's workflow
-// list carries instead of writing them out as empty files.
-var errScriptsAdminOnly = errors.New("workflow scripts are admin-only: sign in with an admin account (see autablectl whoami)")
-
-func (script remoteScript) readable() bool {
-	return script.PermissionLevel >= 2
-}
-
-type remoteWorkflow struct {
-	remoteScript
-	Enabled              bool              `json:"enabled"`
-	Variables            map[string]string `json:"variables"`
-	Runners              map[string]string `json:"runners"`
-	HistoryRetentionDays *int64            `json:"history_retention_days"`
-	TimeoutSeconds       *int64            `json:"timeout_seconds"`
-}
-
-// saveRequest builds a full workflow definition for POST /api/workflows.
-// Secrets are sent empty: the server merges them into the stored ones, so
-// saving never touches secret values.
-func (workflow remoteWorkflow) saveRequest() map[string]any {
-	variables := workflow.Variables
-	if variables == nil {
-		variables = map[string]string{}
-	}
-	runners := workflow.Runners
-	if runners == nil {
-		runners = map[string]string{}
-	}
-	return map[string]any{
-		"id":                     workflow.ID,
-		"database_name":          workflow.DatabaseName,
-		"name":                   workflow.Name,
-		"script":                 workflow.Script,
-		"enabled":                workflow.Enabled,
-		"secrets":                map[string]string{},
-		"variables":              variables,
-		"runners":                runners,
-		"history_retention_days": workflow.HistoryRetentionDays,
-		"timeout_seconds":        workflow.TimeoutSeconds,
-	}
-}
-
-func listWorkflows(c *client, database string) ([]remoteWorkflow, error) {
-	var workflows []remoteWorkflow
-	err := c.call(http.MethodGet, apiPath("databases", database, "workflows"), nil, &workflows)
-	return workflows, err
-}
-
-// findWorkflow resolves a workflow by name, or by id when the reference is
-// a number no workflow is named.
-func findWorkflow(c *client, database, ref string) (remoteWorkflow, error) {
-	workflows, err := listWorkflows(c, database)
-	if err != nil {
-		return remoteWorkflow{}, err
-	}
-	for _, workflow := range workflows {
-		if workflow.Name == ref {
-			return workflow, nil
-		}
-	}
-	for _, workflow := range workflows {
-		if strconv.FormatInt(workflow.ID, 10) == ref {
-			return workflow, nil
-		}
-	}
-	return remoteWorkflow{}, fmt.Errorf("workflow %q not found in database %q (or not readable)", ref, database)
-}
-
-func runWorkflowList(a *app, args []string) error {
-	values, err := a.parse(a.newFlags("workflow list"), args, "DATABASE")
-	if err != nil {
-		return err
-	}
-	c, err := a.client()
-	if err != nil {
-		return err
-	}
-	workflows, err := listWorkflows(c, values[0])
-	if err != nil {
-		return err
-	}
-	summaries := make([]map[string]any, 0, len(workflows))
-	for _, workflow := range workflows {
-		summaries = append(summaries, map[string]any{
-			"id":         workflow.ID,
-			"name":       workflow.Name,
-			"enabled":    workflow.Enabled,
-			"updated_at": workflow.UpdatedAt,
-		})
-	}
-	return a.printJSON(summaries)
-}
-
-func runWorkflowGet(a *app, args []string) error {
-	fs := a.newFlags("workflow get")
-	scriptOnly := fs.Bool("script", false, "print only the script source")
-	values, err := a.parse(fs, args, "DATABASE", "WORKFLOW")
-	if err != nil {
-		return err
-	}
-	c, err := a.client()
-	if err != nil {
-		return err
-	}
-	workflow, err := findWorkflow(c, values[0], values[1])
-	if err != nil {
-		return err
-	}
-	if *scriptOnly {
-		if !workflow.readable() {
-			return errScriptsAdminOnly
-		}
-		_, err := io.WriteString(a.stdout, workflow.Script)
-		return err
-	}
-	return a.get(apiPath("workflows", strconv.FormatInt(workflow.ID, 10)))
-}
-
-type multiFlag []string
-
-func (values *multiFlag) String() string     { return strings.Join(*values, ",") }
-func (values *multiFlag) Set(v string) error { *values = append(*values, v); return nil }
-
-func runWorkflowSet(a *app, args []string) error {
-	fs := a.newFlags("workflow set")
-	enabled := fs.String("enabled", "", "true or false")
-	timeout := fs.Int64("timeout", 0, "run timeout in seconds (0 keeps the current value)")
-	var setVars, unsetVars multiFlag
-	fs.Var(&setVars, "var", "set a variable, KEY=VALUE (repeatable)")
-	fs.Var(&unsetVars, "unset-var", "remove a variable (repeatable)")
-	values, err := a.parse(fs, args, "DATABASE", "WORKFLOW")
-	if err != nil {
-		return err
-	}
-	c, err := a.client()
-	if err != nil {
-		return err
-	}
-	workflow, err := findWorkflow(c, values[0], values[1])
-	if err != nil {
-		return err
-	}
-	if *enabled != "" {
-		parsed, err := strconv.ParseBool(*enabled)
-		if err != nil {
-			return usagef("--enabled must be true or false")
-		}
-		workflow.Enabled = parsed
-	}
-	if *timeout > 0 {
-		workflow.TimeoutSeconds = timeout
-	}
-	if workflow.Variables == nil {
-		workflow.Variables = map[string]string{}
-	}
-	for _, pair := range setVars {
-		key, value, ok := strings.Cut(pair, "=")
-		if !ok || key == "" {
-			return usagef("--var must be KEY=VALUE, got %q", pair)
-		}
-		workflow.Variables[key] = value
-	}
-	for _, key := range unsetVars {
-		delete(workflow.Variables, key)
-	}
-	return a.send(http.MethodPost, "/api/workflows", workflow.saveRequest())
-}
-
-func runWorkflowRun(a *app, args []string) error {
-	fs := a.newFlags("workflow run")
-	inputs := fs.String("inputs", "", "inputs passed to the run, as a JSON object")
-	values, err := a.parse(fs, args, "DATABASE", "WORKFLOW")
-	if err != nil {
-		return err
-	}
-	body := map[string]any{"inputs": map[string]any{}}
-	if *inputs != "" {
-		var parsed map[string]any
-		if err := a.readJSONArg("inputs", *inputs, &parsed); err != nil {
-			return err
-		}
-		body["inputs"] = parsed
-	}
-	c, err := a.client()
-	if err != nil {
-		return err
-	}
-	workflow, err := findWorkflow(c, values[0], values[1])
-	if err != nil {
-		return err
-	}
-	data, err := c.do(http.MethodPost, apiPath("workflows", strconv.FormatInt(workflow.ID, 10), "runs"), body)
-	var failed *apiError
-	if errors.As(err, &failed) && failed.Status == http.StatusBadRequest && len(failed.Body) > 0 {
-		// A failed run still returns the run record with its error.
-		if printErr := a.printRaw(failed.Body); printErr != nil {
-			return printErr
-		}
-		return errors.New("workflow run failed")
-	}
-	if err != nil {
-		return err
-	}
-	return a.printRaw(data)
-}
-
-func runWorkflowRuns(a *app, args []string) error {
-	fs := a.newFlags("workflow runs")
-	limit := fs.Int("limit", 20, "number of runs")
-	values, err := a.parse(fs, args, "DATABASE", "WORKFLOW")
-	if err != nil {
-		return err
-	}
-	c, err := a.client()
-	if err != nil {
-		return err
-	}
-	workflow, err := findWorkflow(c, values[0], values[1])
-	if err != nil {
-		return err
-	}
-	return a.get(apiPath("workflows", strconv.FormatInt(workflow.ID, 10), "runs") + "?limit=" + strconv.Itoa(*limit))
-}
-
-func runWorkflowRunLog(a *app, args []string) error {
-	values, err := a.parse(a.newFlags("workflow run-log"), args, "DATABASE", "WORKFLOW", "HISTORY_KEY")
-	if err != nil {
-		return err
-	}
-	c, err := a.client()
-	if err != nil {
-		return err
-	}
-	workflow, err := findWorkflow(c, values[0], values[1])
-	if err != nil {
-		return err
-	}
-	return a.get(apiPath("workflows", strconv.FormatInt(workflow.ID, 10), "runs", values[2]))
 }
 
 func runFileUpload(a *app, args []string) error {

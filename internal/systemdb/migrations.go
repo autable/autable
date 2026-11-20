@@ -89,6 +89,21 @@ var migrations = []func(orm *gorm.DB) error{
 		}
 		return orm.Exec("UPDATE `permission_grant_models` SET `level` = 1 WHERE `scope` IN ('app', 'app_set') AND `level` > 1").Error
 	},
+	// 7 → 8: workflows became versioned code bundles (workflows v2) with no
+	// compatibility. The old workflow table is dropped; AutoMigrate creates
+	// the new one, whose ids restart, so every grant and role membership
+	// held by a workflow:<id> subject and every workflow (run) grant goes
+	// too — a new workflow must not inherit an old one's grants. The old
+	// LevelDB run history is deleted at startup (history.DeleteLegacyWorkflowRuns).
+	func(orm *gorm.DB) error {
+		if err := orm.Exec("DROP TABLE `workflow_models`").Error; err != nil {
+			return err
+		}
+		if err := orm.Exec("DELETE FROM `permission_grant_models` WHERE `subject_id` LIKE 'workflow:%' OR `scope` = 'workflow'").Error; err != nil {
+			return err
+		}
+		return orm.Exec("DELETE FROM `role_member_models` WHERE `subject_type` = 'workflow' OR `subject_id` LIKE 'workflow:%'").Error
+	},
 }
 
 func currentSchemaVersion() int64 {

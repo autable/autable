@@ -226,7 +226,10 @@ func (service *Service) setFailed(err error) {
 
 func (service *Service) commit(ctx context.Context, changes []Change) (string, bool, error) {
 	paths := []string{}
-	for _, path := range []string{"metadata", "workflow"} {
+	// The repository is the deployment's backup: metadata, plus the source
+	// of every pushed app and workflow version (see api/repository_mirror.go).
+	// form/ holds scripts written by releases before apps replaced forms.
+	for _, path := range []string{repository.MetadataDir, "app", "workflow", "form"} {
 		if _, err := os.Stat(filepath.Join(service.options.Root, path)); err == nil {
 			paths = append(paths, path)
 		} else if err != nil && !os.IsNotExist(err) {

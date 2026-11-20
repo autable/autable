@@ -2,7 +2,6 @@ package systemdb
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -22,27 +21,6 @@ import (
 
 type DB struct {
 	orm *gorm.DB
-}
-
-type WorkflowDefinition struct {
-	ID           int64             `json:"id"`
-	DatabaseName string            `json:"database_name"`
-	Name         string            `json:"name"`
-	Script       string            `json:"script"`
-	Enabled      bool              `json:"enabled"`
-	CreatorID    string            `json:"creator_id,omitempty"`
-	Secrets      map[string]string `json:"secrets"`
-	Variables    map[string]string `json:"variables"`
-	Runners      map[string]string `json:"runners"`
-	// HistoryRetentionDays is nil to keep run history forever, 0 to keep
-	// none, and a positive count to keep that many days.
-	HistoryRetentionDays *int64 `json:"history_retention_days"`
-	// TimeoutSeconds is nil to run with the default one-hour limit, or a
-	// positive number of seconds after which a run is aborted.
-	TimeoutSeconds  *int64           `json:"timeout_seconds"`
-	PermissionLevel permission.Level `json:"permission_level,omitempty" gorm:"-"`
-	CreatedAt       int64            `json:"created_at"`
-	UpdatedAt       int64            `json:"updated_at"`
 }
 
 type RoleDefinition struct {
@@ -88,22 +66,6 @@ type permissionGrantModel struct {
 	Resource  string           `gorm:"uniqueIndex:idx_permission_target;not null"`
 	Field     string           `gorm:"uniqueIndex:idx_permission_target;not null;default:''"`
 	Level     permission.Level `gorm:"not null"`
-}
-
-type workflowModel struct {
-	ID                   int64  `gorm:"primaryKey;autoIncrement"`
-	DatabaseName         string `gorm:"uniqueIndex:idx_workflow_database_name;not null"`
-	Name                 string `gorm:"uniqueIndex:idx_workflow_database_name;not null"`
-	Script               string `gorm:"not null"`
-	Enabled              bool   `gorm:"not null;default:true"`
-	CreatorID            string `gorm:"index;not null;default:''"`
-	SecretsJSON          string `gorm:"not null"`
-	VariablesJSON        string `gorm:"not null"`
-	RunnersJSON          string `gorm:"not null;default:'{}'"`
-	HistoryRetentionDays *int64
-	TimeoutSeconds       *int64
-	CreatedAt            int64 `gorm:"autoCreateTime:milli"`
-	UpdatedAt            int64 `gorm:"autoUpdateTime:milli"`
 }
 
 type fileModel struct {
@@ -178,6 +140,11 @@ func (db *DB) Migrate(ctx context.Context) error {
 		&sessionModel{},
 		&permissionGrantModel{},
 		&workflowModel{},
+		&workflowVersionModel{},
+		&workflowSecretModel{},
+		&workflowVarModel{},
+		&workflowRunModel{},
+		&workflowLogModel{},
 		&appModel{},
 		&appVersionModel{},
 		&roleModel{},
@@ -406,70 +373,6 @@ func (db *DB) GrantListForSubject(ctx context.Context, subjectID string) ([]perm
 	return grants, nil
 }
 
-func (db *DB) SaveWorkflow(ctx context.Context, workflow WorkflowDefinition) (WorkflowDefinition, error) {
-	if workflow.DatabaseName == "" {
-		return WorkflowDefinition{}, errors.New("database_name is required")
-	}
-	if workflow.ID == 0 {
-		workflow.Enabled = true
-	}
-	if workflow.ID != 0 {
-		existing, err := db.Workflow(ctx, workflow.ID)
-		if err != nil {
-			return WorkflowDefinition{}, err
-		}
-		workflow.CreatorID = existing.CreatorID
-		workflow.Secrets = mergeStringMaps(existing.Secrets, workflow.Secrets)
-	}
-	model, err := workflowToModel(workflow)
-	if err != nil {
-		return WorkflowDefinition{}, err
-	}
-	if workflow.ID == 0 {
-		if err := db.orm.WithContext(ctx).Create(&model).Error; err != nil {
-			return WorkflowDefinition{}, err
-		}
-		return modelToWorkflow(model)
-	}
-	if err := db.orm.WithContext(ctx).Save(&model).Error; err != nil {
-		return WorkflowDefinition{}, err
-	}
-	return modelToWorkflow(model)
-}
-
-func (db *DB) DeleteWorkflow(ctx context.Context, id int64) error {
-	return db.orm.WithContext(ctx).Delete(&workflowModel{}, id).Error
-}
-
-func (db *DB) Workflow(ctx context.Context, id int64) (WorkflowDefinition, error) {
-	var model workflowModel
-	if err := db.orm.WithContext(ctx).First(&model, id).Error; err != nil {
-		return WorkflowDefinition{}, err
-	}
-	return modelToWorkflow(model)
-}
-
-func (db *DB) Workflows(ctx context.Context, databaseName string) ([]WorkflowDefinition, error) {
-	var models []workflowModel
-	err := db.orm.WithContext(ctx).
-		Where(&workflowModel{DatabaseName: databaseName}).
-		Order(clause.OrderByColumn{Column: clause.Column{Name: "id"}}).
-		Find(&models).
-		Error
-	if err != nil {
-		return nil, err
-	}
-	workflows := make([]WorkflowDefinition, 0, len(models))
-	for _, model := range models {
-		workflow, err := modelToWorkflow(model)
-		if err != nil {
-			return nil, err
-		}
-		workflows = append(workflows, workflow)
-	}
-	return workflows, nil
-}
-
 func (db *DB) SaveRole(ctx context.Context, role RoleDefinition) (RoleDefinition, error) {
 	if role.DatabaseName == "" {
 		return RoleDefinition{}, errors.New("database_name is required")
@@ -621,10 +524,6 @@ func RoleSubjectID(databaseName, roleName string) string {
 	return "role:" + databaseName + ":" + roleName
 }
 
-func WorkflowSubjectID(workflowID int64) string {
-	return "workflow:" + strconv.FormatInt(workflowID, 10)
-}
-
 func roleMemberSubjectID(member RoleMember) string {
 	if member.Type == "workflow" {
 		workflowID, err := strconv.ParseInt(member.ID, 10, 64)
@@ -686,61 +585,6 @@ func modelToGrant(model permissionGrantModel) permission.Grant {
 	}
 }
 
-func workflowToModel(workflow WorkflowDefinition) (workflowModel, error) {
-	secrets, err := json.Marshal(emptyStringMap(workflow.Secrets))
-	if err != nil {
-		return workflowModel{}, err
-	}
-	variables, err := json.Marshal(emptyStringMap(workflow.Variables))
-	if err != nil {
-		return workflowModel{}, err
-	}
-	runners, err := json.Marshal(emptyStringMap(workflow.Runners))
-	if err != nil {
-		return workflowModel{}, err
-	}
-	return workflowModel{
-		ID:                   workflow.ID,
-		DatabaseName:         workflow.DatabaseName,
-		Name:                 workflow.Name,
-		Script:               workflow.Script,
-		Enabled:              workflow.Enabled,
-		CreatorID:            workflow.CreatorID,
-		SecretsJSON:          string(secrets),
-		VariablesJSON:        string(variables),
-		RunnersJSON:          string(runners),
-		HistoryRetentionDays: workflow.HistoryRetentionDays,
-		TimeoutSeconds:       workflow.TimeoutSeconds,
-		CreatedAt:            workflow.CreatedAt,
-		UpdatedAt:            workflow.UpdatedAt,
-	}, nil
-}
-
-func modelToWorkflow(model workflowModel) (WorkflowDefinition, error) {
-	workflow := WorkflowDefinition{
-		ID:                   model.ID,
-		DatabaseName:         model.DatabaseName,
-		Name:                 model.Name,
-		Script:               model.Script,
-		Enabled:              model.Enabled,
-		CreatorID:            model.CreatorID,
-		HistoryRetentionDays: model.HistoryRetentionDays,
-		TimeoutSeconds:       model.TimeoutSeconds,
-		CreatedAt:            model.CreatedAt,
-		UpdatedAt:            model.UpdatedAt,
-	}
-	if err := json.Unmarshal([]byte(model.SecretsJSON), &workflow.Secrets); err != nil {
-		return WorkflowDefinition{}, err
-	}
-	if err := json.Unmarshal([]byte(model.VariablesJSON), &workflow.Variables); err != nil {
-		return WorkflowDefinition{}, err
-	}
-	if err := json.Unmarshal([]byte(model.RunnersJSON), &workflow.Runners); err != nil {
-		return WorkflowDefinition{}, err
-	}
-	return workflow, nil
-}
-
 func roleToModel(role RoleDefinition) roleModel {
 	return roleModel{
 		ID:           role.ID,
@@ -789,24 +633,6 @@ func (db *DB) roleMembers(ctx context.Context, databaseName, roleName string) ([
 		members = append(members, roleMemberFromModel(model))
 	}
 	return members, nil
-}
-
-func emptyStringMap(values map[string]string) map[string]string {
-	if values == nil {
-		return map[string]string{}
-	}
-	return values
-}
-
-func mergeStringMaps(base map[string]string, updates map[string]string) map[string]string {
-	merged := map[string]string{}
-	for key, value := range base {
-		merged[key] = value
-	}
-	for key, value := range updates {
-		merged[key] = value
-	}
-	return merged
 }
 
 type FileRecord struct {

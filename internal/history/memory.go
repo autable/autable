@@ -77,23 +77,3 @@ func (store *MemoryStore) DeletePrefixBefore(_ context.Context, prefix string, e
 	}
 	return deleted, nil
 }
-
-func (store *MemoryStore) GetPrefixKeysLimit(_ context.Context, prefix string, limit int) ([]string, error) {
-	store.mu.RLock()
-	defer store.mu.RUnlock()
-
-	keys := []string{}
-	for key := range store.data {
-		if strings.HasPrefix(key, prefix) {
-			keys = append(keys, key)
-		}
-	}
-	sort.Strings(keys)
-	if limit <= 0 {
-		return []string{}, nil
-	}
-	if len(keys) <= limit {
-		return keys, nil
-	}
-	return keys[len(keys)-limit:], nil
-}

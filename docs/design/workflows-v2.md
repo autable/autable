@@ -7,14 +7,12 @@ existing workflows are rewritten on the new model.
 
 The old model was one JavaScript file with `instances`, `trigger` and
 `run`, evaluated synchronously in goja. The only way to reach the outside
-world was a **node**: Go code compiled into autable. That had four costs:
+world was a **node**: Go code compiled into autable. That had three costs:
 
 - **Every integration was a release.** Even one HTTP call or signature
   needed a new node, a new build and an upgrade.
 - **Triggers were hard-coded** in the API server. The webhook body format
   was fixed, so third-party callbacks could not be received.
-- **Nothing was durable.** There were no retries, no waiting, no stored
-  queue, and a run was written only at the end. Approvals were polled.
 - **There was no versioning, rollback or shared code.**
 
 ## Model
@@ -40,6 +38,9 @@ ordinary TypeScript built on `fetch` and `crypto`, and live with the
 deployment. Adding or fixing one is a workflow push, not an autable
 release. There are no nodes.
 
+Workflows are **stateless**: a run is one execution of `run(event)` from
+start to finish. Anything that must outlive a run lives in table rows.
+
 ### Project layout
 
 ```
@@ -50,48 +51,62 @@ dist/workflow.js        esbuild output (IIFE assigning globalThis.__workflow)
 ```
 
 The bundle is the same gzip tar format as apps: manifest, `dist/`,
-`source/`. `dist/workflow.js` is required.
+`source/`. `dist/workflow.js` is required. Workflow names follow the app
+name rule, `^[a-z0-9][a-z0-9-]{0,62}$`.
 
 ### Code shape
 
 ```ts
-import { schedule, recordChanged, webhook, manual, step, waitFor, signal, fetch, secrets, tables, log } from "./autable";
+import { schedule, recordChanged, webhook, manual, fetch, secrets, tables, log } from "./autable";
 
 export const triggers = {
-  daily: schedule({ cron: "0 9 * * 1-5", timezone: "Asia/Shanghai" }),
-  changed: recordChanged({ table: "订单", operations: ["create", "update"] }),
-  callback: webhook({ path: "approval" }),
+  sync: schedule({ cron: "*/10 * * * *", timezone: "Asia/Shanghai" }),
+  changed: recordChanged({ table: "订单", operations: ["update"], fields: ["状态"] }),
+  ping: webhook({ path: "ping" }),
   start: manual({ fields: [{ name: "orderId", label: "Order", type: "number" }] }),
 };
 
 export async function run(event: TriggerEvent<typeof triggers>) {
   switch (event.trigger) {
-    case "callback": {
-      // event.request: { method, path, query, headers, body (bytes), text(), json() }
-      const payload = verifyAndDecode(event.request, secrets.get("callback_key"));
-      await signal(`approval:${payload.instanceId}`, payload);
-      return { status: 200, body: "success" };   // webhook runs answer the HTTP request
-    }
-    case "start": {
-      const created = await step("create approval", () => createApproval(event.input.orderId));
-      const result = await waitFor<ApprovalResult>(`approval:${created.id}`, { timeout: "7d" });
-      await step("write result", () => tables("订单").update(event.input.orderId, { 状态: result.status }));
-    }
+    case "sync":
+      // poll an external system and write what changed into rows
+      break;
+    case "changed":
+      // react to the row change; event.change.changedFields, event.change.actor
+      break;
+    case "ping":
+      return { status: 200, body: "pong" };   // webhook runs answer the HTTP request
+    case "start":
+      await tables("订单").update(event.input.orderId, { 状态: "submitted" });
   }
 }
 ```
 
 - **Triggers** are read once, when a version is published: the bundle is
-  evaluated and the `triggers` export is stored. Publishing fails when the
-  declarations are invalid.
-- **Trigger kinds** are `schedule` (cron with seconds omitted, plus a
-  timezone), `recordChanged` (table and operations; the event carries the
-  row change filtered by the workflow subject's grants), `webhook` (path
-  segment; the run gets the raw request) and `manual` (optional `fields` list of `{name,
-  label, type: "string" | "number" | "boolean"}` used for the input form;
-  started from the API, the CLI or an app).
+  evaluated and the `triggers` export is stored. Publishing fails (`422`)
+  when the declarations are invalid.
+- **Trigger kinds:**
+  - `schedule`: cron with seconds omitted (5 fields), plus an IANA
+    timezone (default UTC). Missed minutes (server down) are not caught up.
+  - `recordChanged`: `table`, optional `operations` (default create,
+    update and delete), optional `fields` (fire only when one of them
+    changed) and `includeOwnWrites` (default `false`: changes written by
+    this workflow's own runs do not fire it, so a workflow that updates
+    the row it reacts to cannot loop on itself). The event carries the
+    row change with its `actor` (a user, or `workflow:<id>`) and
+    `changedFields`, with values and before/after diffs filtered by the
+    workflow subject's field grants.
+  - `webhook`: a path; the run gets the raw request and its return value
+    is the HTTP response.
+  - `manual`: optional `fields` list of `{name, label, type: "string" |
+    "number" | "boolean"}` used for the input form; started from the
+    API, the CLI or an app.
 - **`run`** receives `{ trigger, runId, ... }` with the trigger-specific
   fields: `scheduledAt`, `change`, `request` or `input`.
+
+The exact declaration objects, event shapes and the host functions the
+SDK is built on are specified in
+[workflows-host-api.md](workflows-host-api.md).
 
 ### Primitives (SDK 1.0)
 
@@ -102,45 +117,57 @@ export async function run(event: TriggerEvent<typeof triggers>) {
 | `secrets.get(name)`, `vars.get(name)` | Per-workflow, set by admins in the UI or with `autablectl workflow secret set`. Secret values are never returned by the API. |
 | `tables(name)`, `users`, `files` | The same typed API as the app SDK, executed server-side as the `workflow:<id>` subject and limited by that subject's grants. |
 | `log.info/warn/error(message, data?)` | Stored with the run. |
-| `step(name, fn, { retries?, backoffMs? })` | Runs `fn` once per run and journals its JSON result. On failure it retries (default 0), then fails the run. |
-| `sleep(duration)` | Durable timer; suspends the run. |
-| `waitFor(key, { timeout? })` | Suspends until `signal(key, payload)`; resolves with the payload. On timeout it throws `TimeoutError`. |
-| `signal(key, payload)` | Wakes every waiting run of this database's workflows that waits on `key`. |
-| `now()`, `random()` | Journaled, so replay is deterministic. |
 
-Durations are strings like `30s`, `15m`, `7d`, or milliseconds.
+Standard globals: `TextEncoder`, `TextDecoder`, `URL`,
+`URLSearchParams`, `atob`, `btoa`, `setTimeout`/`clearTimeout` (within
+the run) and `console.*` (mapped to the run log). `Date` and
+`Math.random` behave normally.
 
-### Durable execution
+### Long-running processes
 
-- **Run status:** a run is `queued`, `running`, `waiting`, `succeeded` or
-  `failed`.
-- **Stored state:** runs, their journal (step results, `now`/`random`
-  values, the signal and timer outcomes) and their logs live in the system
-  database.
-- **Suspending:** when the code awaits `sleep` or `waitFor`, the run is
-  stored as `waiting`, with a wake time or a wait key, and its goja
-  runtime is discarded.
-- **Resuming:** a signal, the timer or a timeout queues the run again.
-  Resuming evaluates the code from the top in a fresh runtime. Every
-  journaled `step`, `now`, `random`, `sleep` and `waitFor` returns its
-  recorded outcome instead of running again. Code between steps must
-  therefore be deterministic; side effects belong inside `step`.
-- **Pinned version:** a run always uses the version it started with, even
-  after a newer one is published.
-- **Restarts:** the queue is stored, so a restart resumes queued and
-  running runs. A run that was mid-step re-executes that step, so steps
-  should be idempotent where it matters.
+There is no waiting inside a run. A process that spans hours or days —
+an approval, a multi-stage order — keeps its state in table rows and is
+advanced by triggers:
+
+- **External approvals** happen in the IM or ERP system. A
+  `schedule`-triggered workflow polls the external system for the status
+  of open requests (rows whose state says "pending") and writes the
+  results into those rows.
+- **Stages** are driven by `recordChanged`: each row change fires the
+  workflow again, which looks at the row's state (`event.change`), does
+  the next stage's work, and writes the next state. Use `fields` to react
+  only to the state field. Own writes do not re-trigger the workflow by
+  default; a second workflow (or a user) writing the row does.
+- **Idempotence** comes from the rows: check the current state before
+  acting, and use upsert or unique fields where duplicates would hurt.
+
+`webhook` is a plain feature for systems that push events or need an
+HTTP endpoint; a webhook run usually just records what it received in a
+row.
+
+### Runs
+
+- **Status:** a run is `queued`, `running`, `succeeded`, `failed` or
+  `cancelled`.
+- **Stored:** the system database keeps each run's trigger, event (or
+  input), pinned version, status, output, error, logs and timestamps,
+  and who started it (manual runs).
+- **Pinned version:** a run uses the version that was published when it
+  was queued, even if a newer one is published before it starts.
+- **Queue:** queued runs live in memory. On startup, runs left `queued`
+  or `running` by a previous process are marked `failed` with
+  `interrupted by server restart`.
+- **Concurrency:** runs execute in parallel up to a worker limit (8).
+  Runs of one workflow are not serialized; use table constraints and
+  row state for ordering.
+- **Cancel:** a queued run is cancelled before it starts; a running run
+  is interrupted.
 - **Limits:**
-  - Each execution slice (from start or resume until it suspends or
-    finishes) has a CPU-time limit: the workflow's `timeout`, default
-    10 min, enforced with `Interrupt`.
-  - A run lasts at most 30 days.
-  - The journal is capped at 10 MiB.
-  - Webhook runs must respond within 15 s. They may call `signal` and
-    `step`, but not suspend.
-- **Concurrency:** runs of different workflows execute in parallel up to
-  a worker limit. Runs of one workflow are not serialized; use `step` and
-  table constraints for ordering.
+  - Each run has a time limit: the workflow's `timeout_seconds`
+    (default 10 min), enforced with `Interrupt`.
+  - Webhook runs must respond within 15 s; they run immediately, not
+    through the queue, but share the worker limit.
+  - Output is capped at 1 MiB, logs at 1000 entries per run.
 
 ### Runners
 
@@ -154,13 +181,37 @@ tokens stay per database.
 
 - **Engine:** goja inside the server binary. async/await and generators
   are native in the pinned version.
-- **Event loop:** a small loop per execution slice. Host operations such
-  as `fetch` run in goroutines and settle their promises on the loop.
+- **Event loop:** a small loop per run. Host operations such as `fetch`
+  run in goroutines and settle their promises on the loop.
 - **Bundles:** esbuild bundles pure-JS npm packages. Node built-ins are
   not available.
-- **Globals:** `TextEncoder`, `TextDecoder`, `URL`, `URLSearchParams`,
-  `atob`, `btoa` and `setTimeout` (non-durable, short delays only) are
-  provided; `console.log` maps to `log.info`.
+
+### Implementation decisions
+
+- **Packages:** `internal/wfruntime` (goja runtime, event loop, globals,
+  host API, crypto, trigger validation), `internal/cron` (5-field cron
+  parser, no dependency), `internal/egress` (the HTTP client behind
+  `fetch`, shared by the server and runners), `internal/wfsdk` (embedded
+  SDK and version rule), `internal/sdkversion` (MAJOR.MINOR rule shared
+  with the app SDK), `internal/appbundle` (bundle kinds: app and
+  workflow); engine, host and handlers live in `internal/api`.
+- **Triggers are read on every publish** (also when re-publishing an old
+  version for a rollback), because `recordChanged` declarations name
+  tables and fields that may have changed; the result is stored with the
+  version. An upload with `publish=1` whose triggers are invalid stores
+  nothing.
+- **Webhook runs** run immediately on the request (not through the queue)
+  but take a worker slot; their limit is the smaller of 15 s and the
+  workflow timeout. Unknown paths and disabled or unpublished workflows
+  answer `404`. A thrown error answers `500 {error, run_id}`, the time
+  limit `504`.
+- **Schedules** are checked once a minute in process; each trigger fires
+  at most once per minute. Missed minutes are not caught up.
+- **recordChanged** creates one run per matching trigger; a workflow
+  whose subject can read none of the table's fields is not fired.
+- **Deleting a workflow** cancels its queued and running runs.
+- **Run ids** are numbers. A run's `version` is the published version at
+  queue time.
 
 ## Storage
 
@@ -168,22 +219,29 @@ The system database holds these tables:
 
 | Table | Contents |
 |---|---|
-| `workflow_models` | id, database, name, title, published version, latest version, enabled, creator, timestamps |
-| `workflow_version_models` | workflow, version, sdk, message, bundle (blob), triggers (JSON), created by, timestamp |
+| `workflow_models` | id, database, name, title, published version, latest version, enabled, timeout seconds, history retention days, creator, timestamps |
+| `workflow_version_models` | workflow, version, sdk, message, size, bundle (blob), triggers (JSON, stored when the version is first published), created by, timestamp |
 | `workflow_secret_models` / `workflow_var_models` | workflow, name, value |
-| `workflow_run_models` | id, workflow, version, trigger, status, event (JSON), journal (JSON), output, error, wait key, wake at, attempts, timestamps |
+| `workflow_run_models` | id, workflow, version, trigger, status, event (JSON), output (JSON), error, started by, created / started / finished timestamps |
 | `workflow_log_models` | run, time, level, message, data |
 
-Retention applies per workflow (`history_retention_days`, default 30).
-Waiting runs are never pruned.
+Retention applies per workflow (`history_retention_days`, 1–3650,
+default 30): finished runs older than that are deleted daily, with their
+logs.
 
 Migration 7 → 8 does the following:
 
-- drops the old workflow table and its LevelDB run history keys;
+- drops the old workflow table; the old run history (LevelDB `whistory_`
+  keys) is deleted at server startup, because LevelDB is not part of the
+  system database transaction;
 - deletes every grant and role membership held by `workflow:<id>`
   subjects (new ids would otherwise inherit old grants), and every
   `workflow` scope grant;
-- removes the `workflow/` directory from repository sync.
+- the repository sync stops staging the `workflow/` directory. Scripts
+  already written there are left untouched.
+
+Deleting a workflow deletes its versions, secrets, vars, runs and logs,
+the grants on it and the grants and role memberships of its subject.
 
 ## API
 
@@ -198,16 +256,40 @@ PUT    /api/databases/{db}/workflows/{name}/secrets/{key}   {value} ; DELETE to 
 PUT    /api/databases/{db}/workflows/{name}/vars/{key}      {value} ; DELETE to remove
 GET    /api/databases/{db}/workflows/{name}/versions/{v}/source
 DELETE /api/databases/{db}/workflows/{name}
-POST   /api/databases/{db}/workflows/{name}/runs            {trigger, input} — manual trigger; {wait: true} waits up to 60 s for completion
+POST   /api/databases/{db}/workflows/{name}/runs            {trigger?, input?, wait?} — manual trigger; wait: true waits up to 60 s
 GET    /api/databases/{db}/workflows/{name}/runs            ?status=&limit=&before=
-GET    /api/databases/{db}/workflows/{name}/runs/{id}       run with journal and logs
+GET    /api/databases/{db}/workflows/{name}/runs/{id}       run with event and logs
 POST   /api/databases/{db}/workflows/{name}/runs/{id}/cancel
 ANY    /api/hooks/{db}/{name}/{path}                        webhook trigger, no session; the code authenticates the request
 ```
 
 Users with a run grant may use only the list (for runnable workflows),
 `POST .../runs` with a manual trigger, and `GET .../runs/{id}` for the
-runs they started, which show status and output only.
+runs they started, which show status and output only. A disabled or
+unpublished workflow cannot be started by them (`409`); admins may start
+the manual trigger of a disabled workflow to test it.
+
+Response shapes:
+
+- **Workflow:** `{id, database_name, name, title, enabled,
+  published_version, latest_version, timeout_seconds,
+  history_retention_days, creator_id, created_at, updated_at, triggers,
+  last_run}`. `triggers` is `[{name, kind, ...declaration, url?}]` from
+  the published version (`url` for webhooks). Non-admins get `{id,
+  database_name, name, title, enabled, published_version, triggers}`
+  with manual triggers only.
+- **Detail:** `{workflow, versions: [{version, sdk, message, size,
+  created_by, created_at, published, supported, sdk_error?}], secrets:
+  [name], vars: {name: value}, sdk: {version, min_major}}`.
+- **Run:** `{id, workflow_id, version, trigger, status, event, output,
+  error, started_by, created_at, started_at, finished_at, logs: [{time,
+  level, message, data}]}`; lists omit `event` and `logs`; non-admins get
+  `{id, workflow_id, trigger, status, output, error, created_at,
+  started_at, finished_at}`.
+- `POST .../runs` answers `201` with the run, or with `wait: true` `200`
+  when it finished within 60 s and `202` when it is still going.
+- Upload answers like apps (`201` creating, `200` otherwise) with
+  `{workflow, version}`; publish answers with the workflow.
 
 ## Command line
 
@@ -233,8 +315,7 @@ Workflows get the same shape as apps:
   - triggers, including webhook URLs;
   - settings;
   - secrets, which can be set but not read, and vars;
-  - the runs list, with run detail: the step journal, logs, waits and
-    errors;
+  - the runs list, with run detail: event, logs, output and errors;
   - starting a manual run with JSON input.
 
 There is no in-browser code editor; code lives in projects. Ordinary

@@ -22,13 +22,10 @@ import (
 	"autable/internal/config"
 	"autable/internal/history"
 	"autable/internal/metadata"
-	"autable/internal/permission"
 	"autable/internal/recorddb"
 	"autable/internal/systemdb"
 	"autable/internal/table"
 )
-
-const testWorkflowScript = "function instances(info) { return { noop: \"echo\" }; }\nfunction run(info) { return { message: \"hello \" + info.inputs.name }; }\n"
 
 type testEnv struct {
 	t      *testing.T
@@ -42,6 +39,8 @@ type testEnv struct {
 	noEnv bool
 	// browser stands in for the user's browser during login.
 	browser func(string) error
+	// stdin is what the command reads on stdin.
+	stdin string
 	// npm stands in for running npm.
 	npm func(dir string, env []string, out io.Writer, args ...string) error
 }
@@ -81,6 +80,14 @@ func newTestEnv(t *testing.T) *testEnv {
 		t.Fatal(err)
 	}
 	server.EnableMetadataWrites(metadataPath)
+	workflowCtx, stopWorkflows := context.WithCancel(ctx)
+	if err := server.StartWorkflows(workflowCtx); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		stopWorkflows()
+		server.WaitWorkflows()
+	})
 
 	user, err := auth.NewPasswordUser(auth.PasswordRegistration{Email: "admin@example.com", DisplayName: "Admin", Password: "correct horse"})
 	if err != nil {
@@ -124,7 +131,7 @@ func (env *testEnv) runOutput(wantCode int, args ...string) (string, string) {
 	env.t.Helper()
 	var stdout, stderr bytes.Buffer
 	a := &app{
-		stdin:  strings.NewReader(""),
+		stdin:  strings.NewReader(env.stdin),
 		stdout: &stdout,
 		stderr: &stderr,
 		getenv: func(name string) string {
@@ -143,6 +150,7 @@ func (env *testEnv) runOutput(wantCode int, args ...string) (string, string) {
 		httpClient: env.server.Client(),
 		openURL:    env.browser,
 		runNPM:     env.npm,
+		pollEvery:  10 * time.Millisecond,
 	}
 	if code := a.run(args); code != wantCode {
 		env.t.Fatalf("autablectl %s: exit %d, want %d\nstdout: %s\nstderr: %s", strings.Join(args, " "), code, wantCode, stdout.String(), stderr.String())
@@ -198,103 +206,6 @@ func TestRowsCommandsRoundTrip(t *testing.T) {
 
 	env.run(0, "rows", "delete", "db", "contacts", recordID)
 	env.run(1, "rows", "get", "db", "contacts", recordID)
-}
-
-func TestPullEditPushWorkflow(t *testing.T) {
-	env := newTestEnv(t)
-	work := filepath.Join(env.dir, "scripts")
-	env.run(0, "pull", "--dir", work)
-
-	// A new file under workflow/<database>/ becomes a new workflow.
-	path := filepath.Join(work, "workflow", "db", "greet.js")
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, []byte(testWorkflowScript), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	status := decode[[]change](t, env.run(0, "status", "--dir", work))
-	if len(status) != 1 || status[0].Status != "new" || status[0].Database != "db" || status[0].Name != "greet" {
-		t.Fatalf("unexpected status %#v", status)
-	}
-	dry := decode[[]change](t, env.run(0, "push", "--dir", work, "--dry-run"))
-	if len(dry) != 1 || dry[0].Status != "would-create" {
-		t.Fatalf("unexpected dry run %#v", dry)
-	}
-	pushed := decode[[]change](t, env.run(0, "push", "--dir", work))
-	if len(pushed) != 1 || pushed[0].Status != "created" || pushed[0].ID == 0 {
-		t.Fatalf("unexpected push %#v", pushed)
-	}
-	if status := decode[[]change](t, env.run(0, "status", "--dir", work)); len(status) != 0 {
-		t.Fatalf("expected a clean status after push, got %#v", status)
-	}
-
-	// Settings changed through the CLI survive a later script push.
-	env.run(0, "workflow", "set", "db", "greet", "--var", "suffix=!", "--timeout", "30")
-	edited := strings.Replace(testWorkflowScript, "hello ", "hi ", 1)
-	if err := os.WriteFile(path, []byte(edited), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	// The settings change bumped updated_at on the server: push refuses.
-	conflict := decode[[]change](t, env.run(1, "push", "--dir", work))
-	if len(conflict) != 1 || conflict[0].Status != "failed" || !strings.Contains(conflict[0].Detail, "changed on the server") {
-		t.Fatalf("expected a conflict, got %#v", conflict)
-	}
-	// Pull keeps the local edit; the conflict stands until it is merged and
-	// pushed with --force.
-	pulled := decode[[]pullResult](t, env.run(0, "pull", "--dir", work))
-	if len(pulled) != 1 || pulled[0].Action != "kept" {
-		t.Fatalf("expected pull to keep the edit, got %#v", pulled)
-	}
-	env.run(1, "push", "--dir", work)
-	env.run(0, "push", "--dir", work, "--force")
-
-	workflow := decode[map[string]any](t, env.run(0, "workflow", "get", "db", "greet"))
-	if workflow["variables"].(map[string]any)["suffix"] != "!" || workflow["timeout_seconds"].(float64) != 30 {
-		t.Fatalf("settings were lost by the script push: %#v", workflow)
-	}
-	if script := env.run(0, "workflow", "get", "db", "greet", "--script"); script != edited {
-		t.Fatalf("unexpected script %q", script)
-	}
-
-	run := decode[map[string]any](t, env.run(0, "workflow", "run", "db", "greet", "--inputs", `{"name":"Ada"}`))
-	if !strings.Contains(mustJSON(t, run["run"]), "hi Ada") {
-		t.Fatalf("unexpected run %#v", run)
-	}
-	runs := decode[[]map[string]any](t, env.run(0, "workflow", "runs", "db", "greet"))
-	if len(runs) != 1 {
-		t.Fatalf("expected one run, got %#v", runs)
-	}
-	detail := env.run(0, "workflow", "run-log", "db", "greet", runs[0]["history_key"].(string))
-	if !strings.Contains(detail, "hi Ada") {
-		t.Fatalf("unexpected run log %s", detail)
-	}
-}
-
-func TestPullDoesNotOverwriteLocalEdits(t *testing.T) {
-	env := newTestEnv(t)
-	work := filepath.Join(env.dir, "scripts")
-	env.run(0, "pull", "--dir", work)
-	path := filepath.Join(work, "workflow", "db", "greet.js")
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, []byte(testWorkflowScript), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	env.run(0, "push", "--dir", work)
-
-	if err := os.WriteFile(path, []byte("// local draft\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	env.run(0, "pull", "--dir", work)
-	if data, _ := os.ReadFile(path); string(data) != "// local draft\n" {
-		t.Fatalf("pull overwrote a local edit: %q", data)
-	}
-	env.run(0, "pull", "--dir", work, "--force")
-	if data, _ := os.ReadFile(path); string(data) != testWorkflowScript {
-		t.Fatalf("pull --force did not restore the server script: %q", data)
-	}
 }
 
 func TestBrowserLoginStoresToken(t *testing.T) {
@@ -370,19 +281,6 @@ func TestParseFlagsAcceptsInterspersedFlags(t *testing.T) {
 	}
 }
 
-func TestNewFileChangeResolvesDatabaseAndName(t *testing.T) {
-	got := newFileChange("workflow/名称-db/备注.js", kindWorkflow, "", []string{"other", "名称 db"})
-	if got.Status != "new" || got.Database != "名称 db" || got.Name != "备注" {
-		t.Fatalf("unexpected change %#v", got)
-	}
-	if got := newFileChange("workflow/missing/a.js", kindWorkflow, "", []string{"db"}); got.Status != "invalid" {
-		t.Fatalf("expected unknown database to be invalid, got %#v", got)
-	}
-	if got := newFileChange("workflow/db/-a.js", kindWorkflow, "", []string{"db"}); got.Status != "invalid" {
-		t.Fatalf("expected an unmappable name to be invalid, got %#v", got)
-	}
-}
-
 func jsonNumber(value int64) string {
 	data, _ := json.Marshal(value)
 	return string(data)
@@ -436,17 +334,6 @@ func TestSkillMapPointsAtExistingFiles(t *testing.T) {
 
 func TestNonAdminSeesServerRefusals(t *testing.T) {
 	env := newTestEnv(t)
-	work := filepath.Join(env.dir, "scripts")
-	path := filepath.Join(work, "workflow", "db", "greet.js")
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, []byte(testWorkflowScript), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	env.run(0, "pull", "--dir", work)
-	env.run(0, "push", "--dir", work)
-
 	env.token = env.memberToken
 	if me := decode[map[string]any](t, env.run(0, "whoami")); me["email"] != "member@example.com" || me["is_admin"] != false {
 		t.Fatalf("unexpected whoami: %#v", me)
@@ -456,36 +343,8 @@ func TestNonAdminSeesServerRefusals(t *testing.T) {
 	if !strings.Contains(stderr, "403") {
 		t.Fatalf("expected a 403 for a write without grants, got %q", stderr)
 	}
-	if _, stderr := env.runOutput(1, "workflow", "runs", "db", "1"); !strings.Contains(stderr, "not found") && !strings.Contains(stderr, "admin") {
-		t.Fatalf("expected the workflow to stay hidden, got %q", stderr)
-	}
-
-	// A user granted only run sees the workflow by name and runs it, but
-	// its script and history are for admins.
-	if err := env.system.SaveGrant(context.Background(), permission.Grant{SubjectID: memberID(t, env), Scope: permission.ScopeWorkflow, Resource: "1", Level: permission.Run}); err != nil {
-		t.Fatal(err)
-	}
-	if listed := decode[[]map[string]any](t, env.run(0, "workflow", "list", "db")); len(listed) != 1 || listed[0]["name"] != "greet" {
-		t.Fatalf("expected the runnable workflow, got %#v", listed)
-	}
-	run := decode[map[string]any](t, env.run(0, "workflow", "run", "db", "greet", "--inputs", `{"name":"Ada"}`))
-	if !strings.Contains(mustJSON(t, run["run"]), "hello Ada") {
-		t.Fatalf("unexpected run %#v", run)
-	}
-	for _, args := range [][]string{
-		{"workflow", "get", "db", "greet"},
-		{"workflow", "runs", "db", "greet"},
-		{"workflow", "set", "db", "greet", "--enabled", "false"},
-	} {
-		if _, stderr := env.runOutput(1, args...); !strings.Contains(stderr, "403") || !strings.Contains(stderr, "requires an admin") {
-			t.Fatalf("expected %v to surface the admin requirement, got %q", args, stderr)
-		}
-	}
-	if _, stderr := env.runOutput(1, "workflow", "get", "db", "greet", "--script"); !strings.Contains(stderr, "admin-only") {
-		t.Fatalf("expected script read to explain the admin requirement, got %q", stderr)
-	}
-	if _, stderr := env.runOutput(1, "pull", "--dir", filepath.Join(env.dir, "member")); !strings.Contains(stderr, "admin-only") {
-		t.Fatalf("expected pull to explain the admin requirement, got %q", stderr)
+	if _, stderr := env.runOutput(1, "fields", "add", "db", "contacts", "--fields", `[{"name":"数量","type":"int"}]`); !strings.Contains(stderr, "403") {
+		t.Fatalf("expected adding a field to need an admin, got %q", stderr)
 	}
 }
 

@@ -238,62 +238,6 @@ func TestPermissionGrantPersistence(t *testing.T) {
 	}
 }
 
-func TestWorkflowDefinitionStoresSecretsAndVariablesAsJSON(t *testing.T) {
-	ctx := context.Background()
-	db := openTestDB(t)
-
-	saved, err := db.SaveWorkflow(ctx, WorkflowDefinition{
-		DatabaseName: "workspace",
-		Name:         "notify",
-		Script:       "function run() {}",
-		CreatorID:    "creator",
-		Secrets:      map[string]string{"TOKEN": "secret"},
-		Variables:    map[string]string{"CHANNEL": "ops"},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if saved.ID == 0 {
-		t.Fatal("expected autoincrement workflow id")
-	}
-	if saved.CreatedAt <= 0 || saved.UpdatedAt <= 0 {
-		t.Fatalf("expected workflow millisecond timestamps, got %#v", saved)
-	}
-
-	loaded, err := db.Workflow(ctx, saved.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if loaded.CreatorID != "creator" || loaded.Secrets["TOKEN"] != "secret" || loaded.Variables["CHANNEL"] != "ops" {
-		t.Fatalf("unexpected workflow JSON fields: %#v", loaded)
-	}
-	updated, err := db.SaveWorkflow(ctx, WorkflowDefinition{
-		ID:           saved.ID,
-		DatabaseName: "workspace",
-		Name:         "notify",
-		Script:       "function run() { return {}; }",
-		CreatorID:    "attacker",
-		Secrets:      map[string]string{},
-		Variables:    map[string]string{},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if updated.CreatorID != "creator" {
-		t.Fatalf("expected workflow creator to be immutable, got %#v", updated)
-	}
-	if updated.Secrets["TOKEN"] != "secret" {
-		t.Fatalf("expected omitted workflow secret to be preserved, got %#v", updated.Secrets)
-	}
-	list, err := db.Workflows(ctx, "workspace")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(list) != 1 || list[0].ID != saved.ID {
-		t.Fatalf("unexpected workflow list: %#v", list)
-	}
-}
-
 func TestAppVersionsPublishAndDelete(t *testing.T) {
 	ctx := context.Background()
 	db := openTestDB(t)

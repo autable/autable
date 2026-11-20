@@ -22,8 +22,9 @@ import (
 //     grants (see readJSON).
 //
 // Requests authenticated with "Authorization: Bearer" (autablectl, scripts)
-// carry no ambient credentials and are exempt, as is the workflow webhook,
-// which authenticates with a token in its body.
+// carry no ambient credentials and are exempt, as are workflow webhooks
+// (/api/hooks/...), which use no session and whose code authenticates the
+// request itself.
 
 var errCrossSiteRequest = errors.New("cross-site request rejected")
 
@@ -36,10 +37,9 @@ func isUnsafeMethod(method string) bool {
 	}
 }
 
-// isWebhookPath matches POST /api/databases/{database}/workflows/{id}/webhook.
+// isWebhookPath matches /api/hooks/{database}/{name}/{path...}.
 func isWebhookPath(path string) bool {
-	segments := strings.Split(strings.TrimPrefix(path, "/"), "/")
-	return len(segments) == 6 && segments[0] == "api" && segments[1] == "databases" && segments[3] == "workflows" && segments[5] == "webhook"
+	return strings.HasPrefix(path, webhookPathPrefix)
 }
 
 // checkSameOrigin writes 403 and returns false for a state-changing API

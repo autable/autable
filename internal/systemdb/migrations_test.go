@@ -30,6 +30,38 @@ type preRunnersWorkflowModel struct {
 
 func (preRunnersWorkflowModel) TableName() string { return "workflow_models" }
 
+// nodeWorkflowModel is the node-based workflow model as shipped from schema
+// version 1 until workflows v2 replaced it (schema version 8).
+type nodeWorkflowModel struct {
+	ID                   int64  `gorm:"primaryKey;autoIncrement"`
+	DatabaseName         string `gorm:"uniqueIndex:idx_workflow_database_name;not null"`
+	Name                 string `gorm:"uniqueIndex:idx_workflow_database_name;not null"`
+	Script               string `gorm:"not null"`
+	Enabled              bool   `gorm:"not null;default:true"`
+	CreatorID            string `gorm:"index;not null;default:''"`
+	SecretsJSON          string `gorm:"not null"`
+	VariablesJSON        string `gorm:"not null"`
+	RunnersJSON          string `gorm:"not null;default:'{}'"`
+	HistoryRetentionDays *int64
+	TimeoutSeconds       *int64
+	CreatedAt            int64 `gorm:"autoCreateTime:milli"`
+	UpdatedAt            int64 `gorm:"autoUpdateTime:milli"`
+}
+
+func (nodeWorkflowModel) TableName() string { return "workflow_models" }
+
+// migrateTo runs the schema migrations up to version on a raw database,
+// without the AutoMigrate of the current models that Open performs.
+func migrateTo(t *testing.T, orm *gorm.DB, version int) {
+	t.Helper()
+	previous := migrations
+	migrations = migrations[:version]
+	defer func() { migrations = previous }()
+	if err := (&DB{orm: orm}).runSchemaMigrations(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // databaseOwnerModel is the database ownership table as shipped from the
 // 0.1.18 release until autable became admin-gated (schema version 7).
 type databaseOwnerModel struct {
@@ -47,7 +79,7 @@ func createOldDatabase(t *testing.T, path string, models ...any) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := orm.AutoMigrate(append([]any{&userModel{}, &permissionGrantModel{}, &databaseOwnerModel{}}, models...)...); err != nil {
+	if err := orm.AutoMigrate(append([]any{&userModel{}, &permissionGrantModel{}, &databaseOwnerModel{}, &roleModel{}, &roleMemberModel{}}, models...)...); err != nil {
 		t.Fatal(err)
 	}
 	workflow := preRunnersWorkflowModel{
@@ -85,6 +117,28 @@ func TestMigrateUpgradesPreRunnersDatabase(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "system.sqlite")
 	createOldDatabase(t, path, &preRunnersWorkflowModel{})
 
+	// 0 → 1 adds runners_json to the populated table.
+	orm, err := gorm.Open(sqlite.Open(path), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	migrateTo(t, orm, 1)
+	var legacy nodeWorkflowModel
+	if err := orm.First(&legacy).Error; err != nil {
+		t.Fatal(err)
+	}
+	if legacy.Name != "legacy-sync" || legacy.SecretsJSON != `{"a.token":"s"}` || legacy.VariablesJSON != `{"a.channel":"ops"}` || legacy.RunnersJSON != "{}" {
+		t.Fatalf("unexpected legacy workflow after 0 → 1: %#v", legacy)
+	}
+	handle, err := orm.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := handle.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// The full upgrade then replaces node workflows (7 → 8).
 	db, err := Open(ctx, path)
 	if err != nil {
 		t.Fatalf("expected existing database to open, got %v", err)
@@ -93,32 +147,9 @@ func TestMigrateUpgradesPreRunnersDatabase(t *testing.T) {
 	if version := schemaVersion(t, db); version != currentSchemaVersion() {
 		t.Fatalf("expected schema version %d, got %d", currentSchemaVersion(), version)
 	}
-
 	workflows, err := db.Workflows(ctx, "db")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(workflows) != 1 {
-		t.Fatalf("expected the legacy workflow to survive, got %#v", workflows)
-	}
-	legacy := workflows[0]
-	if legacy.Name != "legacy-sync" || legacy.Secrets["a.token"] != "s" || legacy.Variables["a.channel"] != "ops" {
-		t.Fatalf("unexpected legacy workflow: %#v", legacy)
-	}
-	if len(legacy.Runners) != 0 {
-		t.Fatalf("expected legacy workflow without runner bindings, got %#v", legacy.Runners)
-	}
-
-	legacy.Runners = map[string]string{"pull": "intranet"}
-	if _, err := db.SaveWorkflow(ctx, legacy); err != nil {
-		t.Fatal(err)
-	}
-	reloaded, err := db.Workflow(ctx, legacy.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if reloaded.Runners["pull"] != "intranet" {
-		t.Fatalf("expected runners to persist after upgrade, got %#v", reloaded.Runners)
+	if err != nil || len(workflows) != 0 {
+		t.Fatalf("expected node workflows to be gone, got %#v, %v", workflows, err)
 	}
 }
 
@@ -171,10 +202,10 @@ func TestMigrationDriftFailsLoudly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Simulate drift: the version row claims 0, but the runners column
-	// already exists, so the 0 → 1 migration must fail instead of being
-	// silently skipped.
-	if err := db.orm.Model(&schemaVersionModel{}).Where("id = ?", schemaVersionRowID).Update("version", 0).Error; err != nil {
+	// Simulate drift: the version row claims 6, but the database owner
+	// table that version 6 always has does not exist, so the 6 → 7
+	// migration must fail instead of being silently skipped.
+	if err := db.orm.Model(&schemaVersionModel{}).Where("id = ?", schemaVersionRowID).Update("version", 6).Error; err != nil {
 		t.Fatal(err)
 	}
 	if err := db.Close(); err != nil {
@@ -182,7 +213,7 @@ func TestMigrationDriftFailsLoudly(t *testing.T) {
 	}
 
 	_, err = Open(ctx, path)
-	if err == nil || !strings.Contains(err.Error(), "schema migration 0 → 1") {
+	if err == nil || !strings.Contains(err.Error(), "schema migration 6 → 7") {
 		t.Fatalf("expected drift to fail loudly, got %v", err)
 	}
 }
@@ -314,7 +345,7 @@ func TestMigrateDropsFormsAndTheirGrants(t *testing.T) {
 		t.Fatal(err)
 	}
 	migrations = previous
-	if err := orm.AutoMigrate(&userModel{}, &permissionGrantModel{}, &databaseOwnerModel{}, &workflowModel{}, &formModel{}); err != nil {
+	if err := orm.AutoMigrate(&userModel{}, &permissionGrantModel{}, &databaseOwnerModel{}, &nodeWorkflowModel{}, &roleModel{}, &roleMemberModel{}, &formModel{}); err != nil {
 		t.Fatal(err)
 	}
 	if err := orm.Create(&formModel{DatabaseName: "db", Name: "intake", Script: "function render() {}", CreatorID: "u1"}).Error; err != nil {
@@ -376,7 +407,7 @@ func TestMigrateRemovesOwnershipAndStructureGrants(t *testing.T) {
 		&sessionModel{},
 		&permissionGrantModel{},
 		&databaseOwnerModel{},
-		&workflowModel{},
+		&nodeWorkflowModel{},
 		&appModel{},
 		&appVersionModel{},
 		&roleModel{},
@@ -392,7 +423,7 @@ func TestMigrateRemovesOwnershipAndStructureGrants(t *testing.T) {
 	if err := orm.Create(&[]databaseOwnerModel{{DatabaseName: "db", OwnerID: "u1"}, {DatabaseName: "other", OwnerID: "u2"}}).Error; err != nil {
 		t.Fatal(err)
 	}
-	if err := orm.Create(&workflowModel{DatabaseName: "db", Name: "sync", Script: "function instances() {}", Enabled: true, CreatorID: "u1", SecretsJSON: "{}", VariablesJSON: "{}", RunnersJSON: "{}"}).Error; err != nil {
+	if err := orm.Create(&nodeWorkflowModel{DatabaseName: "db", Name: "sync", Script: "function instances() {}", Enabled: true, CreatorID: "u1", SecretsJSON: "{}", VariablesJSON: "{}", RunnersJSON: "{}"}).Error; err != nil {
 		t.Fatal(err)
 	}
 	if err := orm.Create(&appModel{DatabaseName: "db", Name: "intake", Title: "Intake", CreatorID: "u1"}).Error; err != nil {
@@ -429,17 +460,12 @@ func TestMigrateRemovesOwnershipAndStructureGrants(t *testing.T) {
 	if err := orm.Create(&grants).Error; err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Close(); err != nil {
-		t.Fatal(err)
-	}
-
-	upgraded, err := Open(ctx, path)
-	if err != nil {
-		t.Fatalf("expected version-6 database to open, got %v", err)
-	}
+	// Only 6 → 7 is under test here; 7 → 8 has its own test.
+	migrateTo(t, orm, 7)
+	upgraded := db
 	defer upgraded.Close()
-	if got := schemaVersion(t, upgraded); got != currentSchemaVersion() {
-		t.Fatalf("expected schema version %d, got %d", currentSchemaVersion(), got)
+	if got := schemaVersion(t, upgraded); got != 7 {
+		t.Fatalf("expected schema version 7, got %d", got)
 	}
 	if upgraded.orm.Migrator().HasTable("database_owner_models") {
 		t.Fatal("expected database_owner_models to be dropped")
@@ -479,8 +505,8 @@ func TestMigrateRemovesOwnershipAndStructureGrants(t *testing.T) {
 	if err != nil || user.Email != "u1@example.com" {
 		t.Fatalf("expected user to survive, got %#v, %v", user, err)
 	}
-	workflows, err := upgraded.Workflows(ctx, "db")
-	if err != nil || len(workflows) != 1 || workflows[0].Name != "sync" {
+	var workflows []nodeWorkflowModel
+	if err := upgraded.orm.Find(&workflows).Error; err != nil || len(workflows) != 1 || workflows[0].Name != "sync" {
 		t.Fatalf("expected workflow to survive, got %#v, %v", workflows, err)
 	}
 	app, err := upgraded.AppByName(ctx, "db", "intake")
@@ -493,5 +519,155 @@ func TestMigrateRemovesOwnershipAndStructureGrants(t *testing.T) {
 	}
 	if !effective.CanCreateRecord("workflow:1", "db.contacts") || !effective.CanDeleteRecord("workflow:1", "db.contacts") {
 		t.Fatal("expected the workflow subject to keep its direct and role data grants")
+	}
+}
+
+func TestMigrateReplacesNodeWorkflows(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "system.sqlite")
+
+	// A version-7 database: the version-7 models, with node workflows.
+	orm, err := gorm.Open(sqlite.Open(path), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	migrateTo(t, orm, 7)
+	if err := orm.AutoMigrate(
+		&userModel{},
+		&sessionModel{},
+		&permissionGrantModel{},
+		&nodeWorkflowModel{},
+		&appModel{},
+		&appVersionModel{},
+		&roleModel{},
+		&roleMemberModel{},
+		&runnerTokenModel{},
+		&fileModel{},
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := orm.Create(&userModel{ID: "u1", Email: "u1@example.com", DisplayName: "u1", Provider: "password", ProviderName: "password", Subject: "u1@example.com"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	retention := int64(7)
+	if err := orm.Create(&[]nodeWorkflowModel{
+		{DatabaseName: "db", Name: "sync", Script: "function instances() {}", Enabled: true, CreatorID: "u1", SecretsJSON: `{"a.token":"s"}`, VariablesJSON: "{}", RunnersJSON: `{"a":"intranet"}`, HistoryRetentionDays: &retention},
+		{DatabaseName: "db", Name: "notify", Script: "function instances() {}", Enabled: false, CreatorID: "u1", SecretsJSON: "{}", VariablesJSON: "{}", RunnersJSON: "{}"},
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := orm.Create(&appModel{DatabaseName: "db", Name: "intake", Title: "Intake", CreatorID: "u1"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := orm.Create(&roleModel{DatabaseName: "db", Name: "sync"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := orm.Create(&[]roleMemberModel{
+		{DatabaseName: "db", RoleName: "sync", SubjectType: "workflow", SubjectID: "workflow:1"},
+		{DatabaseName: "db", RoleName: "sync", SubjectType: "user", SubjectID: "u1"},
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := orm.Create(&runnerTokenModel{DatabaseName: "db", TokenHash: "hash"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	grants := []permissionGrantModel{
+		// Grants held by old workflow subjects would pass to new ids.
+		{SubjectID: "workflow:1", Scope: permission.ScopeFieldSet, Resource: "db.contacts", Level: permission.FieldAll},
+		{SubjectID: "workflow:1", Scope: permission.ScopeRecord, Resource: "db.contacts", Field: "create", Level: permission.Write},
+		{SubjectID: "workflow:2", Scope: permission.ScopeView, Resource: "db.contacts", Field: "all", Level: permission.Read},
+		// Run grants name old ids.
+		{SubjectID: "u1", Scope: permission.ScopeWorkflow, Resource: "1", Level: permission.Run},
+		{SubjectID: "role:db:sync", Scope: permission.ScopeWorkflow, Resource: "2", Level: permission.Run},
+		// Everything else stays.
+		{SubjectID: "u1", Scope: permission.ScopeField, Resource: "db.contacts", Field: "email", Level: permission.FieldRead},
+		{SubjectID: "role:db:sync", Scope: permission.ScopeRecord, Resource: "db.contacts", Field: "delete", Level: permission.Write},
+		{SubjectID: "u1", Scope: permission.ScopeApp, Resource: "1", Level: permission.Open},
+	}
+	if err := orm.Create(&grants).Error; err != nil {
+		t.Fatal(err)
+	}
+	handle, err := orm.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := handle.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	upgraded, err := Open(ctx, path)
+	if err != nil {
+		t.Fatalf("expected version-7 database to open, got %v", err)
+	}
+	defer upgraded.Close()
+	if got := schemaVersion(t, upgraded); got != 8 || currentSchemaVersion() < 8 {
+		t.Fatalf("expected schema version 8, got %d", got)
+	}
+	migrator := upgraded.orm.Migrator()
+	if migrator.HasColumn(&workflowModel{}, "script") || migrator.HasColumn(&workflowModel{}, "secrets_json") {
+		t.Fatal("expected the node workflow table to be replaced")
+	}
+	for _, model := range []any{&workflowVersionModel{}, &workflowSecretModel{}, &workflowVarModel{}, &workflowRunModel{}, &workflowLogModel{}} {
+		if !migrator.HasTable(model) {
+			t.Fatalf("expected %T to exist", model)
+		}
+	}
+	if workflows, err := upgraded.Workflows(ctx, "db"); err != nil || len(workflows) != 0 {
+		t.Fatalf("expected no workflows after the upgrade, got %#v, %v", workflows, err)
+	}
+
+	var remaining []permissionGrantModel
+	if err := upgraded.orm.Order("id").Find(&remaining).Error; err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]permission.Level{}
+	for _, grant := range remaining {
+		got[grant.SubjectID+"|"+string(grant.Scope)+"|"+grant.Resource+"|"+grant.Field] = grant.Level
+	}
+	want := map[string]permission.Level{
+		"u1|field|db.contacts|email":             permission.FieldRead,
+		"role:db:sync|record|db.contacts|delete": permission.Write,
+		"u1|app|1|":                              permission.Open,
+	}
+	if len(got) != len(want) {
+		t.Fatalf("expected grants %#v, got %#v", want, got)
+	}
+	for key, level := range want {
+		if got[key] != level {
+			t.Fatalf("expected %s at level %d, got %#v", key, level, got)
+		}
+	}
+	role, err := upgraded.Role(ctx, "db", "sync")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(role.Members) != 1 || role.Members[0] != (RoleMember{Type: "user", ID: "u1"}) {
+		t.Fatalf("expected only the user member to remain, got %#v", role.Members)
+	}
+
+	// A new workflow gets id 1 again and must not inherit anything.
+	created, err := upgraded.CreateWorkflow(ctx, Workflow{DatabaseName: "db", Name: "sync"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	perms, err := upgraded.EffectiveGrantsForSubject(ctx, WorkflowSubjectID(created.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if perms.CanCreateRecord(WorkflowSubjectID(created.ID), "db.contacts") || perms.CanReadField(WorkflowSubjectID(created.ID), "db.contacts", "email") {
+		t.Fatalf("expected the new workflow %d to start without grants", created.ID)
+	}
+	if !created.Enabled || created.TimeoutSeconds != DefaultWorkflowTimeoutSeconds || created.HistoryRetentionDays != DefaultWorkflowRetentionDays {
+		t.Fatalf("unexpected defaults on the new workflow: %#v", created)
+	}
+	// Unrelated data is intact.
+	if user, err := upgraded.User(ctx, "u1"); err != nil || user.Email != "u1@example.com" {
+		t.Fatalf("expected user to survive, got %#v, %v", user, err)
+	}
+	if app, err := upgraded.AppByName(ctx, "db", "intake"); err != nil || app.Title != "Intake" {
+		t.Fatalf("expected app to survive, got %#v, %v", app, err)
+	}
+	if _, ok, err := upgraded.RunnerTokenCreatedAt(ctx, "db"); err != nil || !ok {
+		t.Fatalf("expected the runner token to survive, got %v %v", ok, err)
 	}
 }

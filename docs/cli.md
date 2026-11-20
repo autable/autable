@@ -48,17 +48,15 @@ structure are written only by admins, the email addresses listed under
 `auth.admins` in the server config.
 
 - Any user, within their grants: read metadata, read and write rows, read row
-  history, upload and download files, list and run the workflows they may run,
-  list and open the apps they may open.
+  history, upload and download files, list the workflows they may run and
+  start their manual trigger, list and open the apps they may open.
 - Admins only: schema changes (`fields add` succeeds for anyone else only when
-  every listed field already exists with the same type), editing workflows
-  (`workflow set`, `push`), workflow run history (`workflow runs`,
-  `workflow run-log`), and pushing, publishing, rolling back, or pulling apps.
-- Workflow definitions (script, secrets, variables, runners) are returned only
-  to admins; other users see a workflow's id and name. For them `workflow get`
-  gets the server's `403`, and `workflow get --script` and `pull` stop with an
-  error saying scripts are admin-only instead of writing empty files. A
-  non-admin's `workflow run` prints the run without its steps.
+  every listed field already exists with the same type), everything else about
+  workflows (push, publish, rollback, pull, delete, settings, secrets, vars,
+  run history), and pushing, publishing, rolling back, or pulling apps.
+- A non-admin's `workflow list` shows only the workflows they may run, with
+  their manual triggers; `workflow run` works for those, and `workflow
+  run-log` only for runs they started, showing status, output, and error.
 
 `autablectl whoami` prints the signed-in user, including whether it is an
 admin. When a non-admin runs an admin-only command, the CLI prints the server's
@@ -67,7 +65,7 @@ admin. When a non-admin runs an admin-only command, the CLI prints the server's
 ## Commands
 
 Run `autablectl help` for the full list and `autablectl <command> -h` for a
-command's flags. JSON-valued flags (`--values`, `--query`, `--inputs`,
+command's flags. JSON-valued flags (`--values`, `--query`, `--input`,
 `--fields`, `--data`) accept inline JSON, `@path` to read a file, or `-` to
 read stdin.
 
@@ -77,7 +75,6 @@ read stdin.
 autablectl meta                      # every readable database, table, field, view
 autablectl meta sales orders         # one table
 autablectl fields add sales orders --fields '[{"name":"数量","type":"int"}]'
-autablectl nodes                     # workflow node types and their params
 ```
 
 ### Rows
@@ -98,46 +95,61 @@ autablectl rows history sales orders 42
 
 ### Workflows
 
+A workflow is a TypeScript project, built and versioned like an app: it
+exports `triggers` (`schedule`, `recordChanged`, `webhook`, `manual`) and
+`run(event)`, uses the platform primitives of the vendored SDK (`fetch`,
+`crypto`, `secrets`, `vars`, `tables`, `users`, `files`, `log`), and is
+bundled with esbuild into `dist/workflow.js`. Every run is one call of
+`run`, from start to finish. See
+[design/workflows-v2.md](design/workflows-v2.md) and
+[design/workflows-host-api.md](design/workflows-host-api.md).
+
 ```sh
+autablectl workflow init ./nightly --database sales --name nightly --title "Nightly"
+cd nightly && npm install && npm run typecheck
+autablectl workflow push -m "first version"      # npm run build, upload; nothing runs yet
+autablectl workflow publish sales nightly 1       # reads the triggers; this version runs
+autablectl workflow run sales nightly --trigger start --input '{"note":"hi"}' --wait
+autablectl workflow runs sales nightly --status failed --limit 5
+autablectl workflow run-log sales nightly 42      # event, output, error, logs
+autablectl workflow rollback sales nightly        # publish the newest version below the current one
 autablectl workflow list sales
-autablectl workflow get sales notify            # settings; secrets show only their lengths
-autablectl workflow get sales notify --script   # just the source
-autablectl workflow set sales notify --var recipient=alice --unset-var old --enabled true --timeout 120
-autablectl workflow run sales notify --inputs '{"record_id":42}'
-autablectl workflow runs sales notify --limit 5
-autablectl workflow run-log sales notify <history_key>
+autablectl workflow versions sales nightly        # versions, triggers (webhook URLs), settings, secret names, vars
+autablectl workflow pull sales nightly ./nightly-v1 --version 1
+autablectl workflow sdk                           # after tables change or the server is upgraded
+printf %s "$TOKEN" | autablectl workflow secret set sales nightly api_token
+autablectl workflow secret unset sales nightly api_token
+autablectl workflow var set sales nightly region eu
+autablectl workflow var unset sales nightly region
+autablectl workflow disable sales nightly         # triggers stop starting runs; enable undoes it
+autablectl workflow delete sales nightly          # with its versions, settings, runs, and grants
 ```
 
-Workflows are addressed by name, or by id. `workflow run` exits `1`
-when the run fails and still prints the run record with its error.
-
-### Editing scripts: pull, status, push
-
-```sh
-mkdir scripts && cd scripts
-autablectl pull                 # all readable databases; --database to narrow
-$EDITOR workflow/sales/notify.js
-autablectl status               # what changed locally
-autablectl push --dry-run
-autablectl push
-```
-
-`pull` writes `workflow/<database>/<name>.js`, the same layout the server
-uses in its repository, and records in
-`.autable/state.json` which object each file belongs to, the object's
-`updated_at`, and the file's hash.
-
-- `push` saves only files whose content changed. A workflow push replaces the
-  script and sends the current settings back unchanged; secrets are never sent
-  or overwritten.
-- A new file `workflow/<database>/<name>.js` creates a workflow named
-  `<name>`. The directory must match an existing database. Pushing, like any
-  workflow change, needs an admin account.
-- If the object changed on the server since the last pull (someone edited it
-  in the web UI, or `workflow set` ran), `push` refuses with a conflict. `pull`
-  never overwrites local edits, so: inspect the server version with
-  `workflow get --script`, merge, then `push --force`.
-- Deleting a file does not delete anything on the server.
+- `workflow init` writes a TypeScript + esbuild project (`npm run build`
+  bundles `src/index.ts` into `dist/workflow.js`, an IIFE assigning
+  `globalThis.__workflow`; `npm run typecheck`), the manifest
+  `autable.workflow.json`, the SDK from `GET /api/workflows/sdk` into
+  `src/autable/`, and `src/autable/schema.ts` with the database's tables and
+  fields as types. The project's `AGENTS.md` explains the rules. The
+  directory must be new or empty.
+- `workflow sdk` rewrites `src/autable/` from the server and updates `sdk` in
+  the manifest. Do not edit those files.
+- `workflow push` runs `npm run build` (skip with `--no-build`) and uploads
+  the manifest, `dist/`, and the source, chosen as for apps. A push never
+  changes what runs unless `--publish` is given; publishing fails when the
+  trigger declarations are invalid.
+- `workflow run` starts a manual trigger: `--trigger` names it (it may be
+  omitted when the workflow has only one), `--input` is a JSON object. Without
+  `--wait` it prints the queued run. With `--wait` it prints the finished
+  run, polling past the server's 60-second wait, and exits `1` when the run
+  did not succeed.
+- `workflow secret set` reads the value from stdin, or prompts for it without
+  echo when stdin is a terminal; it is never taken from the command line and
+  never printed (the output shows only its length).
+- `workflow pull` downloads the source of a version (default: the published
+  one, else the newest) into a new or empty directory.
+- `workflow var set` takes the value as an argument; put `--` before a value
+  that starts with `-` (a PEM public key, for example).
 
 ### Apps
 

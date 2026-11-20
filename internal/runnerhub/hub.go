@@ -1,3 +1,7 @@
+// Package runnerhub accepts runner connections and sends them fetch jobs.
+// A runner is an egress proxy for workflows (docs/design/workflows-v2.md):
+// it performs the HTTP requests a workflow's fetch(..., { via }) names and
+// executes no code.
 package runnerhub
 
 import (
@@ -12,60 +16,48 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 
-	"autable/internal/workflow"
+	"autable/internal/egress"
 )
 
 const (
 	// readTimeout closes connections whose runner stopped pinging.
 	readTimeout = 90 * time.Second
 	writeWait   = 10 * time.Second
-	// DefaultJobTimeout bounds a single dispatched node execution.
-	DefaultJobTimeout = 10 * time.Minute
+	// jobSlack is added to a request's own timeout before the hub gives up
+	// on a runner's answer.
+	jobSlack = 15 * time.Second
+	// maxMessageBytes bounds one frame: a capped body, base64-encoded,
+	// plus headers.
+	maxMessageBytes = egress.MaxResponseBytes*4/3 + 1<<20
 )
 
 // HelloMessage is the first frame a runner sends after connecting.
 type HelloMessage struct {
-	Kind      string   `json:"kind"`
-	Name      string   `json:"name"`
-	Version   string   `json:"version"`
-	NodeTypes []string `json:"node_types"`
+	Kind    string `json:"kind"`
+	Name    string `json:"name"`
+	Version string `json:"version"`
 }
 
-// JobMessage carries one node execution from the server to a runner.
+// JobMessage carries one fetch from the server to a runner.
 type JobMessage struct {
-	Kind      string            `json:"kind"`
-	JobID     string            `json:"job_id"`
-	NodeType  string            `json:"node_type"`
-	Input     map[string]any    `json:"input,omitempty"`
-	Secrets   map[string]string `json:"secrets,omitempty"`
-	Variables map[string]string `json:"variables,omitempty"`
-	Runtime   RuntimeMessage    `json:"runtime"`
+	Kind    string         `json:"kind"`
+	JobID   string         `json:"job_id"`
+	Request egress.Request `json:"request"`
 }
 
-// RuntimeMessage is the wire form of workflow.RuntimeInfo without the secret
-// and variable maps, which travel as JobMessage fields.
-type RuntimeMessage struct {
-	WorkflowID   int64  `json:"workflow_id"`
-	DatabaseName string `json:"database_name"`
-	RunID        string `json:"run_id"`
-	InstanceID   string `json:"instance_id"`
-	CreatorID    string `json:"creator_id,omitempty"`
-}
-
-// ResultMessage carries a node output or error back from a runner.
+// ResultMessage carries the response, or the error, back from a runner.
 type ResultMessage struct {
-	Kind   string         `json:"kind"`
-	JobID  string         `json:"job_id"`
-	Output map[string]any `json:"output,omitempty"`
-	Error  string         `json:"error,omitempty"`
+	Kind     string           `json:"kind"`
+	JobID    string           `json:"job_id"`
+	Response *egress.Response `json:"response,omitempty"`
+	Error    string           `json:"error,omitempty"`
 }
 
 // RunnerStatus describes one live runner connection.
 type RunnerStatus struct {
-	Name        string   `json:"name"`
-	Version     string   `json:"version"`
-	NodeTypes   []string `json:"node_types"`
-	ConnectedAt int64    `json:"connected_at"`
+	Name        string `json:"name"`
+	Version     string `json:"version"`
+	ConnectedAt int64  `json:"connected_at"`
 }
 
 // TokenResolver resolves a presented runner token to the database the
@@ -85,34 +77,30 @@ type runnerConn struct {
 	database    string
 	name        string
 	version     string
-	nodeTypes   map[string]bool
 	connectedAt int64
 	send        chan any
 	closed      chan struct{}
 	closeOnce   sync.Once
 }
 
-// Hub accepts runner connections and dispatches node jobs to them. It
-// implements workflow.RemoteDispatcher.
+// Hub accepts runner connections and dispatches fetch jobs to them.
 type Hub struct {
-	resolve    TokenResolver
-	jobTimeout time.Duration
-	upgrader   websocket.Upgrader
+	resolve  TokenResolver
+	upgrader websocket.Upgrader
+	// slack is how long past the request's own timeout the hub waits.
+	slack time.Duration
 
 	mu    sync.Mutex
 	conns map[*runnerConn]struct{}
 	jobs  map[string]*pendingJob
 }
 
-func New(resolve TokenResolver, jobTimeout time.Duration) *Hub {
-	if jobTimeout <= 0 {
-		jobTimeout = DefaultJobTimeout
-	}
+func New(resolve TokenResolver) *Hub {
 	return &Hub{
-		resolve:    resolve,
-		jobTimeout: jobTimeout,
-		conns:      map[*runnerConn]struct{}{},
-		jobs:       map[string]*pendingJob{},
+		resolve: resolve,
+		slack:   jobSlack,
+		conns:   map[*runnerConn]struct{}{},
+		jobs:    map[string]*pendingJob{},
 	}
 }
 
@@ -137,6 +125,7 @@ func (hub *Hub) ServeWS(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
+	ws.SetReadLimit(maxMessageBytes)
 	conn, err := hub.register(ws, database)
 	if err != nil {
 		ws.Close()
@@ -156,17 +145,12 @@ func (hub *Hub) register(ws *websocket.Conn, database string) (*runnerConn, erro
 	if hello.Kind != "hello" || hello.Name == "" {
 		return nil, errors.New("runner hello with a name is required")
 	}
-	nodeTypes := map[string]bool{}
-	for _, nodeType := range hello.NodeTypes {
-		nodeTypes[nodeType] = true
-	}
 	conn := &runnerConn{
 		hub:         hub,
 		ws:          ws,
 		database:    database,
 		name:        hello.Name,
 		version:     hello.Version,
-		nodeTypes:   nodeTypes,
 		connectedAt: time.Now().UTC().UnixMilli(),
 		send:        make(chan any, 16),
 		closed:      make(chan struct{}),
@@ -190,19 +174,15 @@ func (hub *Hub) unregister(conn *runnerConn) {
 	}
 	hub.mu.Unlock()
 	for _, job := range orphaned {
-		job.result <- ResultMessage{Error: fmt.Sprintf("runner %q disconnected while the job was running", conn.name)}
+		job.result <- ResultMessage{Error: fmt.Sprintf("runner %q disconnected while the request was running", conn.name)}
 	}
 }
 
-// Dispatch implements workflow.RemoteDispatcher; the job's database decides
-// which database's runners are eligible.
-func (hub *Hub) Dispatch(ctx context.Context, runnerName string, job workflow.RemoteJob) (map[string]any, error) {
-	conn, ok := hub.pick(job.Runtime.DatabaseName, runnerName)
+// Fetch has the named runner of the database perform the request.
+func (hub *Hub) Fetch(ctx context.Context, database, runnerName string, request egress.Request) (egress.Response, error) {
+	conn, ok := hub.pick(database, runnerName)
 	if !ok {
-		return nil, fmt.Errorf("runner %q is not connected", runnerName)
-	}
-	if !conn.nodeTypes[job.Runtime.NodeType] {
-		return nil, fmt.Errorf("runner %q does not support node %q", runnerName, job.Runtime.NodeType)
+		return egress.Response{}, fmt.Errorf("runner %q is not connected", runnerName)
 	}
 	jobID := uuid.NewString()
 	pending := &pendingJob{result: make(chan ResultMessage, 1), conn: conn}
@@ -215,55 +195,34 @@ func (hub *Hub) Dispatch(ctx context.Context, runnerName string, job workflow.Re
 		hub.mu.Unlock()
 	}()
 
-	message := JobMessage{
-		Kind:      "job",
-		JobID:     jobID,
-		NodeType:  job.Runtime.NodeType,
-		Input:     job.Input,
-		Secrets:   job.Runtime.Secrets,
-		Variables: job.Runtime.Variables,
-		Runtime: RuntimeMessage{
-			WorkflowID:   job.Runtime.WorkflowID,
-			DatabaseName: job.Runtime.DatabaseName,
-			RunID:        job.Runtime.RunID,
-			InstanceID:   job.Runtime.InstanceID,
-			CreatorID:    job.Runtime.CreatorID,
-		},
-	}
 	select {
-	case conn.send <- message:
+	case conn.send <- JobMessage{Kind: "fetch", JobID: jobID, Request: request}:
 	case <-conn.closed:
-		return nil, fmt.Errorf("runner %q is not connected", runnerName)
+		return egress.Response{}, fmt.Errorf("runner %q is not connected", runnerName)
 	case <-ctx.Done():
-		return nil, ctx.Err()
+		return egress.Response{}, ctx.Err()
 	}
 
-	timer := time.NewTimer(hub.jobTimeout)
+	wait := request.Timeout() + hub.slack
+	timer := time.NewTimer(wait)
 	defer timer.Stop()
 	select {
 	case result := <-pending.result:
 		if result.Error != "" {
-			return nil, errors.New(result.Error)
+			return egress.Response{}, fmt.Errorf("runner %q: %s", runnerName, result.Error)
 		}
-		return result.Output, nil
+		if result.Response == nil {
+			return egress.Response{}, fmt.Errorf("runner %q returned no response", runnerName)
+		}
+		if len(result.Response.Body) > egress.MaxResponseBytes {
+			return egress.Response{}, egress.ErrResponseTooLarge
+		}
+		return *result.Response, nil
 	case <-timer.C:
-		return nil, fmt.Errorf("runner %q job timed out after %s", runnerName, hub.jobTimeout)
+		return egress.Response{}, fmt.Errorf("runner %q did not answer within %s", runnerName, wait)
 	case <-ctx.Done():
-		return nil, ctx.Err()
+		return egress.Response{}, ctx.Err()
 	}
-}
-
-// NodeTypes implements workflow.RemoteDispatcher.
-func (hub *Hub) NodeTypes(databaseName, runnerName string) ([]string, bool) {
-	conn, ok := hub.pick(databaseName, runnerName)
-	if !ok {
-		return nil, false
-	}
-	nodeTypes := make([]string, 0, len(conn.nodeTypes))
-	for nodeType := range conn.nodeTypes {
-		nodeTypes = append(nodeTypes, nodeType)
-	}
-	return nodeTypes, true
 }
 
 // Runners lists the live runner connections serving one database.
@@ -275,16 +234,7 @@ func (hub *Hub) Runners(databaseName string) []RunnerStatus {
 		if conn.database != databaseName {
 			continue
 		}
-		nodeTypes := make([]string, 0, len(conn.nodeTypes))
-		for nodeType := range conn.nodeTypes {
-			nodeTypes = append(nodeTypes, nodeType)
-		}
-		statuses = append(statuses, RunnerStatus{
-			Name:        conn.name,
-			Version:     conn.version,
-			NodeTypes:   nodeTypes,
-			ConnectedAt: conn.connectedAt,
-		})
+		statuses = append(statuses, RunnerStatus{Name: conn.name, Version: conn.version, ConnectedAt: conn.connectedAt})
 	}
 	return statuses
 }
@@ -305,15 +255,17 @@ func (hub *Hub) DisconnectDatabase(databaseName string) {
 	}
 }
 
+// pick returns the most recently connected runner with the name.
 func (hub *Hub) pick(databaseName, runnerName string) (*runnerConn, bool) {
 	hub.mu.Lock()
 	defer hub.mu.Unlock()
+	var picked *runnerConn
 	for conn := range hub.conns {
-		if conn.database == databaseName && conn.name == runnerName {
-			return conn, true
+		if conn.database == databaseName && conn.name == runnerName && (picked == nil || conn.connectedAt > picked.connectedAt) {
+			picked = conn
 		}
 	}
-	return nil, false
+	return picked, picked != nil
 }
 
 func (conn *runnerConn) readLoop() {
