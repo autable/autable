@@ -5,6 +5,7 @@ import {
   House,
   Languages,
   LayoutDashboard,
+  Library,
   LogOut,
   Plus,
   RefreshCw,
@@ -227,6 +228,9 @@ function ManageGroup(props: SidebarProps) {
           {t("nav.permissions")}
         </NavRow>
         {view === "permission" && <RoleItems {...props} />}
+        <NavRow route={{ databaseName: db, view: "library" }} icon={Library} active={view === "library"} onNavigated={onNavigated}>
+          {t("nav.libraries")}
+        </NavRow>
         <button
           type="button"
           className={cn(navRowClass, navRowIdleClass, "w-full text-left")}

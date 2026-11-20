@@ -306,6 +306,19 @@ async function defaultFetch(input: RequestInfo | URL, init?: RequestInit): Promi
   if (url === "/api/databases/workspace/roles") {
     return jsonResponse([]);
   }
+  if (url === "/api/libs") {
+    return jsonResponse([libraryFixture]);
+  }
+  if (url === "/api/libs/http") {
+    return jsonResponse({
+      library: libraryFixture,
+      versions: [
+        { library_id: 1, version: 2, sdk: "1.0", message: "retry on 429", size: 4096, imports: [], created_by: "u1", created_at: 1781604000000, published: false, supported: true },
+        { library_id: 1, version: 1, sdk: "1.0", message: "first", size: 4000, imports: [], created_by: "u1", created_at: 1781600000000, published: true, supported: true }
+      ],
+      sdk: { version: "1.0", min_major: 1 }
+    });
+  }
   if (url === "/api/databases/workspace/runners") {
     if (init?.method === "POST") {
       return jsonResponse({ token: "atr_fresh-runner-token", created_at: 1781604000000 });
@@ -314,6 +327,17 @@ async function defaultFetch(input: RequestInfo | URL, init?: RequestInit): Promi
   }
   return jsonResponse({ error: `unhandled ${url}` }, 404);
 }
+
+const libraryFixture = {
+  id: 1,
+  name: "http",
+  title: "HTTP helpers",
+  published_version: 1,
+  latest_version: 2,
+  created_at: 1781600000000,
+  updated_at: 1781604000000,
+  imported_by: [{ kind: "workflow", database_name: "workspace", name: "record-review", title: "Record review", version: 1 }]
+};
 
 beforeEach(async () => {
   vi.useRealTimers();
@@ -1250,6 +1274,40 @@ describe("App", () => {
     await userEvent.click(screen.getByRole("button", { name: /Remote runners.*other networks/ }));
     const dialog = await findDialog("Remote runners");
     expect(await within(dialog).findByText("intranet")).toBeInTheDocument();
+  });
+
+  it("opens the instance-wide libraries from the Manage group", async () => {
+    const user = userEvent.setup();
+    renderApp("/databases/workspace/admin");
+    expect(await screen.findByRole("link", { name: /Libraries.*1 library · 1 published/ })).toHaveAttribute("href", "/databases/workspace/libraries");
+    await user.click(within(await sidebar()).getByRole("link", { name: "Libraries" }));
+    expect(await screen.findByRole("heading", { name: "Libraries", level: 1 })).toBeInTheDocument();
+    expect(window.location.pathname).toBe("/databases/workspace/libraries");
+    const table = screen.getByRole("table", { name: "Libraries" });
+    expect(within(table).getByText("1 workflow")).toBeInTheDocument();
+    await user.click(within(table).getByRole("link", { name: /HTTP helpers/ }));
+    expect(await screen.findByRole("heading", { name: "HTTP helpers", level: 1 })).toBeInTheDocument();
+    expect(window.location.pathname).toBe("/databases/workspace/libraries/http");
+    expect(within(screen.getByRole("table", { name: "Imported by" })).getByRole("link", { name: "Record review" })).toHaveAttribute(
+      "href",
+      "/databases/workspace/workflows/record-review"
+    );
+
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      if (String(input) === "/api/libs/http/publish") {
+        expect(JSON.parse(String(init?.body))).toEqual({ version: 2 });
+        return jsonResponse({ library: { ...libraryFixture, published_version: 2 }, versions: [], sdk: { version: "1.0", min_major: 1 } });
+      }
+      return defaultFetch(input, init);
+    });
+    await user.click(screen.getByRole("button", { name: "Publish version 2" }));
+    await user.click(within(await findDialog("Publish library version")).getByRole("button", { name: "Publish" }));
+    expect(await screen.findByText(/Published HTTP helpers version 2/)).toBeInTheDocument();
+  });
+
+  it("returns unknown library routes to the list", async () => {
+    renderApp("/databases/workspace/libraries/missing");
+    await waitFor(() => expect(window.location.pathname).toBe("/databases/workspace/libraries"));
   });
 
   it("signs out from the account menu", async () => {

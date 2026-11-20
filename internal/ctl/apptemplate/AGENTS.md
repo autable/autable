@@ -38,3 +38,28 @@ pull <database> <name> <dir>` downloads the source of any version.
 - `npm run build` must produce `dist/index.html`. The source pushed with
   each version is what git would commit (or, outside git, everything except
   `node_modules`, `dist`, `.git`, and `.autable`); keep secrets out of it.
+
+## Shared code in the repository (`lib/`)
+
+Several apps and workflows can live in one git repository with shared code
+next to them (`repo/lib/`, `repo/apps/<app>/`, `repo/workflows/<workflow>/`).
+
+- Import shared files by relative path: `import { formatOrder } from
+  "../../lib/format";`. Shared code imports the SDK as `"@autable/app"`
+  (mapped to `src/autable/autable.ts` in `tsconfig.json` and
+  `vite.config.ts`), never by a path into one project. `autablectl app
+  dev` may serve files anywhere in the repository.
+- `npm run build` writes `.autable/build-inputs.json` (a small plugin in
+  `vite.config.ts` lists the modules the build used). `autablectl app push`
+  uploads, besides this project, exactly the files outside it that the
+  build used, at their paths from the repository root, and records this
+  project's path (`root`) in the uploaded manifest; `pull` recreates that
+  slice with the project at `<dir>/<root>`.
+- Only modules are recorded: a stylesheet outside the project must be
+  imported from TypeScript (`import "../../lib/theme.css"`), and its own
+  `@import`s and `url()`s of further files outside the project are not
+  uploaded.
+- Files outside the project are uploaded only from inside a git work tree
+  and never from `node_modules`. Shared code that imports npm packages
+  finds them from its own directory, so install those at the repository
+  root.

@@ -151,6 +151,8 @@ func (db *DB) Migrate(ctx context.Context) error {
 		&roleMemberModel{},
 		&runnerTokenModel{},
 		&fileModel{},
+		&libraryModel{},
+		&libraryVersionModel{},
 	)
 }
 

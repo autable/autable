@@ -66,6 +66,9 @@ type Options struct {
 	Timeout time.Duration
 	// Webhook makes the result an HTTP response instead of JSON output.
 	Webhook bool
+	// Libraries resolves require("@lib/<name>"); nil makes every library
+	// import fail.
+	Libraries LibraryResolver
 }
 
 // Log is one entry of the run log. Data is JSON, empty when absent.
@@ -89,6 +92,8 @@ type Result struct {
 	Output   string
 	Response *WebhookResponse
 	Logs     []Log
+	// Libraries are the libraries the run loaded, in load order.
+	Libraries []LibraryUse
 }
 
 // Error kinds the caller maps to statuses.
@@ -128,7 +133,7 @@ func Run(ctx context.Context, options Options) (Result, error) {
 		}
 		return fn(goja.Undefined(), vm.toJS(options.Event))
 	})
-	result := Result{Logs: vm.logs}
+	result := Result{Logs: vm.logs, Libraries: vm.libUses}
 	if err != nil {
 		return result, err
 	}
@@ -145,11 +150,13 @@ func Run(ctx context.Context, options Options) (Result, error) {
 
 // ReadTriggers evaluates the bundle with every host function disabled and
 // returns the JSON of its `triggers` export. It also checks that `run` is
-// a function. Validate the result with ParseTriggers.
-func ReadTriggers(ctx context.Context, program *goja.Program, info Info) (string, error) {
+// a function. Libraries the bundle imports are loaded through libraries
+// (evaluated with host functions disabled too). Validate the result with
+// ParseTriggers.
+func ReadTriggers(ctx context.Context, program *goja.Program, info Info, libraries LibraryResolver) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, TriggerReadTimeout)
 	defer cancel()
-	vm := newVM(ctx, Options{Program: program, Info: info}, true)
+	vm := newVM(ctx, Options{Program: program, Info: info, Libraries: libraries}, true)
 	defer vm.stop()
 	value, err := vm.execute(func() (goja.Value, error) {
 		run, err := vm.workflowExport("run")
@@ -195,6 +202,11 @@ type vm struct {
 	isView   goja.Callable
 	jsonStr  goja.Callable
 	errorCtr goja.Value
+	// Libraries loaded in this run, the ones being loaded (for cycles),
+	// and what was used.
+	libExports map[string]goja.Value
+	libLoading []string
+	libUses    []LibraryUse
 }
 
 func newVM(ctx context.Context, options Options, sandbox bool) *vm {
@@ -208,6 +220,8 @@ func newVM(ctx context.Context, options Options, sandbox bool) *vm {
 		queue:   make(chan func(), 64),
 		done:    make(chan struct{}),
 		timers:  map[int64]*time.Timer{},
+
+		libExports: map[string]goja.Value{},
 	}
 	machine.isView, _ = goja.AssertFunction(rt.Get("ArrayBuffer").ToObject(rt).Get("isView"))
 	machine.jsonStr, _ = goja.AssertFunction(rt.Get("JSON").ToObject(rt).Get("stringify"))

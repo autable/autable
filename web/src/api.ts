@@ -125,7 +125,11 @@ export type WorkflowRun = {
   started_at?: number;
   finished_at?: number;
   logs?: WorkflowLogEntry[];
+  // The libraries the run loaded (@lib/<name>) with the versions it used.
+  libraries?: LibraryUse[];
 };
+
+export type LibraryUse = { name: string; version: number };
 
 // WorkflowSummary names a workflow, e.g. as a role member.
 export type WorkflowSummary = {
@@ -157,6 +161,8 @@ export type WorkflowVersion = {
   sdk: string;
   message: string;
   size: number;
+  // Libraries the version imports, recorded when it is published.
+  libraries?: string[];
   created_by: string;
   created_at: number;
   published: boolean;
@@ -230,6 +236,48 @@ export type AppVersion = {
 export type AppDetail = {
   app: AppDefinition;
   versions: AppVersion[];
+  sdk: { version: string; min_major: number };
+};
+
+// A library is instance-wide shared code that workflows import as
+// "@lib/<name>"; every run loads its published version. Admins only.
+export type LibraryImporter = {
+  kind: "workflow" | "library";
+  database_name?: string;
+  name: string;
+  title: string;
+  version: number;
+};
+
+export type LibraryDefinition = {
+  id: number;
+  name: string;
+  title: string;
+  published_version: number;
+  latest_version: number;
+  creator_id?: string;
+  created_at: number;
+  updated_at: number;
+  imported_by: LibraryImporter[];
+};
+
+export type LibraryVersion = {
+  library_id: number;
+  version: number;
+  sdk: string;
+  message: string;
+  size: number;
+  imports: string[];
+  created_by: string;
+  created_at: number;
+  published: boolean;
+  supported: boolean;
+  sdk_error?: string;
+};
+
+export type LibraryDetail = {
+  library: LibraryDefinition;
+  versions: LibraryVersion[];
   sdk: { version: string; min_major: number };
 };
 
@@ -896,6 +944,56 @@ export async function deleteApp(dbName: string, appName: string): Promise<void> 
 
 export function appSourceURL(dbName: string, appName: string, version: number): string {
   return `${appPath(dbName, appName)}/versions/${version}/source`;
+}
+
+function libraryPath(name: string): string {
+  return `/api/libs/${encodeURIComponent(name)}`;
+}
+
+async function failure(response: Response, fallback: string): Promise<Error> {
+  const error = await response.json().catch(() => ({ error: response.statusText }));
+  return new Error(error.error ?? `${fallback}: ${response.status}`);
+}
+
+export async function listLibraries(): Promise<LibraryDefinition[]> {
+  const response = await fetch("/api/libs");
+  if (!response.ok) {
+    throw await failure(response, "library list failed");
+  }
+  return response.json() as Promise<LibraryDefinition[]>;
+}
+
+export async function loadLibrary(name: string): Promise<LibraryDetail> {
+  const response = await fetch(libraryPath(name));
+  if (!response.ok) {
+    throw await failure(response, "library load failed");
+  }
+  return response.json() as Promise<LibraryDetail>;
+}
+
+// publishLibraryVersion publishes (or rolls back to) a version; every
+// importing workflow uses it from its next run.
+export async function publishLibraryVersion(name: string, version: number): Promise<LibraryDetail> {
+  const response = await fetch(`${libraryPath(name)}/publish`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ version })
+  });
+  if (!response.ok) {
+    throw await failure(response, "library publish failed");
+  }
+  return response.json() as Promise<LibraryDetail>;
+}
+
+export async function deleteLibrary(name: string): Promise<void> {
+  const response = await fetch(libraryPath(name), { method: "DELETE" });
+  if (!response.ok) {
+    throw await failure(response, "library delete failed");
+  }
+}
+
+export function librarySourceURL(name: string, version: number): string {
+  return `${libraryPath(name)}/versions/${version}/source`;
 }
 
 export async function listRoles(dbName: string): Promise<RoleDefinition[]> {

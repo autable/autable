@@ -23,8 +23,10 @@ const (
 	ManifestName = "autable.app.json"
 	// WorkflowManifestName is the manifest of a workflow bundle.
 	WorkflowManifestName = "autable.workflow.json"
-	distPrefix           = "dist/"
-	sourcePrefix         = "source/"
+	// LibraryManifestName is the manifest of a library bundle.
+	LibraryManifestName = "autable.lib.json"
+	distPrefix          = "dist/"
+	sourcePrefix        = "source/"
 
 	// MaxCompressedBytes bounds an upload; MaxUncompressedBytes and
 	// MaxEntries bound what it may expand to.
@@ -35,17 +37,25 @@ const (
 
 var namePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}$`)
 
-// Kind describes one bundle flavour: its manifest file and the dist file
+// Kind describes one bundle flavour: its manifest file and the dist files
 // it must contain.
 type Kind struct {
 	Name         string
 	ManifestName string
+	// RequiredDist is the file the server loads; OtherDist lists further
+	// files a bundle must have.
 	RequiredDist string
+	OtherDist    []string
+	// Instance kinds (libraries) belong to no database.
+	Instance bool
 }
 
 var (
 	App      = Kind{Name: "app", ManifestName: ManifestName, RequiredDist: "index.html"}
 	Workflow = Kind{Name: "workflow", ManifestName: WorkflowManifestName, RequiredDist: "workflow.js"}
+	// Library bundles hold the module (dist/lib.js, an IIFE assigning
+	// __lib) and its type declarations for importers (dist/index.d.ts).
+	Library = Kind{Name: "lib", ManifestName: LibraryManifestName, RequiredDist: "lib.js", OtherDist: []string{"index.d.ts"}, Instance: true}
 )
 
 // ValidName reports whether name can be an app's or workflow's URL slug.
@@ -56,11 +66,32 @@ func ValidName(name string) error {
 	return nil
 }
 
+// Manifest is autable.app.json, autable.workflow.json or autable.lib.json.
+// Libraries have no database.
 type Manifest struct {
-	Database string `json:"database"`
+	Database string `json:"database,omitempty"`
 	Name     string `json:"name"`
 	Title    string `json:"title,omitempty"`
 	SDK      string `json:"sdk"`
+	// Root is set by autablectl, only in uploads, when the build used files
+	// outside the project directory (a shared lib/ of the development
+	// repository): source/ then mirrors the repository from its root, and
+	// Root is the slash-separated path of the project within it. Empty
+	// means source/ is the project directory itself.
+	Root string `json:"root,omitempty"`
+}
+
+// ValidRoot reports whether root can be a manifest's Root: empty, or a
+// clean relative slash-separated path inside the source tree.
+func ValidRoot(root string) error {
+	if root == "" {
+		return nil
+	}
+	if strings.HasPrefix(root, "/") || strings.Contains(root, "\\") || strings.Contains(root, ":") ||
+		path.Clean(root) != root || root == "." || root == ".." || strings.HasPrefix(root, "../") {
+		return fmt.Errorf("root %q must be a relative path inside the source tree", root)
+	}
+	return nil
 }
 
 // Bundle is a parsed upload. Dist maps paths below dist/ to file contents.
@@ -110,30 +141,46 @@ func (kind Kind) Parse(archive []byte) (Bundle, error) {
 	if !manifestSeen {
 		return Bundle{}, fmt.Errorf("bundle has no %s", kind.ManifestName)
 	}
-	if _, ok := bundle.Dist[kind.RequiredDist]; !ok {
-		return Bundle{}, fmt.Errorf("bundle has no dist/%s", kind.RequiredDist)
+	for _, required := range append([]string{kind.RequiredDist}, kind.OtherDist...) {
+		if _, ok := bundle.Dist[required]; !ok {
+			return Bundle{}, fmt.Errorf("bundle has no dist/%s", required)
+		}
 	}
 	if err := ValidName(bundle.Manifest.Name); err != nil {
 		return Bundle{}, err
 	}
-	if bundle.Manifest.Database == "" {
+	switch {
+	case kind.Instance && bundle.Manifest.Database != "":
+		return Bundle{}, fmt.Errorf("%s: a %s belongs to no database; remove database", kind.ManifestName, kind.Name)
+	case !kind.Instance && bundle.Manifest.Database == "":
 		return Bundle{}, fmt.Errorf("%s: database is required", kind.ManifestName)
+	}
+	if err := ValidRoot(bundle.Manifest.Root); err != nil {
+		return Bundle{}, fmt.Errorf("%s: %w", kind.ManifestName, err)
 	}
 	return bundle, nil
 }
 
 // Source returns a gzip-compressed tar of the manifest and the source tree,
 // with the source/ prefix removed, ready to unpack as a project directory.
+// When the manifest has a Root, the tree is a slice of the development
+// repository: the manifest (with root) stays at the top, telling
+// autablectl where the project is, and the project's own copy stays at
+// <root>/<manifest>.
 func (kind Kind) Source(archive []byte) ([]byte, error) {
+	manifest, err := kind.readManifest(archive)
+	if err != nil {
+		return nil, err
+	}
 	var out bytes.Buffer
 	gz := gzip.NewWriter(&out)
 	tw := tar.NewWriter(gz)
-	err := walk(archive, func(name string, body []byte) error {
+	err = walk(archive, func(name string, body []byte) error {
 		target := ""
 		switch {
 		case name == kind.ManifestName:
 			target = kind.ManifestName
-		case name == sourcePrefix+kind.ManifestName:
+		case name == sourcePrefix+kind.ManifestName && manifest.Root == "":
 			// The root manifest is the authoritative copy of the same file.
 			return nil
 		case strings.HasPrefix(name, sourcePrefix):
@@ -157,6 +204,22 @@ func (kind Kind) Source(archive []byte) ([]byte, error) {
 		return nil, err
 	}
 	return out.Bytes(), nil
+}
+
+// readManifest returns the manifest of an archive without validating the
+// rest; a missing manifest reads as the zero Manifest.
+func (kind Kind) readManifest(archive []byte) (Manifest, error) {
+	var manifest Manifest
+	err := walk(archive, func(name string, body []byte) error {
+		if name != kind.ManifestName {
+			return nil
+		}
+		if err := json.Unmarshal(body, &manifest); err != nil {
+			return fmt.Errorf("%s: %w", kind.ManifestName, err)
+		}
+		return ValidRoot(manifest.Root)
+	})
+	return manifest, err
 }
 
 // walk calls visit for every regular file in the archive, enforcing the

@@ -25,7 +25,14 @@ import (
 //
 //	app/<database>/<name>/        source of the latest pushed version
 //	workflow/<database>/<name>/   same for workflows
+//	lib/<name>/                   same for libraries, which are instance-wide
 //	.../.autable-version.json     which version that is, and which is published
+//
+// A version uploaded with files from outside its project (a shared lib/ of
+// the development repository) carries a slice of that repository; the
+// mirror holds the slice as is, with the project at <root>/ and the
+// shared files at their repository paths, and .autable-version.json
+// records the root.
 
 const versionFileName = ".autable-version.json"
 
@@ -36,6 +43,9 @@ type mirroredVersion struct {
 	Message          string `json:"message,omitempty"`
 	CreatedBy        string `json:"created_by,omitempty"`
 	CreatedAt        int64  `json:"created_at"`
+	// Root is the project's path within the mirrored directory when the
+	// version was uploaded as a repository slice.
+	Root string `json:"root,omitempty"`
 }
 
 func (server *Server) SetRepositoryRoot(root string) {
@@ -54,6 +64,9 @@ func repositorySegment(name string) string {
 }
 
 func mirrorRelativePath(kind appbundle.Kind, databaseName, name string) string {
+	if kind.Instance {
+		return path.Join(kind.Name, repositorySegment(name))
+	}
 	return path.Join(kind.Name, repositorySegment(databaseName), repositorySegment(name))
 }
 
@@ -66,6 +79,10 @@ func (server *Server) mirrorVersion(ctx context.Context, actorID string, kind ap
 	}
 	relative := mirrorRelativePath(kind, databaseName, name)
 	err := func() error {
+		bundle, err := kind.Parse(archive)
+		if err != nil {
+			return err
+		}
 		source, err := kind.Source(archive)
 		if err != nil {
 			return err
@@ -77,13 +94,20 @@ func (server *Server) mirrorVersion(ctx context.Context, actorID string, kind ap
 		if err := extractTarGz(source, dir); err != nil {
 			return err
 		}
+		if version.Root = bundle.Manifest.Root; version.Root != "" {
+			// The top manifest only locates the project, whose own copy
+			// is at <root>/; .autable-version.json records the root.
+			if err := os.Remove(filepath.Join(dir, kind.ManifestName)); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return err
+			}
+		}
 		return writeVersionFile(dir, version)
 	}()
 	if err != nil {
 		slog.Warn("mirror version into repository", "path", relative, "error", err)
 		return
 	}
-	summary := fmt.Sprintf("pushed %s %s/%s v%d", kind.Name, databaseName, name, version.Version)
+	summary := fmt.Sprintf("pushed %s %s v%d", kind.Name, mirrorLabel(kind, databaseName, name), version.Version)
 	if version.Message != "" {
 		summary += ": " + version.Message
 	}
@@ -116,7 +140,7 @@ func (server *Server) mirrorPublish(ctx context.Context, actorID string, kind ap
 		slog.Warn("mirror publish into repository", "path", relative, "error", err)
 		return
 	}
-	server.notifyRepositoryChange(ctx, actorID, kind.Name+".publish", fmt.Sprintf("published %s %s/%s v%d", kind.Name, databaseName, name, published), relative)
+	server.notifyRepositoryChange(ctx, actorID, kind.Name+".publish", fmt.Sprintf("published %s %s v%d", kind.Name, mirrorLabel(kind, databaseName, name), published), relative)
 }
 
 // mirrorDelete removes the mirrored source of a deleted app or workflow.
@@ -129,7 +153,15 @@ func (server *Server) mirrorDelete(ctx context.Context, actorID string, kind app
 		slog.Warn("remove mirrored source from repository", "path", relative, "error", err)
 		return
 	}
-	server.notifyRepositoryChange(ctx, actorID, kind.Name+".delete", fmt.Sprintf("deleted %s %s/%s", kind.Name, databaseName, name), relative)
+	server.notifyRepositoryChange(ctx, actorID, kind.Name+".delete", fmt.Sprintf("deleted %s %s", kind.Name, mirrorLabel(kind, databaseName, name)), relative)
+}
+
+// mirrorLabel names an app, workflow or library in commit summaries.
+func mirrorLabel(kind appbundle.Kind, databaseName, name string) string {
+	if kind.Instance {
+		return name
+	}
+	return databaseName + "/" + name
 }
 
 func writeVersionFile(dir string, version mirroredVersion) error {

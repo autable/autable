@@ -38,6 +38,21 @@ you are talking to:
   there are no nodes. Processes that span time keep their state in table
   rows: a `schedule` trigger polls the other system and writes results into
   rows, and `recordChanged` triggers move each stage on.
+- Write integrations and other shared code once, in the development
+  repository's shared `lib/` beside its `workflows/` and `apps/`, imported
+  by relative path; shared code imports the SDK as `@autable/workflow` or
+  `@autable/app`. `push` uploads the shared files the build used with the
+  source (the project's path in the repository becomes `root`), and `pull`
+  recreates that slice; the project is at the `project_dir` it prints. See
+  "Shared code" in `docs/cli.md`.
+- Libraries (`@lib/<name>`) are instance-wide shared code that admins push
+  with `autablectl lib init|push|publish|rollback`; every workflow run loads
+  a library's published version, so publishing one changes every importing
+  workflow at its next run (`lib versions NAME` lists the importers; `lib
+  rollback` undoes it instantly). Keep library exports backward compatible,
+  push without `--publish` and test first, and run `workflow sdk` in
+  importing projects for the types. A run's `libraries` show the versions
+  it loaded.
 - Build UIs as apps: ordinary frontend projects autable hosts at
   `/apps/<db>/<name>/`. `autablectl app init DIR --database DB --name NAME`
   scaffolds Vite + React + TypeScript with the SDK in `src/autable/`; read the
@@ -69,6 +84,7 @@ you are talking to:
 | What workflow code may call, event shapes, webhook responses | `docs/design/workflows-host-api.md` |
 | Workflow SDK (`schedule`, `recordChanged`, `webhook`, `manual`, `fetch`, `crypto`, `tables`, `secrets`, `log`) | `internal/wfsdk/files/` (start at `index.ts`) |
 | Workflow project template | `internal/ctl/wftemplate/` |
+| Library project template, linking (`@lib/<name>`) | `internal/ctl/libtemplate/`, `internal/wfruntime/libraries.go`, `internal/api/libraries.go` |
 | How a run executes (host functions, event loop, timeouts) | `internal/wfruntime/` |
 | Apps: model, bundle, SDK versioning, URLs, CLI | `docs/design/apps.md` |
 | App SDK (`table(...)`, `files`, `currentUser`, `runWorkflow`, `basePath`) | `internal/appsdk/files/autable.ts`; field types in `schema.ts` (apps and workflows) come from `internal/ctl/appschema.go` |

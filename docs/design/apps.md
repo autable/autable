@@ -49,6 +49,16 @@ dist/...             built static files; dist/index.html is required
 source/...           the project source, without node_modules or build output
 ```
 
+When the build used files outside the project directory (a shared `lib/`
+of the development repository), `source/` is instead a slice of that git
+repository from its root: the project at its path there plus exactly the
+outside files the build used, and the manifest carries `"root"`, the
+project's path within `source/`. The server only checks that `root` is a
+clean relative path; `autablectl app pull` writes the slice and puts the
+project at `<dir>/<root>`, and the repository mirror keeps the slice as is,
+recording the root in `.autable-version.json`. See "Shared code in a
+development repository" in `docs/cli.md`.
+
 The source travels with every version so whoever maintains an app next
 can pick it up: `autablectl app pull` downloads the source of any version
 (admins only), and rolling back the build also identifies the

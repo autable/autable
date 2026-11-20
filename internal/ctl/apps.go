@@ -105,6 +105,8 @@ func runAppPush(a *app, args []string) error {
 		"bytes":             len(result.archive),
 		"dist_files":        result.counts.dist,
 		"source_files":      result.counts.source,
+		"shared_files":      result.counts.shared,
+		"root":              result.counts.root,
 	})
 }
 
@@ -191,9 +193,9 @@ func runAppPull(a *app, args []string) error {
 			return fmt.Errorf("app %s has no versions", values[1])
 		}
 	}
-	files, err := appProject.pullSource(c, values[0], values[1], *version, dir)
+	pulled, err := appProject.pullSource(c, values[0], values[1], *version, dir)
 	if err != nil {
 		return err
 	}
-	return a.printJSON(map[string]any{"dir": dir, "version": *version, "files": files})
+	return a.printJSON(pulledOutput(dir, *version, pulled))
 }

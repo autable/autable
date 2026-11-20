@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"autable/internal/appbundle"
 	"autable/internal/appsdk"
 	"autable/internal/metadata"
 	"autable/internal/repositorysync"
@@ -89,5 +90,49 @@ func TestAppVersionsAreMirroredIntoTheRepository(t *testing.T) {
 	}
 	if strings.Join(actions, ",") != "app.push,app.push,app.publish,app.delete" {
 		t.Fatalf("unexpected repository changes: %v", actions)
+	}
+}
+
+func TestRepositorySliceVersionsAreMirroredAsTheSlice(t *testing.T) {
+	catalog := metadata.Catalog{Databases: []metadata.Database{{Name: "shop", Tables: []metadata.Table{}}}}
+	server, system, _ := newTestServerWithMetadataFile(t, catalog)
+	makeTestAdmins(server, "builder")
+	root := t.TempDir()
+	server.SetRepositoryRoot(root)
+	server.SetRepositorySync(&recordingSync{})
+
+	manifest := `{"database":"shop","name":"widgets","sdk":"` + appsdk.Version() + `"}`
+	uploaded := `{"database":"shop","name":"widgets","sdk":"` + appsdk.Version() + `","root":"apps/widgets"}`
+	bundle := testTarGz(t, []testTarEntry{
+		{name: appbundle.ManifestName, body: uploaded},
+		{name: "dist/index.html", body: `<!doctype html><html><head></head><body></body></html>`},
+		{name: "source/apps/widgets/" + appbundle.ManifestName, body: manifest},
+		{name: "source/apps/widgets/src/main.ts", body: `import { greet } from "../../../lib/greet";`},
+		{name: "source/lib/greet.ts", body: `export const greet = "hi";`},
+	})
+	if response := uploadTestApp(t, server, system, "builder", "shop", "widgets", bundle, "publish=1"); response.Code != http.StatusCreated {
+		t.Fatalf("expected upload 201, got %d: %s", response.Code, response.Body.String())
+	}
+	dir := filepath.Join(root, "app", "shop", "widgets")
+	for rel, want := range map[string]string{
+		"apps/widgets/" + appbundle.ManifestName: manifest,
+		"apps/widgets/src/main.ts":               "lib/greet",
+		"lib/greet.ts":                           "hi",
+	} {
+		data, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(rel)))
+		if err != nil || !strings.Contains(string(data), want) {
+			t.Fatalf("expected %s with %q in the mirror, got %q, %v", rel, want, data, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, appbundle.ManifestName)); !os.IsNotExist(err) {
+		t.Fatalf("the locating manifest must not be mirrored at the top, got %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, versionFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var version mirroredVersion
+	if err := json.Unmarshal(data, &version); err != nil || version.Root != "apps/widgets" || version.Version != 1 {
+		t.Fatalf("expected the root in the version file, got %s, %v", data, err)
 	}
 }

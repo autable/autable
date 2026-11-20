@@ -55,30 +55,33 @@ type workflowEngine struct {
 	// slots bounds concurrent executions, queued and webhook runs alike.
 	slots chan struct{}
 
-	mu        sync.Mutex
-	ctx       context.Context
-	queue     []queuedRun
-	wake      chan struct{}
-	active    map[int64]*activeRun
-	done      map[int64]chan struct{}
-	programs  map[[2]int64]*goja.Program
-	triggers  map[[2]int64][]wfruntime.Trigger
-	lastFired map[string]int64
-	wg        sync.WaitGroup
+	mu       sync.Mutex
+	ctx      context.Context
+	queue    []queuedRun
+	wake     chan struct{}
+	active   map[int64]*activeRun
+	done     map[int64]chan struct{}
+	programs map[[2]int64]*goja.Program
+	// libPrograms caches compiled library versions by library id and version.
+	libPrograms map[[2]int64]*goja.Program
+	triggers    map[[2]int64][]wfruntime.Trigger
+	lastFired   map[string]int64
+	wg          sync.WaitGroup
 }
 
 func newWorkflowEngine(server *Server) *workflowEngine {
 	return &workflowEngine{
-		server:    server,
-		client:    egress.NewClient(),
-		now:       time.Now,
-		slots:     make(chan struct{}, DefaultWorkflowWorkers),
-		wake:      make(chan struct{}, 1),
-		active:    map[int64]*activeRun{},
-		done:      map[int64]chan struct{}{},
-		programs:  map[[2]int64]*goja.Program{},
-		triggers:  map[[2]int64][]wfruntime.Trigger{},
-		lastFired: map[string]int64{},
+		server:      server,
+		client:      egress.NewClient(),
+		now:         time.Now,
+		slots:       make(chan struct{}, DefaultWorkflowWorkers),
+		wake:        make(chan struct{}, 1),
+		active:      map[int64]*activeRun{},
+		done:        map[int64]chan struct{}{},
+		programs:    map[[2]int64]*goja.Program{},
+		libPrograms: map[[2]int64]*goja.Program{},
+		triggers:    map[[2]int64][]wfruntime.Trigger{},
+		lastFired:   map[string]int64{},
 	}
 }
 
@@ -270,7 +273,12 @@ func (engine *workflowEngine) finish(ctx context.Context, run systemdb.WorkflowR
 		encoded, _ := json.Marshal(map[string]any{"status": result.Response.Status, "headers": result.Response.Headers})
 		output = string(encoded)
 	}
-	if _, err := system.FinishWorkflowRun(ctx, run.ID, status, output, errorText, engine.now().UnixMilli()); err != nil {
+	libraries := ""
+	if len(result.Libraries) > 0 {
+		encoded, _ := json.Marshal(result.Libraries)
+		libraries = string(encoded)
+	}
+	if _, err := system.FinishWorkflowRun(ctx, run.ID, status, output, errorText, libraries, engine.now().UnixMilli()); err != nil {
 		slog.Error("store workflow run result", "run", run.ID, "error", err)
 	}
 }
@@ -317,7 +325,7 @@ func (engine *workflowEngine) cancel(ctx context.Context, runID int64) error {
 		engine.wait(waitCtx, runID)
 		return nil
 	}
-	_, err := engine.server.system.FinishWorkflowRun(ctx, runID, systemdb.WorkflowRunCancelled, "", "cancelled", engine.now().UnixMilli())
+	_, err := engine.server.system.FinishWorkflowRun(ctx, runID, systemdb.WorkflowRunCancelled, "", "cancelled", "", engine.now().UnixMilli())
 	if err == nil {
 		engine.markDone(runID)
 	}
@@ -407,14 +415,15 @@ func (engine *workflowEngine) runProgram(ctx context.Context, workflow systemdb.
 	full["trigger"] = run.Trigger
 	full["runId"] = run.ID
 	return wfruntime.Run(ctx, wfruntime.Options{
-		Program: program,
-		Info:    wfruntime.Info{Database: workflow.DatabaseName, Workflow: workflow.Name, Version: run.Version, RunID: run.ID, Trigger: run.Trigger},
-		Event:   full,
-		Secrets: secrets,
-		Vars:    vars,
-		Host:    &workflowHost{server: engine.server, workflow: workflow, subject: systemdb.WorkflowSubjectID(workflow.ID)},
-		Timeout: timeout,
-		Webhook: webhook,
+		Program:   program,
+		Info:      wfruntime.Info{Database: workflow.DatabaseName, Workflow: workflow.Name, Version: run.Version, RunID: run.ID, Trigger: run.Trigger},
+		Event:     full,
+		Secrets:   secrets,
+		Vars:      vars,
+		Host:      &workflowHost{server: engine.server, workflow: workflow, subject: systemdb.WorkflowSubjectID(workflow.ID)},
+		Timeout:   timeout,
+		Webhook:   webhook,
+		Libraries: engine.libraryResolver(),
 	})
 }
 

@@ -12,7 +12,10 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "paths": {
+      "@autable/workflow": ["./src/autable/index.ts"]
+    }
   },
   "include": ["src"]
 }

@@ -928,7 +928,7 @@ func TestRetentionKeepsUnfinishedRuns(t *testing.T) {
 	workflow := deployTestWorkflow(t, server, system, "kept", workflowScript(manualOnlyTriggers, `function () {}`))
 	ctx := context.Background()
 	old, _ := system.CreateWorkflowRun(ctx, systemdb.WorkflowRun{WorkflowID: workflow.ID, Trigger: "start"})
-	if _, err := system.FinishWorkflowRun(ctx, old.ID, systemdb.WorkflowRunSucceeded, "", "", time.Now().UnixMilli()); err != nil {
+	if _, err := system.FinishWorkflowRun(ctx, old.ID, systemdb.WorkflowRunSucceeded, "", "", "", time.Now().UnixMilli()); err != nil {
 		t.Fatal(err)
 	}
 	waiting, _ := system.CreateWorkflowRun(ctx, systemdb.WorkflowRun{WorkflowID: workflow.ID, Trigger: "start"})

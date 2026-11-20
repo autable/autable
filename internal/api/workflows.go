@@ -97,6 +97,8 @@ type workflowRunView struct {
 	StartedAt  int64                 `json:"started_at,omitempty"`
 	FinishedAt int64                 `json:"finished_at,omitempty"`
 	Logs       []workflowLogResponse `json:"logs,omitempty"`
+	// Libraries are the libraries the run loaded: [{"name","version"}].
+	Libraries json.RawMessage `json:"libraries,omitempty"`
 }
 
 // workflowRunListedView is a run in lists: no event, no logs.
@@ -159,7 +161,8 @@ func (server *Server) adminRunView(ctx context.Context, run systemdb.WorkflowRun
 		ID: run.ID, WorkflowID: run.WorkflowID, Version: run.Version, Trigger: run.Trigger, Status: run.Status,
 		Event: systemdb.RawJSON(run.Event), Output: systemdb.RawJSON(run.Output), Error: run.Error, StartedBy: run.StartedBy,
 		CreatedAt: run.CreatedAt, StartedAt: run.StartedAt, FinishedAt: run.FinishedAt,
-		Logs: make([]workflowLogResponse, 0, len(logs)),
+		Logs:      make([]workflowLogResponse, 0, len(logs)),
+		Libraries: systemdb.RawJSON(run.Libraries),
 	}
 	for _, entry := range logs {
 		view.Logs = append(view.Logs, workflowLogResponse{Time: entry.Time, Level: entry.Level, Message: entry.Message, Data: systemdb.RawJSON(entry.Data)})
@@ -377,26 +380,33 @@ func workflowVersionResponses(workflow systemdb.Workflow, versions []systemdb.Wo
 	return responses
 }
 
-// readWorkflowTriggers compiles a bundle and reads and validates its
-// triggers; failures are the bundle's fault (422).
-func (server *Server) readWorkflowTriggers(ctx context.Context, workflow systemdb.Workflow, version int64, bundle appbundle.Bundle) (string, error) {
-	program, err := wfruntime.Compile("workflow.js", string(bundle.Dist[appbundle.Workflow.RequiredDist]))
-	if err != nil {
-		return "", err
+// readWorkflowTriggers checks that every library a bundle imports can be
+// loaded, compiles the bundle, and reads and validates its triggers. It
+// returns the triggers and the imported libraries; failures are the
+// bundle's fault (422).
+func (server *Server) readWorkflowTriggers(ctx context.Context, workflow systemdb.Workflow, version int64, bundle appbundle.Bundle) (string, []string, error) {
+	source := string(bundle.Dist[appbundle.Workflow.RequiredDist])
+	imports := wfruntime.Imports(source)
+	if err := server.checkLibraryImports(ctx, imports, ""); err != nil {
+		return "", nil, err
 	}
-	raw, err := wfruntime.ReadTriggers(ctx, program, wfruntime.Info{Database: workflow.DatabaseName, Workflow: workflow.Name, Version: version})
+	program, err := wfruntime.Compile("workflow.js", source)
 	if err != nil {
-		return "", fmt.Errorf("read triggers: %w", err)
+		return "", nil, err
+	}
+	raw, err := wfruntime.ReadTriggers(ctx, program, wfruntime.Info{Database: workflow.DatabaseName, Workflow: workflow.Name, Version: version}, server.workflows.libraryResolver())
+	if err != nil {
+		return "", nil, fmt.Errorf("read triggers: %w", err)
 	}
 	triggers, err := wfruntime.ParseTriggers(raw, catalogSchema{server: server, database: workflow.DatabaseName})
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	encoded, err := json.Marshal(triggers)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
-	return string(encoded), nil
+	return string(encoded), imports, nil
 }
 
 // catalogSchema answers trigger validation from the live catalog.
@@ -478,10 +488,11 @@ func (server *Server) handleUploadWorkflowVersion(w http.ResponseWriter, r *http
 	}
 	publish := r.URL.Query().Get("publish") == "1" || r.URL.Query().Get("publish") == "true"
 	var triggersJSON string
+	var imports []string
 	if publish {
 		// Read the triggers before storing anything: an invalid bundle is
 		// rejected as a whole.
-		triggersJSON, err = server.readWorkflowTriggers(r.Context(), workflow, workflow.LatestVersion+1, bundle)
+		triggersJSON, imports, err = server.readWorkflowTriggers(r.Context(), workflow, workflow.LatestVersion+1, bundle)
 		if err != nil {
 			if created {
 				_ = server.system.DeleteWorkflow(r.Context(), workflow.ID)
@@ -496,7 +507,8 @@ func (server *Server) handleUploadWorkflowVersion(w http.ResponseWriter, r *http
 		CreatedBy: actorID,
 	}, archive)
 	if err == nil && publish {
-		workflow, err = server.system.PublishWorkflowVersion(r.Context(), workflow.ID, version.Version, triggersJSON)
+		workflow, err = server.system.PublishWorkflowVersion(r.Context(), workflow.ID, version.Version, triggersJSON, imports)
+		version.Libraries = imports
 	}
 	if err != nil {
 		if created {
@@ -561,12 +573,12 @@ func (server *Server) handlePublishWorkflow(w http.ResponseWriter, r *http.Reque
 	}
 	// Triggers are read again on every publish: they may name tables, which
 	// can have changed since the version was uploaded.
-	triggersJSON, err := server.readWorkflowTriggers(r.Context(), workflow, version.Version, bundle)
+	triggersJSON, imports, err := server.readWorkflowTriggers(r.Context(), workflow, version.Version, bundle)
 	if err != nil {
 		writeError(w, http.StatusUnprocessableEntity, err)
 		return
 	}
-	published, err := server.system.PublishWorkflowVersion(r.Context(), workflow.ID, version.Version, triggersJSON)
+	published, err := server.system.PublishWorkflowVersion(r.Context(), workflow.ID, version.Version, triggersJSON, imports)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return

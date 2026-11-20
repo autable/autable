@@ -13,7 +13,10 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "paths": {
+      "@autable/app": ["./src/autable/autable.ts"]
+    }
   },
   "include": ["src", "vite.config.ts"]
 }

@@ -671,3 +671,114 @@ func TestMigrateReplacesNodeWorkflows(t *testing.T) {
 		t.Fatalf("expected the runner token to survive, got %v %v", ok, err)
 	}
 }
+
+// preLibrariesWorkflowVersionModel and preLibrariesWorkflowRunModel are the
+// workflow version and run models as shipped with schema version 8 before
+// libraries (libraries_json) existed.
+type preLibrariesWorkflowVersionModel struct {
+	ID           int64  `gorm:"primaryKey;autoIncrement"`
+	WorkflowID   int64  `gorm:"uniqueIndex:idx_workflow_version;not null"`
+	Version      int64  `gorm:"uniqueIndex:idx_workflow_version;not null"`
+	SDK          string `gorm:"not null;default:''"`
+	Message      string `gorm:"not null;default:''"`
+	Size         int64  `gorm:"not null;default:0"`
+	Bundle       []byte `gorm:"not null"`
+	TriggersJSON string `gorm:"not null;default:''"`
+	CreatedBy    string `gorm:"not null;default:''"`
+	CreatedAt    int64  `gorm:"autoCreateTime:milli"`
+}
+
+func (preLibrariesWorkflowVersionModel) TableName() string { return "workflow_version_models" }
+
+type preLibrariesWorkflowRunModel struct {
+	ID         int64  `gorm:"primaryKey;autoIncrement"`
+	WorkflowID int64  `gorm:"index:idx_workflow_run_workflow;not null"`
+	Version    int64  `gorm:"not null;default:0"`
+	Trigger    string `gorm:"not null;default:''"`
+	Status     string `gorm:"index;not null;default:'queued'"`
+	EventJSON  string `gorm:"not null;default:''"`
+	OutputJSON string `gorm:"not null;default:''"`
+	Error      string `gorm:"not null;default:''"`
+	StartedBy  string `gorm:"index;not null;default:''"`
+	CreatedAt  int64  `gorm:"autoCreateTime:milli"`
+	StartedAt  int64  `gorm:"not null;default:0"`
+	FinishedAt int64  `gorm:"index;not null;default:0"`
+}
+
+func (preLibrariesWorkflowRunModel) TableName() string { return "workflow_run_models" }
+
+// Libraries add tables and defaulted columns only, which AutoMigrate
+// handles on a populated version-8 database without a migration.
+func TestOpenAddsLibrariesToAVersion8Database(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "system.sqlite")
+	orm, err := gorm.Open(sqlite.Open(path), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	migrateTo(t, orm, 8)
+	if err := orm.AutoMigrate(
+		&userModel{}, &sessionModel{}, &permissionGrantModel{},
+		&workflowModel{}, &preLibrariesWorkflowVersionModel{}, &workflowSecretModel{}, &workflowVarModel{},
+		&preLibrariesWorkflowRunModel{}, &workflowLogModel{},
+		&appModel{}, &appVersionModel{}, &roleModel{}, &roleMemberModel{}, &runnerTokenModel{}, &fileModel{},
+	); err != nil {
+		t.Fatal(err)
+	}
+	workflow := workflowModel{DatabaseName: "db", Name: "sync", Title: "Sync", Enabled: true, TimeoutSeconds: 600, HistoryRetentionDays: 30, PublishedVersion: 1, LatestVersion: 1}
+	if err := orm.Create(&workflow).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := orm.Create(&preLibrariesWorkflowVersionModel{WorkflowID: workflow.ID, Version: 1, SDK: "1.0", Bundle: []byte("bundle"), TriggersJSON: `[{"name":"start","kind":"manual"}]`}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := orm.Create(&preLibrariesWorkflowRunModel{WorkflowID: workflow.ID, Version: 1, Trigger: "start", Status: "succeeded", OutputJSON: `{"ok":true}`, FinishedAt: 5}).Error; err != nil {
+		t.Fatal(err)
+	}
+	handle, err := orm.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := handle.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	upgraded, err := Open(ctx, path)
+	if err != nil {
+		t.Fatalf("expected the version-8 database to open, got %v", err)
+	}
+	defer upgraded.Close()
+	if got := schemaVersion(t, upgraded); got != currentSchemaVersion() || got != 8 {
+		t.Fatalf("expected schema version 8, got %d", got)
+	}
+	migrator := upgraded.orm.Migrator()
+	for _, check := range []struct {
+		model  any
+		column string
+	}{{&workflowVersionModel{}, "libraries_json"}, {&workflowRunModel{}, "libraries_json"}} {
+		if !migrator.HasColumn(check.model, check.column) {
+			t.Fatalf("expected %T to gain %s", check.model, check.column)
+		}
+	}
+	if !migrator.HasTable(&libraryModel{}) || !migrator.HasTable(&libraryVersionModel{}) {
+		t.Fatal("expected the library tables")
+	}
+	version, err := upgraded.WorkflowVersion(ctx, workflow.ID, 1)
+	if err != nil || version.Triggers != `[{"name":"start","kind":"manual"}]` || len(version.Libraries) != 0 {
+		t.Fatalf("expected the version intact, got %#v, %v", version, err)
+	}
+	runs, err := upgraded.WorkflowRuns(ctx, workflow.ID, WorkflowRunFilter{})
+	if err != nil || len(runs) != 1 || runs[0].Output != `{"ok":true}` || runs[0].Libraries != "" {
+		t.Fatalf("expected the run intact, got %#v, %v", runs, err)
+	}
+	if importers, err := upgraded.LibraryImporters(ctx, "text"); err != nil || len(importers) != 0 {
+		t.Fatalf("expected no importers, got %#v, %v", importers, err)
+	}
+	// New rows work on the upgraded tables.
+	if _, err := upgraded.PublishWorkflowVersion(ctx, workflow.ID, 1, `[]`, []string{"text"}); err != nil {
+		t.Fatal(err)
+	}
+	if importers, err := upgraded.LibraryImporters(ctx, "text"); err != nil || len(importers) != 1 {
+		t.Fatalf("expected the workflow as importer, got %#v, %v", importers, err)
+	}
+}

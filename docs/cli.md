@@ -135,7 +135,8 @@ autablectl workflow delete sales nightly          # with its versions, settings,
 - `workflow sdk` rewrites `src/autable/` from the server and updates `sdk` in
   the manifest. Do not edit those files.
 - `workflow push` runs `npm run build` (skip with `--no-build`) and uploads
-  the manifest, `dist/`, and the source, chosen as for apps. A push never
+  the manifest, `dist/`, and the source, chosen as for apps (including
+  shared files outside the project, see below). A push never
   changes what runs unless `--publish` is given; publishing fails when the
   trigger declarations are invalid.
 - `workflow run` starts a manual trigger: `--trigger` names it (it may be
@@ -150,6 +151,44 @@ autablectl workflow delete sales nightly          # with its versions, settings,
   one, else the newest) into a new or empty directory.
 - `workflow var set` takes the value as an argument; put `--` before a value
   that starts with `-` (a PEM public key, for example).
+
+### Libraries
+
+A library is shared TypeScript that workflows (and other libraries)
+import as `@lib/<name>`. It belongs to no database. Every workflow run
+loads the library's **published** version, so publishing or rolling back
+a library changes every importing workflow at its next run, without
+pushing the workflows. All `lib` commands need an admin account. See
+"Libraries" in [design/workflows-v2.md](design/workflows-v2.md).
+
+```sh
+autablectl lib init ./http --name http --title "HTTP helpers"
+cd http && npm install && npm run build
+autablectl lib push -m "first version"           # npm run build, upload; nothing changes yet
+autablectl lib publish http 1                    # importing workflows use it from their next run
+autablectl lib rollback http                     # publish the newest version below the current one
+autablectl lib list                              # with the workflows and libraries importing each
+autablectl lib versions http                     # versions, imports, imported_by
+autablectl lib pull http ./http-v1 --version 1
+autablectl lib sdk                               # refresh the vendored SDK and library types
+autablectl lib delete http                       # refused while a published version imports it
+```
+
+- `lib init` writes a TypeScript + esbuild project: `npm run build` emits
+  the declarations with `tsc`, bundles `src/index.ts` into `dist/lib.js`
+  (an IIFE assigning `__lib`), and joins the declarations into
+  `dist/index.d.ts` as `declare module "@lib/<name>"`. The manifest is
+  `autable.lib.json` (`name`, `title`, `sdk`; no database). `src/autable/`
+  holds the workflow SDK and a `schema.ts` without tables.
+- `workflow init` and `workflow sdk` (and `lib init`/`lib sdk`) vendor the
+  declarations of every published library into
+  `src/autable/libs/<name>.d.ts` and print them as `libraries`; run
+  `workflow sdk` again after a library publishes a new API. They skip
+  this with a note on stderr when the server cannot list libraries.
+- `lib push --publish` and `lib publish` fail when the library imports a
+  library that is not published, imports itself, or would close an import
+  cycle. Publishing a workflow that imports a missing or unpublished
+  library fails the same way.
 
 ### Apps
 
@@ -190,6 +229,43 @@ autablectl app sdk                       # after tables change or the server is 
   unless `--publish` is given.
 - `app pull` downloads the source of a version (default: the published one,
   else the newest) into a new or empty directory.
+
+### Shared code in a development repository
+
+Apps and workflows can live in one git repository with shared code beside
+them, which every project imports by relative path:
+
+```
+repo/
+  lib/notify.ts                 import { notify } from "../../lib/notify"
+  workflows/order-sync/         autable.workflow.json, src/, build.mjs
+  apps/board/                   autable.app.json, src/, vite.config.ts
+```
+
+- The builds of the current templates write `.autable/build-inputs.json`,
+  the files the bundle was built from (`build.mjs` from esbuild's metafile;
+  a small plugin in `vite.config.ts` from the module ids of the Vite
+  build), as paths relative to the project.
+- `push` uploads the project's source as above. When the build used files
+  outside the project, it also uploads exactly those files, never anything
+  below `node_modules` and nothing else of the repository. The source then
+  mirrors the repository from the root of the git work tree (`lib/...`,
+  `workflows/order-sync/...`), and the uploaded manifest gets `"root":
+  "workflows/order-sync"`, the project's path in it. `push` prints `root`
+  and `shared_files`. A project not inside a git work tree may not use
+  files outside its directory; `push` refuses with the paths it found.
+- `pull` writes such a version as that repository slice: it prints `root`
+  and `project_dir` (`DIR/<root>`), where the project's own manifest is;
+  `npm install && npm run build` there builds it as before.
+- Shared code imports the SDK as `@autable/workflow` or `@autable/app`,
+  which the templates' `tsconfig.json` and build configs map to the
+  project's vendored SDK. npm packages that shared code imports resolve from
+  its own directory, so install them at the repository root.
+- Only modules are recorded for apps: a stylesheet outside the project must
+  be imported from TypeScript, and its own `@import`s and `url()`s of
+  further outside files are not uploaded.
+- A project whose build writes no build-inputs file (made from an older
+  template) uploads only its directory; `push` notes that on stderr.
 
 ### Agent skill
 

@@ -2,7 +2,7 @@ import { ChevronRight, CircleStop, ScrollText } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import type { AuthUser, WorkflowLogEntry, WorkflowRun } from "../api";
-import { Button, Callout, Card, cn, Skeleton, StatusBadge } from "../ui";
+import { Badge, Button, Callout, Card, cn, Skeleton, StatusBadge } from "../ui";
 import { formatDuration, formatJSON, formatLogTime, formatTimestamp, isActiveRun, runDuration, runStatusTone } from "../workflowFormat";
 
 /** A JSON value in a scrolling monospace block with its label. */
@@ -155,6 +155,18 @@ export function WorkflowRunDetail({
         <Meta label={t("workflow.runs.queued")}>{formatTimestamp(run.created_at)}</Meta>
         <Meta label={t("workflow.runs.started")}>{formatTimestamp(run.started_at)}</Meta>
         <Meta label={t("workflow.runs.duration")}>{duration === undefined ? "" : formatDuration(duration)}</Meta>
+        {run.libraries && run.libraries.length > 0 && (
+          <div className="col-span-2 flex min-w-0 flex-col gap-0.5 sm:col-span-3">
+            <dt className="text-12 text-muted">{t("workflow.runs.libraries")}</dt>
+            <dd aria-label={t("workflow.runs.libraries")} className="flex flex-wrap gap-1">
+              {run.libraries.map((library) => (
+                <Badge key={library.name} className="font-mono">
+                  {t("workflow.runs.libraryVersion", { name: library.name, version: library.version })}
+                </Badge>
+              ))}
+            </dd>
+          </div>
+        )}
       </dl>
       <div className="flex flex-col gap-4 border-t border-border-soft px-5 py-4">
         {run.error && (

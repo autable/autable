@@ -285,6 +285,7 @@ func (server *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (server *Server) routes() {
 	server.appRoutes()
 	server.workflowRoutes()
+	server.libraryRoutes()
 	server.mux.HandleFunc("GET /api/auth/config", server.handleAuthConfig)
 	server.mux.HandleFunc("POST /api/auth/register", server.handleRegister)
 	server.mux.HandleFunc("POST /api/auth/login", server.handleLogin)

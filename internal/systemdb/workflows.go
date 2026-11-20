@@ -50,21 +50,24 @@ type Workflow struct {
 }
 
 // WorkflowVersion is one immutable upload, without its bundle. Triggers is
-// the JSON trigger list read when the version was first published, empty
-// before that.
+// the JSON trigger list read when the version was last published, empty
+// before that; Libraries lists the libraries ("@lib/<name>") its code
+// imports, recorded at the same time.
 type WorkflowVersion struct {
-	WorkflowID int64  `json:"workflow_id"`
-	Version    int64  `json:"version"`
-	SDK        string `json:"sdk"`
-	Message    string `json:"message"`
-	Size       int64  `json:"size"`
-	Triggers   string `json:"-"`
-	CreatedBy  string `json:"created_by"`
-	CreatedAt  int64  `json:"created_at"`
+	WorkflowID int64    `json:"workflow_id"`
+	Version    int64    `json:"version"`
+	SDK        string   `json:"sdk"`
+	Message    string   `json:"message"`
+	Size       int64    `json:"size"`
+	Triggers   string   `json:"-"`
+	Libraries  []string `json:"libraries"`
+	CreatedBy  string   `json:"created_by"`
+	CreatedAt  int64    `json:"created_at"`
 }
 
 // WorkflowRun is one execution of a workflow. Event and Output are JSON
-// (empty when absent).
+// (empty when absent); so is Libraries, the libraries the run loaded with
+// their versions ([{"name","version"}]).
 type WorkflowRun struct {
 	ID         int64  `json:"id"`
 	WorkflowID int64  `json:"workflow_id"`
@@ -75,6 +78,7 @@ type WorkflowRun struct {
 	Output     string `json:"-"`
 	Error      string `json:"error,omitempty"`
 	StartedBy  string `json:"started_by,omitempty"`
+	Libraries  string `json:"-"`
 	CreatedAt  int64  `json:"created_at"`
 	StartedAt  int64  `json:"started_at,omitempty"`
 	FinishedAt int64  `json:"finished_at,omitempty"`
@@ -128,8 +132,11 @@ type workflowVersionModel struct {
 	Size         int64  `gorm:"not null;default:0"`
 	Bundle       []byte `gorm:"not null"`
 	TriggersJSON string `gorm:"not null;default:''"`
-	CreatedBy    string `gorm:"not null;default:''"`
-	CreatedAt    int64  `gorm:"autoCreateTime:milli"`
+	// LibrariesJSON is added to existing tables by AutoMigrate (it has a
+	// default); empty for versions published before libraries existed.
+	LibrariesJSON string `gorm:"not null;default:''"`
+	CreatedBy     string `gorm:"not null;default:''"`
+	CreatedAt     int64  `gorm:"autoCreateTime:milli"`
 }
 
 type workflowSecretModel struct {
@@ -158,9 +165,12 @@ type workflowRunModel struct {
 	OutputJSON string `gorm:"not null;default:''"`
 	Error      string `gorm:"not null;default:''"`
 	StartedBy  string `gorm:"index;not null;default:''"`
-	CreatedAt  int64  `gorm:"autoCreateTime:milli"`
-	StartedAt  int64  `gorm:"not null;default:0"`
-	FinishedAt int64  `gorm:"index;not null;default:0"`
+	// LibrariesJSON is added to existing tables by AutoMigrate (it has a
+	// default).
+	LibrariesJSON string `gorm:"not null;default:''"`
+	CreatedAt     int64  `gorm:"autoCreateTime:milli"`
+	StartedAt     int64  `gorm:"not null;default:0"`
+	FinishedAt    int64  `gorm:"index;not null;default:0"`
 }
 
 type workflowLogModel struct {
@@ -316,16 +326,20 @@ func (db *DB) WorkflowVersionBundle(ctx context.Context, workflowID, version int
 }
 
 // PublishWorkflowVersion points the workflow at an existing version and
-// stores the triggers read from it.
-func (db *DB) PublishWorkflowVersion(ctx context.Context, workflowID, version int64, triggersJSON string) (Workflow, error) {
+// stores the triggers read from it and the libraries it imports.
+func (db *DB) PublishWorkflowVersion(ctx context.Context, workflowID, version int64, triggersJSON string, libraries []string) (Workflow, error) {
 	if triggersJSON == "" {
 		return Workflow{}, errors.New("published versions need their triggers")
 	}
+	librariesJSON, err := encodeImports(libraries)
+	if err != nil {
+		return Workflow{}, err
+	}
 	var workflow workflowModel
-	err := db.orm.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err = db.orm.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		result := tx.Model(&workflowVersionModel{}).
 			Where(&workflowVersionModel{WorkflowID: workflowID, Version: version}).
-			Update("triggers_json", triggersJSON)
+			Updates(map[string]any{"triggers_json": triggersJSON, "libraries_json": librariesJSON})
 		if result.Error != nil {
 			return result.Error
 		}
@@ -480,9 +494,10 @@ func (db *DB) StartWorkflowRun(ctx context.Context, runID, startedAt int64) (boo
 	return result.RowsAffected == 1, result.Error
 }
 
-// FinishWorkflowRun records the outcome of a queued or running run; it
-// reports false when the run had already finished.
-func (db *DB) FinishWorkflowRun(ctx context.Context, runID int64, status, outputJSON, errorText string, finishedAt int64) (bool, error) {
+// FinishWorkflowRun records the outcome of a queued or running run and the
+// libraries it loaded (JSON, may be empty); it reports false when the run
+// had already finished.
+func (db *DB) FinishWorkflowRun(ctx context.Context, runID int64, status, outputJSON, errorText, librariesJSON string, finishedAt int64) (bool, error) {
 	switch status {
 	case WorkflowRunSucceeded, WorkflowRunFailed, WorkflowRunCancelled:
 	default:
@@ -490,7 +505,7 @@ func (db *DB) FinishWorkflowRun(ctx context.Context, runID int64, status, output
 	}
 	result := db.orm.WithContext(ctx).Model(&workflowRunModel{}).
 		Where("id = ? AND status IN ?", runID, []string{WorkflowRunQueued, WorkflowRunRunning}).
-		Updates(map[string]any{"status": status, "output_json": outputJSON, "error": errorText, "finished_at": finishedAt})
+		Updates(map[string]any{"status": status, "output_json": outputJSON, "error": errorText, "libraries_json": librariesJSON, "finished_at": finishedAt})
 	return result.RowsAffected == 1, result.Error
 }
 
@@ -630,6 +645,7 @@ func modelToWorkflowVersion(model workflowVersionModel) WorkflowVersion {
 		Message:    model.Message,
 		Size:       model.Size,
 		Triggers:   model.TriggersJSON,
+		Libraries:  decodeImports(model.LibrariesJSON),
 		CreatedBy:  model.CreatedBy,
 		CreatedAt:  model.CreatedAt,
 	}
@@ -646,6 +662,7 @@ func modelToWorkflowRun(model workflowRunModel) WorkflowRun {
 		Output:     model.OutputJSON,
 		Error:      model.Error,
 		StartedBy:  model.StartedBy,
+		Libraries:  model.LibrariesJSON,
 		CreatedAt:  model.CreatedAt,
 		StartedAt:  model.StartedAt,
 		FinishedAt: model.FinishedAt,

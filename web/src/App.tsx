@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { AppWorkspace } from "./components/AppWorkspace";
 import { AuthScreen } from "./components/AuthScreen";
 import { CreateNameDialog } from "./components/CreateNamePopover";
+import { LibraryWorkspace } from "./components/LibraryWorkspace";
 import { LoginPage } from "./components/LoginPage";
 import { PermissionPanel } from "./components/PermissionPanel";
 import { RunnersPanel } from "./components/RunnersPanel";
@@ -11,6 +12,7 @@ import { TableWorkspace } from "./components/TableWorkspace";
 import { WorkflowWorkspace } from "./components/WorkflowWorkspace";
 import { useNotifier } from "./notifications";
 import { useAppWorkspace } from "./hooks/useAppWorkspace";
+import { useLibraryWorkspace } from "./hooks/useLibraryWorkspace";
 import { usePermissionWorkspace } from "./hooks/usePermissionWorkspace";
 import { useTableWorkspace } from "./hooks/useTableWorkspace";
 import { useWorkflowWorkspace } from "./hooks/useWorkflowWorkspace";
@@ -136,6 +138,15 @@ function WorkspaceApp() {
   });
   const { apps, appsReady } = appWorkspace;
   const selectedApp = apps.find((item) => item.name === selectedAppName);
+  const libraryRoute = workspaceRoute?.databaseName === database.name && workspaceRoute.view === "library" ? workspaceRoute : null;
+  const selectedLibraryName = libraryRoute?.libraryName ?? "";
+  // Libraries are instance-wide; the list loads once an admin opens the page.
+  const libraryWorkspace = useLibraryWorkspace({
+    enabled: isAdmin && Boolean(currentUser?.id) && (view === "library" || view === "admin"),
+    libraryName: selectedLibraryName,
+    onStatus: notify
+  });
+  const selectedLibrary = libraryWorkspace.libraries.find((item) => item.name === selectedLibraryName);
   const permissionWorkspace = usePermissionWorkspace({
     currentUserID: currentUser?.id,
     database,
@@ -245,6 +256,15 @@ function WorkspaceApp() {
       navigateWorkspace({ databaseName: database.name, view: "app" }, "replace");
       return;
     }
+    if (
+      workspaceRoute.view === "library" &&
+      workspaceRoute.libraryName &&
+      libraryWorkspace.librariesReady &&
+      !libraryWorkspace.libraries.some((item) => item.name === workspaceRoute.libraryName)
+    ) {
+      navigateWorkspace({ databaseName: database.name, view: "library" }, "replace");
+      return;
+    }
     if (workspaceRoute.view === "permission" && workspaceRoute.roleName && rolesReady && !roles.some((item) => item.name === workspaceRoute.roleName)) {
       navigateWorkspace(null, "replace");
       return;
@@ -252,7 +272,7 @@ function WorkspaceApp() {
     if (workspaceRoute.view === "permission" && workspaceRoute.roleName && roles.some((item) => item.name === workspaceRoute.roleName)) {
       permissionWorkspace.setSelectedRoleName(workspaceRoute.roleName);
     }
-  }, [apps, appsReady, database.name, isAdmin, locationPath, roles, rolesReady, workflows, workflowsReady, workspaceRoute]);
+  }, [apps, appsReady, database.name, isAdmin, libraryWorkspace.libraries, libraryWorkspace.librariesReady, locationPath, roles, rolesReady, workflows, workflowsReady, workspaceRoute]);
 
   useEffect(() => {
     let cancelled = false;
@@ -456,6 +476,12 @@ function WorkspaceApp() {
     navigateWorkspace({ databaseName: database.name, view: "app", appName: name }, "push");
   }
 
+  async function deleteSelectedLibrary() {
+    if (await libraryWorkspace.removeLibrary()) {
+      navigateWorkspace({ databaseName: database.name, view: "library" }, "replace");
+    }
+  }
+
   async function deleteSelectedApp() {
     if (await appWorkspace.removeApp()) {
       navigateWorkspace({ databaseName: database.name, view: "app" }, "replace");
@@ -600,6 +626,8 @@ function WorkspaceApp() {
         return isAdmin && selectedWorkflow ? selectedWorkflow.title || selectedWorkflow.name : t("nav.workflows");
       case "permission":
         return t("nav.permissions");
+      case "library":
+        return selectedLibrary ? selectedLibrary.title || selectedLibrary.name : t("library.title");
       case "admin":
         return t("admin.title");
       default:
@@ -626,7 +654,28 @@ function WorkspaceApp() {
         return <HomePage apps={apps} appsReady={appsReady} database={database} isAdmin={isAdmin} />;
       case "admin":
         return isAdmin ? (
-          <AdminPage apps={apps} database={database} onOpenRunners={() => setRunnersOpen(true)} roles={roles} workflows={workflows} />
+          <AdminPage
+            apps={apps}
+            database={database}
+            libraries={libraryWorkspace.libraries}
+            onOpenRunners={() => setRunnersOpen(true)}
+            roles={roles}
+            workflows={workflows}
+          />
+        ) : null;
+      case "library":
+        return isAdmin ? (
+          <LibraryWorkspace
+            busy={libraryWorkspace.busy}
+            currentUser={currentUser}
+            databaseName={database.name}
+            detail={libraryWorkspace.detail}
+            libraries={libraryWorkspace.libraries}
+            librariesReady={libraryWorkspace.librariesReady}
+            libraryName={selectedLibraryName}
+            onDelete={() => void deleteSelectedLibrary()}
+            onPublish={(version) => void libraryWorkspace.publishVersion(version)}
+          />
         ) : null;
       case "table":
         return table.name ? (
@@ -818,7 +867,7 @@ function NoDatabase({
 }
 
 function allowedWorkspaceView(isAdmin: boolean, nextView: View): View {
-  if ((nextView === "permission" || nextView === "admin") && !isAdmin) {
+  if ((nextView === "permission" || nextView === "admin" || nextView === "library") && !isAdmin) {
     return "home";
   }
   return nextView;

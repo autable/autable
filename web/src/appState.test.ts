@@ -143,4 +143,12 @@ describe("appState", () => {
       "/databases/workspace/permissions/staff%2Flead"
     );
   });
+
+  it("routes the instance-wide libraries inside a database's workspace", () => {
+    expect(parseWorkspaceRoute("/databases/workspace/libraries")).toEqual({ databaseName: "workspace", view: "library" });
+    expect(parseWorkspaceRoute("/databases/workspace/libraries/http")).toEqual({ databaseName: "workspace", view: "library", libraryName: "http" });
+    expect(parseWorkspaceRoute("/databases/workspace/libraries/http/extra")).toBeNull();
+    expect(buildWorkspacePath({ databaseName: "workspace", view: "library" })).toBe("/databases/workspace/libraries");
+    expect(buildWorkspacePath({ databaseName: "sales ops", view: "library", libraryName: "http" })).toBe("/databases/sales%20ops/libraries/http");
+  });
 });

@@ -323,7 +323,7 @@ func TestReadTriggersSandbox(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	triggersJSON, err := ReadTriggers(context.Background(), program, Info{Database: "db", Workflow: "w"})
+	triggersJSON, err := ReadTriggers(context.Background(), program, Info{Database: "db", Workflow: "w"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -332,11 +332,11 @@ func TestReadTriggersSandbox(t *testing.T) {
 	}
 	slow, _ := Compile("workflow.js", `for (;;) {}`)
 	started := time.Now()
-	if _, err := ReadTriggers(context.Background(), slow, Info{}); !errors.Is(err, ErrTimeout) || time.Since(started) > TriggerReadTimeout+2*time.Second {
+	if _, err := ReadTriggers(context.Background(), slow, Info{}, nil); !errors.Is(err, ErrTimeout) || time.Since(started) > TriggerReadTimeout+2*time.Second {
 		t.Fatalf("expected reading triggers to time out, got %v", err)
 	}
 	broken, _ := Compile("workflow.js", `var __workflow = { run: function () {} };`)
-	if _, err := ReadTriggers(context.Background(), broken, Info{}); err == nil || !strings.Contains(err.Error(), `"triggers"`) {
+	if _, err := ReadTriggers(context.Background(), broken, Info{}, nil); err == nil || !strings.Contains(err.Error(), `"triggers"`) {
 		t.Fatalf("expected a missing triggers export to fail, got %v", err)
 	}
 }

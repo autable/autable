@@ -102,3 +102,56 @@ triggers move it on:
 - `npm run build` must produce `dist/workflow.js`. The source pushed with
   each version is what git would commit (or, outside git, everything except
   `node_modules`, `dist`, `.git`, and `.autable`); keep secrets out of it.
+
+## Libraries (`@lib/<name>`)
+
+Admins can publish instance-wide libraries on the server (`autablectl lib
+list` shows them). Import one as `import { postJSON } from "@lib/http";`:
+
+- `npm run build` does not bundle it: each run of this workflow loads the
+  library's **published** version. When the library publishes a fix, this
+  workflow uses it from its next run, without being pushed again; a run's
+  `libraries` (in `autablectl workflow run-log`) show the versions it used.
+- `autablectl workflow sdk` vendors the libraries' types into
+  `src/autable/libs/`; run it again when a library changes its API.
+- Publishing this workflow fails while it imports a library that does not
+  exist or is not published.
+- A library runs inside this workflow's run: its `secrets.get` and
+  `vars.get` read this workflow's secrets and vars.
+
+Use a library for integrations that many workflows share and that must be
+fixable in one place; use shared code in the repository (next section)
+for code that should change only when each workflow is pushed.
+
+## Shared code in the repository (`lib/`)
+
+Several workflows and apps can live in one git repository with shared code
+next to them, for example the client of another system that several
+workflows call. That is where integrations belong:
+
+```
+repo/
+  lib/notify.ts              shared code
+  workflows/order-sync/      this project
+  apps/board/
+```
+
+- Import shared files by relative path: `import { notify } from
+  "../../lib/notify";`. Shared code imports the SDK as
+  `"@autable/workflow"` (mapped to `src/autable/index.ts` in
+  `tsconfig.json` and `build.mjs`), never by a path into one project, so
+  every workflow that bundles it uses its own vendored SDK. Pass
+  credentials in from `secrets` rather than reading fixed secret names deep
+  inside shared code.
+- `npm run build` writes `.autable/build-inputs.json`, the files the bundle
+  used. `autablectl workflow push` uploads, besides this project, exactly
+  the files outside it that the build used, at their paths from the
+  repository root, and records this project's path (`root`) in the
+  uploaded manifest. `pull` recreates that slice: the project lands at
+  `<dir>/<root>` with the shared files beside it, and builds as before.
+- Files outside the project are uploaded only from inside a git work tree
+  (its root is the root of the upload) and never from `node_modules`.
+  Shared code that imports npm packages finds them from its own directory,
+  so install those at the repository root.
+- Shared code is bundled in at build time: changing `lib/` changes a
+  workflow only when that workflow is built and pushed again.

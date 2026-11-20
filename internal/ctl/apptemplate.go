@@ -18,7 +18,10 @@ import (
 // vendored app SDK. wftemplate: TypeScript bundled by esbuild into
 // dist/workflow.js, wired to the vendored workflow SDK.
 //
-//go:embed all:apptemplate all:wftemplate
+// libtemplate: a library, bundled by esbuild into dist/lib.js with its
+// type declarations joined into dist/index.d.ts.
+//
+//go:embed all:apptemplate all:wftemplate all:libtemplate
 var projectTemplates embed.FS
 
 func writeAppTemplate(dir, name, title string) error {
@@ -27,6 +30,10 @@ func writeAppTemplate(dir, name, title string) error {
 
 func writeWorkflowTemplate(dir, name, title string) error {
 	return writeTemplate("wftemplate", dir, strings.NewReplacer("__WORKFLOW_NAME__", name, "__WORKFLOW_TITLE__", title))
+}
+
+func writeLibTemplate(dir, name, title string) error {
+	return writeTemplate("libtemplate", dir, strings.NewReplacer("__LIB_NAME__", name, "__LIB_TITLE__", title))
 }
 
 func writeTemplate(root, dir string, replacer *strings.Replacer) error {

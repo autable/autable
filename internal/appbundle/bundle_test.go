@@ -6,6 +6,7 @@ import (
 	"compress/gzip"
 	"errors"
 	"io"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -222,5 +223,75 @@ func TestWorkflowKindRequiresWorkflowScript(t *testing.T) {
 	source, err := Workflow.Source(archive(t, entries...))
 	if err != nil || len(source) == 0 {
 		t.Fatalf("expected workflow source, got %v", err)
+	}
+}
+
+func TestRepositorySliceManifestRoot(t *testing.T) {
+	sliced := `{"database":"shop","name":"widgets","sdk":"1.0","root":"apps/widgets"}`
+	entries := []entry{
+		file(ManifestName, sliced),
+		file("dist/index.html", "<html></html>"),
+		file("source/apps/widgets/"+ManifestName, manifest),
+		file("source/apps/widgets/src/main.ts", "import '../../../lib/x'"),
+		file("source/lib/x.ts", "export {}"),
+	}
+	bundle, err := Parse(archive(t, entries...))
+	if err != nil || bundle.Manifest.Root != "apps/widgets" {
+		t.Fatalf("unexpected parse %#v, %v", bundle.Manifest, err)
+	}
+	source, err := Source(archive(t, entries...))
+	if err != nil {
+		t.Fatal(err)
+	}
+	gz, err := gzip.NewReader(bytes.NewReader(source))
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader := tar.NewReader(gz)
+	files := map[string]string{}
+	for {
+		header, err := reader.Next()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(reader)
+		files[header.Name] = string(body)
+	}
+	if len(files) != 4 || files[ManifestName] != sliced || files["apps/widgets/"+ManifestName] != manifest || files["lib/x.ts"] != "export {}" {
+		t.Fatalf("unexpected slice source %#v", files)
+	}
+
+	for _, root := range []string{"../x", "/abs", "a/../b", ".", "a//b", `a\b`, "c:/x"} {
+		bad := `{"database":"shop","name":"widgets","sdk":"1.0","root":` + strconv.Quote(root) + `}`
+		if _, err := Parse(archive(t, file(ManifestName, bad), file("dist/index.html", "x"))); err == nil || !strings.Contains(err.Error(), "root") {
+			t.Errorf("root %q: expected a root error, got %v", root, err)
+		}
+	}
+}
+
+func TestLibraryKind(t *testing.T) {
+	const libManifest = `{"name":"text","title":"Text","sdk":"1.0"}`
+	entries := []entry{
+		file(LibraryManifestName, libManifest),
+		file("dist/lib.js", "var __lib = {};"),
+		file("dist/index.d.ts", "export declare const x: number;"),
+		file("source/src/index.ts", "export const x = 1;"),
+	}
+	bundle, err := Library.Parse(archive(t, entries...))
+	if err != nil || bundle.Manifest.Name != "text" || bundle.Manifest.Database != "" || string(bundle.Dist["index.d.ts"]) == "" {
+		t.Fatalf("unexpected library bundle %#v, %v", bundle, err)
+	}
+	if _, err := Library.Parse(archive(t, entries[0], entries[1], entries[3])); err == nil || !strings.Contains(err.Error(), "dist/index.d.ts") {
+		t.Fatalf("expected the declarations to be required, got %v", err)
+	}
+	withDatabase := append([]entry{file(LibraryManifestName, `{"database":"db","name":"text","sdk":"1.0"}`)}, entries[1:]...)
+	if _, err := Library.Parse(archive(t, withDatabase...)); err == nil || !strings.Contains(err.Error(), "no database") {
+		t.Fatalf("expected a database to be refused, got %v", err)
+	}
+	if _, err := Workflow.Parse(archive(t, file(WorkflowManifestName, `{"name":"x","sdk":"1.0"}`), file("dist/workflow.js", "x"))); err == nil || !strings.Contains(err.Error(), "database is required") {
+		t.Fatalf("expected workflows to need a database, got %v", err)
 	}
 }

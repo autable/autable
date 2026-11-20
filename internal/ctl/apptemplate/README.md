@@ -11,4 +11,8 @@ autablectl app push -m "what changed"   # build, upload, print the preview URL
 autablectl app publish <database> <name> <version>
 ```
 
+Code shared with other apps and workflows of the same git repository (a
+`lib/` next to them) is bundled in and uploaded with the source; see
+"Shared code" in AGENTS.md.
+
 See AGENTS.md for the full loop and the rules.

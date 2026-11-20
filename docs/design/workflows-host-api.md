@@ -64,6 +64,24 @@ globals, so ordinary npm code works:
 No other host globals exist (`require`, `process`, Node built-ins and the
 browser `fetch` are absent; the SDK's `fetch` is built on `__autable_host.fetch`).
 
+### `__autable_lib(specifier) → exports` (sync)
+
+Imports a library: `specifier` is `"@lib/<name>"`. The first call in a run
+looks up the library's published version, evaluates its `dist/lib.js` in
+this runtime (wrapped in a function, so its `var __lib` leaves no global)
+and returns the value of `__lib`; later calls in the same run return the
+same object. The library sees the same `__autable_host`, so `secret` and
+`variable` answer with the calling workflow's values. It throws an `Error`
+naming the library when the specifier is not `@lib/<name>`, the library
+does not exist, has no published version, was built against an SDK this
+server no longer runs, fails while evaluating (its own exception is
+rethrown), defines no `__lib`, or imports a library that is still being
+loaded (`library import cycle: a -> b -> a`). While triggers are read,
+libraries are loaded the same way (their host calls throw like the
+bundle's). The templates' esbuild plugin compiles `import ... from
+"@lib/<name>"` into calls of this function; the server finds a bundle's
+imports by its literal `__autable_lib("@lib/<name>")` calls.
+
 ## `globalThis.__autable_host`
 
 ### `version: string`

@@ -147,7 +147,8 @@
     "noTables": "No tables yet",
     "admin": "Admin",
     "account": "Account {{name}}",
-    "goHome": "autable home"
+    "goHome": "autable home",
+    "libraries": "Libraries"
   },
   "permission": {
     "addRoleMember": "Add role member",
@@ -300,7 +301,14 @@
     "workflowSecretDeleted": "Deleted secret {{key}}",
     "workflowVarSaved": "Saved var {{key}}",
     "workflowVarDeleted": "Deleted var {{key}}",
-    "workflowDeleted": "Deleted workflow {{name}}"
+    "workflowDeleted": "Deleted workflow {{name}}",
+    "libraryListFailed": "Could not load the libraries.",
+    "libraryLoadFailed": "Could not load the library.",
+    "libraryPublished": "Published {{name}} version {{version}}; importing workflows use it from their next run.",
+    "libraryRolledBack": "Rolled {{name}} back to version {{version}}.",
+    "libraryPublishFailed": "Could not publish the library.",
+    "libraryDeleted": "Deleted {{name}}.",
+    "libraryDeleteFailed": "Could not delete the library."
   },
   "table": {
     "addField": "Add field",
@@ -556,7 +564,9 @@
       "logsCount_one": "Log · {{count}} entry",
       "logsCount_other": "Log · {{count}} entries",
       "noLogs": "No log entries.",
-      "logData": "Data"
+      "logData": "Data",
+      "libraries": "Libraries",
+      "libraryVersion": "@lib/{{name}} v{{version}}"
     },
     "config": {
       "secrets": "Secrets",
@@ -733,6 +743,57 @@
     "appCount_one": "{{count}} app",
     "appCount_other": "{{count}} apps",
     "workflowsFailing_one": "{{count}} last run failed",
-    "workflowsFailing_other": "{{count}} last runs failed"
+    "workflowsFailing_other": "{{count}} last runs failed",
+    "librariesTitle": "Libraries",
+    "librariesDescription": "Shared code every workflow imports as @lib/<name>; publishing a version updates all importers at their next run.",
+    "librariesMeta": "{{libraries}} · {{published}} published",
+    "libraryCount_one": "{{count}} library",
+    "libraryCount_other": "{{count}} libraries"
+  },
+  "library": {
+    "title": "Libraries",
+    "description": "Shared code for every database's workflows, imported as @lib/<name>. Each run loads the published version.",
+    "loading": "Loading libraries",
+    "table": "Libraries",
+    "name": "Library",
+    "publishedVersion": "Published",
+    "importedBy": "Imported by",
+    "updated": "Updated",
+    "noImporters": "Not imported",
+    "noImportersLong": "No published workflow or library imports this library.",
+    "workflowCount_one": "{{count}} workflow",
+    "workflowCount_other": "{{count}} workflows",
+    "libraryCount_one": "{{count}} library",
+    "libraryCount_other": "{{count}} libraries",
+    "emptyTitle": "No libraries yet",
+    "emptyDescription": "Libraries are pushed with autablectl. Fix a shared integration once and every workflow that imports it uses the fix from its next run.",
+    "howToTitle": "Create and publish a library",
+    "stepInit": "Create a library project:",
+    "stepPush": "Build, upload and publish it:",
+    "stepImport": "Import it in a workflow and refresh its types:",
+    "detailLabel": "@lib/{{name}} · shared by all databases",
+    "back": "Libraries",
+    "delete": "Delete library",
+    "deleteBlocked": "Published workflows or libraries still import it",
+    "about": "About",
+    "import": "Import as",
+    "imports": "Imports",
+    "none": "None",
+    "publishWarning": "Publishing or rolling back changes every importing workflow at its next run, without pushing the workflows. Keep the library's API backward compatible.",
+    "importer": "Workflow or library",
+    "kind": "Kind",
+    "kindWorkflow": "Workflow in {{database}}",
+    "kindLibrary": "Library",
+    "importerVersion": "Published version",
+    "versions": "Versions",
+    "versionTable": "Library versions",
+    "deleteTitle": "Delete library",
+    "deleteConfirm": "Delete {{name}} with all its versions? This cannot be undone.",
+    "publishTitle": "Publish library version",
+    "publishConfirm_one": "Publish version {{version}} of {{name}}? {{count}} importing workflow uses it from its next run.",
+    "publishConfirm_other": "Publish version {{version}} of {{name}}? {{count}} importing workflows use it from their next run.",
+    "rollbackTitle": "Roll back library",
+    "rollbackConfirm_one": "Roll {{name}} back from version {{current}} to {{version}}? {{count}} importing workflow uses it from its next run.",
+    "rollbackConfirm_other": "Roll {{name}} back from version {{current}} to {{version}}? {{count}} importing workflows use it from their next run."
   }
 }

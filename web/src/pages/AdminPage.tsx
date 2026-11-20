@@ -1,7 +1,7 @@
-import { AppWindow, ChevronRight, Server, Table2, Users, Workflow, type LucideIcon } from "lucide-react";
+import { AppWindow, ChevronRight, Library, Server, Table2, Users, Workflow, type LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import type { AppDefinition, DatabaseMetadata, RoleDefinition, WorkflowDefinition } from "../api";
+import type { AppDefinition, DatabaseMetadata, LibraryDefinition, RoleDefinition, WorkflowDefinition } from "../api";
 import type { WorkspaceRoute } from "../appState";
 import { Page, SectionHeading } from "../shell/Page";
 import { RouteLink } from "../shell/navigation";
@@ -15,12 +15,15 @@ import { Card, cn, Table, TBody, Td, Th, THead, Tr } from "../ui";
 export function AdminPage({
   apps,
   database,
+  libraries,
   onOpenRunners,
   roles,
   workflows
 }: {
   apps: AppDefinition[];
   database: DatabaseMetadata;
+  // Instance-wide, shared by every database's workflows.
+  libraries: LibraryDefinition[];
   onOpenRunners: () => void;
   roles: RoleDefinition[];
   workflows: WorkflowDefinition[];
@@ -56,6 +59,16 @@ export function AdminPage({
             description={t("admin.appsDescription")}
             meta={t("admin.appsMeta", { apps: t("admin.appCount", { count: apps.length }), published: publishedApps })}
             route={{ databaseName: db, view: "app" }}
+          />
+          <AreaCard
+            icon={Library}
+            title={t("admin.librariesTitle")}
+            description={t("admin.librariesDescription")}
+            meta={t("admin.librariesMeta", {
+              libraries: t("admin.libraryCount", { count: libraries.length }),
+              published: libraries.filter((library) => library.published_version > 0).length
+            })}
+            route={{ databaseName: db, view: "library" }}
           />
           <AreaCard icon={Server} title={t("admin.runnersTitle")} description={t("admin.runnersDescription")} onClick={onOpenRunners} />
         </div>

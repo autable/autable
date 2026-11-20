@@ -85,6 +85,9 @@ func (machine *vm) installGlobals() error {
 	if err := global.Delete("__autable_native"); err != nil {
 		return err
 	}
+	if err := global.Set(LibraryImportFunction, machine.importLibrary); err != nil {
+		return err
+	}
 	return global.Set("__autable_host", machine.hostObject())
 }
 

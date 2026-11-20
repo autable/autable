@@ -2,7 +2,9 @@ import type { RoleDefinition, RoleMember } from "./api";
 
 // home: the database landing page (apps and tables); admin: the management
 // overview, admins only.
-export type WorkspaceViewName = "home" | "table" | "workflow" | "app" | "permission" | "admin";
+// library: the instance-wide libraries, admins only; shown inside the
+// current database's workspace like the other management pages.
+export type WorkspaceViewName = "home" | "table" | "workflow" | "app" | "permission" | "admin" | "library";
 
 // The sections of a workflow's page; "config" holds its secrets and vars.
 export type WorkflowTab = "overview" | "runs" | "versions" | "config";
@@ -19,6 +21,7 @@ export type WorkspaceRoute = {
   workflowRunID?: number;
   appName?: string;
   roleName?: string;
+  libraryName?: string;
 };
 
 export function replaceResource<T extends { id?: number }>(items: T[], saved: T): T[] {
@@ -97,6 +100,9 @@ export function parseWorkspaceRoute(pathname: string): WorkspaceRoute | null {
   if (segments[2] === "apps") {
     return { databaseName, view: "app", appName: segments[3] || undefined };
   }
+  if (segments[2] === "libraries" && segments.length <= 4) {
+    return { databaseName, view: "library", libraryName: segments[3] || undefined };
+  }
   if (segments[2] === "permissions") {
     return {
       databaseName,
@@ -132,6 +138,11 @@ export function buildWorkspacePath(route: WorkspaceRoute | null): string {
     return route.appName
       ? `/databases/${database}/apps/${encodePathSegment(route.appName)}`
       : `/databases/${database}/apps`;
+  }
+  if (route.view === "library") {
+    return route.libraryName
+      ? `/databases/${database}/libraries/${encodePathSegment(route.libraryName)}`
+      : `/databases/${database}/libraries`;
   }
   if (route.view === "permission") {
     return route.roleName

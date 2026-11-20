@@ -29,15 +29,15 @@ func TestWorkflowVersionsPublishSettingsAndSecrets(t *testing.T) {
 	if _, _, err := db.AddWorkflowVersion(ctx, workflow.ID, "", WorkflowVersion{SDK: "1.0"}, []byte("bundle-2")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.PublishWorkflowVersion(ctx, workflow.ID, 3, `[]`); !errors.Is(err, ErrWorkflowVersionNotFound) {
+	if _, err := db.PublishWorkflowVersion(ctx, workflow.ID, 3, `[]`, nil); !errors.Is(err, ErrWorkflowVersionNotFound) {
 		t.Fatalf("expected a missing version error, got %v", err)
 	}
-	published, err := db.PublishWorkflowVersion(ctx, workflow.ID, 2, `[{"name":"start","kind":"manual"}]`)
+	published, err := db.PublishWorkflowVersion(ctx, workflow.ID, 2, `[{"name":"start","kind":"manual"}]`, []string{"text", "text"})
 	if err != nil || published.PublishedVersion != 2 {
 		t.Fatalf("unexpected publish result %#v, %v", published, err)
 	}
 	version, err := db.WorkflowVersion(ctx, workflow.ID, 2)
-	if err != nil || version.Triggers != `[{"name":"start","kind":"manual"}]` {
+	if err != nil || version.Triggers != `[{"name":"start","kind":"manual"}]` || len(version.Libraries) != 1 || version.Libraries[0] != "text" {
 		t.Fatalf("expected triggers stored with the version, got %#v, %v", version, err)
 	}
 	bundle, err := db.WorkflowVersionBundle(ctx, workflow.ID, 1)
@@ -106,15 +106,15 @@ func TestWorkflowRunsLifecycleRetentionAndDelete(t *testing.T) {
 	if err := db.AddWorkflowLogs(ctx, []WorkflowLog{{RunID: first.ID, Time: 12, Level: "info", Message: "hello", Data: `{"a":1}`}}); err != nil {
 		t.Fatal(err)
 	}
-	finished, err := db.FinishWorkflowRun(ctx, first.ID, WorkflowRunSucceeded, `{"ok":true}`, "", 20)
+	finished, err := db.FinishWorkflowRun(ctx, first.ID, WorkflowRunSucceeded, `{"ok":true}`, "", `[{"name":"text","version":2}]`, 20)
 	if err != nil || !finished {
 		t.Fatalf("expected the run to finish, got %v %v", finished, err)
 	}
-	if again, _ := db.FinishWorkflowRun(ctx, first.ID, WorkflowRunFailed, "", "late", 21); again {
+	if again, _ := db.FinishWorkflowRun(ctx, first.ID, WorkflowRunFailed, "", "late", "", 21); again {
 		t.Fatal("expected a finished run to stay finished")
 	}
 	run, err := db.WorkflowRun(ctx, workflow.ID, first.ID)
-	if err != nil || run.Status != WorkflowRunSucceeded || run.Output != `{"ok":true}` || run.Event != `{"input":{}}` || run.StartedAt != 10 || run.FinishedAt != 20 {
+	if err != nil || run.Status != WorkflowRunSucceeded || run.Output != `{"ok":true}` || run.Event != `{"input":{}}` || run.StartedAt != 10 || run.FinishedAt != 20 || run.Libraries != `[{"name":"text","version":2}]` {
 		t.Fatalf("unexpected stored run %#v, %v", run, err)
 	}
 	if _, err := db.WorkflowRun(ctx, workflow.ID+1, first.ID); !errors.Is(err, ErrWorkflowRunNotFound) {

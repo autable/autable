@@ -147,7 +147,8 @@
     "noTables": "还没有表",
     "admin": "管理员",
     "account": "账号 {{name}}",
-    "goHome": "autable 首页"
+    "goHome": "autable 首页",
+    "libraries": "共享库"
   },
   "permission": {
     "addRoleMember": "添加角色成员",
@@ -300,7 +301,14 @@
     "workflowSecretDeleted": "已删除密钥 {{key}}",
     "workflowVarSaved": "已保存变量 {{key}}",
     "workflowVarDeleted": "已删除变量 {{key}}",
-    "workflowDeleted": "已删除工作流 {{name}}"
+    "workflowDeleted": "已删除工作流 {{name}}",
+    "libraryListFailed": "无法加载共享库列表。",
+    "libraryLoadFailed": "无法加载共享库。",
+    "libraryPublished": "已发布 {{name}} 版本 {{version}}；导入它的工作流从下次运行起使用此版本。",
+    "libraryRolledBack": "已将 {{name}} 回滚到版本 {{version}}。",
+    "libraryPublishFailed": "无法发布共享库。",
+    "libraryDeleted": "已删除 {{name}}。",
+    "libraryDeleteFailed": "无法删除共享库。"
   },
   "table": {
     "addField": "添加字段",
@@ -554,7 +562,9 @@
       "logs": "运行日志",
       "logsCount_other": "日志 · {{count}} 条",
       "noLogs": "没有日志。",
-      "logData": "数据"
+      "logData": "数据",
+      "libraries": "共享库",
+      "libraryVersion": "@lib/{{name}} v{{version}}"
     },
     "config": {
       "secrets": "密钥",
@@ -721,6 +731,57 @@
     "workflowCount_other": "{{count}} 个工作流",
     "permissionsMeta_other": "{{count}} 个角色",
     "appCount_other": "{{count}} 个应用",
-    "workflowsFailing_other": "{{count}} 个最近运行失败"
+    "workflowsFailing_other": "{{count}} 个最近运行失败",
+    "librariesTitle": "共享库",
+    "librariesDescription": "工作流以 @lib/<名称> 导入的共享代码；发布新版本后，所有导入它的工作流在下次运行时生效。",
+    "librariesMeta": "{{libraries}} · {{published}} 个已发布",
+    "libraryCount_one": "{{count}} 个共享库",
+    "libraryCount_other": "{{count}} 个共享库"
+  },
+  "library": {
+    "title": "共享库",
+    "description": "供所有数据库的工作流使用的共享代码，以 @lib/<名称> 导入；每次运行都加载已发布的版本。",
+    "loading": "正在加载共享库",
+    "table": "共享库",
+    "name": "共享库",
+    "publishedVersion": "已发布",
+    "importedBy": "导入方",
+    "updated": "更新时间",
+    "noImporters": "未被导入",
+    "noImportersLong": "没有已发布的工作流或共享库导入此库。",
+    "workflowCount_one": "{{count}} 个工作流",
+    "workflowCount_other": "{{count}} 个工作流",
+    "libraryCount_one": "{{count}} 个共享库",
+    "libraryCount_other": "{{count}} 个共享库",
+    "emptyTitle": "还没有共享库",
+    "emptyDescription": "共享库通过 autablectl 推送。共享的集成代码只需修复一次，所有导入它的工作流从下次运行起即使用修复后的版本。",
+    "howToTitle": "创建并发布共享库",
+    "stepInit": "创建共享库项目：",
+    "stepPush": "构建、上传并发布：",
+    "stepImport": "在工作流中导入并刷新类型：",
+    "detailLabel": "@lib/{{name}} · 所有数据库共享",
+    "back": "共享库",
+    "delete": "删除共享库",
+    "deleteBlocked": "仍有已发布的工作流或共享库导入它",
+    "about": "概况",
+    "import": "导入方式",
+    "imports": "依赖",
+    "none": "无",
+    "publishWarning": "发布或回滚会在下次运行时改变所有导入它的工作流，无需重新推送这些工作流。请保持共享库的接口向后兼容。",
+    "importer": "工作流或共享库",
+    "kind": "类型",
+    "kindWorkflow": "{{database}} 中的工作流",
+    "kindLibrary": "共享库",
+    "importerVersion": "已发布版本",
+    "versions": "版本",
+    "versionTable": "共享库版本",
+    "deleteTitle": "删除共享库",
+    "deleteConfirm": "删除 {{name}} 及其所有版本？此操作无法撤销。",
+    "publishTitle": "发布共享库版本",
+    "publishConfirm_one": "发布 {{name}} 的版本 {{version}}？{{count}} 个导入它的工作流将从下次运行起使用此版本。",
+    "publishConfirm_other": "发布 {{name}} 的版本 {{version}}？{{count}} 个导入它的工作流将从下次运行起使用此版本。",
+    "rollbackTitle": "回滚共享库",
+    "rollbackConfirm_one": "将 {{name}} 从版本 {{current}} 回滚到 {{version}}？{{count}} 个导入它的工作流将从下次运行起使用此版本。",
+    "rollbackConfirm_other": "将 {{name}} 从版本 {{current}} 回滚到 {{version}}？{{count}} 个导入它的工作流将从下次运行起使用此版本。"
   }
 }
